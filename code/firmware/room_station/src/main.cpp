@@ -518,7 +518,8 @@ void thermal_step(uint32_t now) {
   const bool chunk_ok = now - thermal_started_ms < kThermalScanMaxMs &&
       desk_robot_room::read_thermal_chunk(
           Wire, kAmgAddress, thermal_next_chunk,
-          thermal_staging + 8U * thermal_next_chunk);
+          thermal_staging + 8U * thermal_next_chunk,
+          AMG88xx_PIXEL_ARRAY_SIZE - 8U * thermal_next_chunk);
   now = millis();
   if (!chunk_ok || now - thermal_started_ms >= kThermalScanMaxMs) {
     thermal_scan_active = false;

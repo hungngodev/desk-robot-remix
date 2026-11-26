@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // Panasonic AMG8833 high-gain pixels: 0x80+2*n low/high, signed 12-bit
@@ -24,9 +25,10 @@ inline bool decode_thermal_pixel(std::uint8_t low, std::uint8_t high,
 
 template <typename WireLike>
 bool read_thermal_chunk(WireLike& wire, std::uint8_t address,
-                        std::uint8_t chunk, float* destination) {
+                        std::uint8_t chunk, float* destination,
+                        std::size_t destination_count) {
   constexpr std::uint8_t kBytes = 16;
-  if (!destination || chunk >= 8U) return false;
+  if (!destination || destination_count < kBytes / 2U || chunk >= 8U) return false;
   const std::uint8_t reg = static_cast<std::uint8_t>(0x80U + kBytes * chunk);
   wire.beginTransmission(address);
   const bool wrote = wire.write(reg) == 1;

@@ -78,31 +78,34 @@ int main() {
   }
   std::array<float, 64> frame{};
   for (int chunk = 0; chunk < 8; ++chunk) {
-    assert(read_thermal_chunk(bus, 0x69, chunk, frame.data() + chunk * 8));
+    assert(read_thermal_chunk(bus, 0x69, chunk, frame.data() + chunk * 8, 8));
     assert(bus.reg == 0x80 + chunk * 16);
     assert(bus.selected == 0x69);
   }
   assert(bus.requests == 8);
   for (float pixel : frame) assert(pixel == 25.0f);
-  assert(!read_thermal_chunk(bus, 0x69, 8, frame.data()));
-  assert(!read_thermal_chunk(bus, 0x69, 0, nullptr));
+  assert(!read_thermal_chunk(bus, 0x69, 8, frame.data(), frame.size()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, nullptr, 8));
+  std::array<float, 7> undersized{};
+  assert(!read_thermal_chunk(bus, 0x69, 0, undersized.data(), undersized.size()));
+  for (float pixel : undersized) assert(pixel == 0.0f);
   assert(bus.requests == 8);
 
   bus.nack = true;
-  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   bus.nack = false;
   bus.write_failure = true;
-  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   assert(bus.stopped_on_failed_write);
   bus.write_failure = false;
   bus.short_read = true;
-  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   bus.short_read = false;
   bus.invalid_byte = true;
-  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   bus.invalid_byte = false;
   bus.oversized_byte = true;
-  assert(!read_thermal_chunk(bus, 0x69, 7, frame.data() + 56));
+  assert(!read_thermal_chunk(bus, 0x69, 7, frame.data() + 56, 8));
   bus.oversized_byte = false;
   // Last pixel invalid: the chunk must not partially overwrite old data.
   // Make every preceding pixel distinct from the cached 25 C frame.
@@ -110,11 +113,11 @@ int main() {
   for (int i = 0; i < 7; ++i) bus.data[2 * i] = 0x50;  // 20 C
   bus.data[14] = 0x41;
   bus.data[15] = 0x01;  // 80.25 C is outside AMG8833 high-gain spec.
-  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   for (float pixel : frame) assert(pixel == 25.0f);
   bus.data[14] = 0x40;
   bus.data[15] = 0x01;
-  assert(read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  assert(read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   for (int i = 0; i < 7; ++i) assert(frame[i] == 20.0f);
   assert(frame[7] == 80.0f);
   for (int i = 8; i < 64; ++i) assert(frame[i] == 25.0f);
