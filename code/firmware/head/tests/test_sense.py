@@ -2635,6 +2635,7 @@ inline std::recursive_mutex lvgl_mutex;
 inline thread_local int lock_depth = 0;
 struct lv_obj_t {
     bool hidden = false;
+    int visibility_writes = 0;
     int x = 0, y = 0, w = 0, h = 0;
     int radius = -1;
     lv_obj_t* parent = nullptr;
@@ -2671,8 +2672,16 @@ inline void lv_obj_align(lv_obj_t* n, int, int x, int y) {
     n->x = (128 - n->w) / 2 + x;
     n->y = y;
 }
-inline void lv_obj_add_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = true; }
-inline void lv_obj_remove_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = false; }
+inline void lv_obj_add_flag(lv_obj_t* n, int) {
+    assert(lock_depth > 0);
+    ++n->visibility_writes;
+    n->hidden = true;
+}
+inline void lv_obj_remove_flag(lv_obj_t* n, int) {
+    assert(lock_depth > 0);
+    ++n->visibility_writes;
+    n->hidden = false;
+}
 inline bool lv_obj_has_flag(lv_obj_t* n, int) { assert(lock_depth > 0); return n->hidden; }
 inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 2;
 inline constexpr int LV_SCROLLBAR_MODE_OFF = 3, LV_OBJ_FLAG_HIDDEN = 4;
@@ -2857,6 +2866,50 @@ int main() {
         }
         resting.UpdateIdlePower(425005, true, true, apply);
         assert(modes.back() == FacePanelMode::kAwake);
+    }
+    {
+        desk_robot::LocalEyeDisplay display;
+        OledDisplay* upstream = &display;
+        display.SetLocalStatus(FaceStatus::kMicPrivacy);
+        upstream->SetStatus("Connecting");
+        display.SetupUI();
+        auto* layer = screen.children.at(0);
+        auto* pupil = layer->children.at(0)->children.at(0);
+        auto* mouth = layer->children.at(2);
+        assert(layer->hidden && display.StatusVisible() && display.Status() == "Mic privacy ON");
+        display.SetLocalStatus(FaceStatus::kNormal);
+        assert(display.Status() == "Connecting");
+        // Mic privacy must win even without a transcript masking the idle eyes.
+        display.ShowEyes({true, false, 3, -3, 14, 7});
+        assert(!layer->hidden && !mouth->hidden && pupil->x == 7 && pupil->y == 2);
+        display.SetLocalStatus(FaceStatus::kMicPrivacy);
+        assert(layer->hidden && display.emotion_text == "neutral");
+        const int privacy_writes = display.status_writes;
+        const int privacy_visibility_writes = layer->visibility_writes;
+        std::vector<desk_robot::FacePanelMode> privacy_modes;
+        for (uint64_t elapsed = 0; elapsed <= 65000; elapsed += 100) {
+            display.SetLocalStatus(FaceStatus::kMicPrivacy);
+            upstream->SetStatus("Listening");
+            upstream->ShowNotification("Ignored while muted");
+            assert(!upstream->SetEmotion("happy"));
+            display.ShowEyes({true, elapsed % 200 == 0, -3, 3, 14, 7});
+            display.UpdateIdlePower(elapsed, true, true, [&](desk_robot::FacePanelMode mode) {
+                privacy_modes.push_back(mode);
+                return true;
+            });
+            assert(layer->hidden && display.StatusVisible());
+            assert(display.Status() == "Mic privacy ON");
+            assert(display.status_writes == privacy_writes);
+            assert(layer->visibility_writes == privacy_visibility_writes);
+            assert(display.notification_text.empty() && display.emotion_text == "neutral");
+        }
+        assert(privacy_modes.size() == 1 &&
+               privacy_modes.back() == desk_robot::FacePanelMode::kAwake);
+        display.SetLocalStatus(FaceStatus::kNormal);
+        assert(layer->hidden && display.Status() == "Listening");
+        // The same pre-mute gaze must render again, not be lost to frame deduplication.
+        display.ShowEyes({true, false, 3, -3, 14, 7});
+        assert(!layer->hidden && !mouth->hidden && pupil->x == 7 && pupil->y == 2);
     }
     desk_robot::LocalEyeDisplay display;
     OledDisplay* upstream = &display;
