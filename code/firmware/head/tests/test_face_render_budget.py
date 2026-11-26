@@ -23,25 +23,46 @@ def test_face_render_guard_releases_only_acquired_lock(tmp_path):
 #include <cassert>
 #include <cstdint>
 #include <type_traits>
-static bool available = false;
-static unsigned attempts = 0, releases = 0;
+static bool externally_owned = true;
+static unsigned attempts = 0, releases = 0, depth = 0;
 static bool lvgl_port_lock(uint32_t timeout_ms) {
     assert(timeout_ms == 1);
     ++attempts;
-    return available;
+    if (externally_owned) return false;
+    ++depth;
+    return true;
 }
-static void lvgl_port_unlock() { ++releases; }
+static void lvgl_port_unlock() {
+    assert(!externally_owned && depth > 0);
+    --depth;
+    ++releases;
+}
 class FaceRenderGuard {""" + guard + r"""
 };
 int main() {
     static_assert(!std::is_copy_constructible_v<FaceRenderGuard>);
+    static_assert(!std::is_copy_assignable_v<FaceRenderGuard>);
+    static_assert(!std::is_move_constructible_v<FaceRenderGuard>);
+    static_assert(!std::is_move_assignable_v<FaceRenderGuard>);
     for (unsigned i = 0; i < 100; ++i) {
         { FaceRenderGuard guard; assert(!guard); }
     }
-    assert(attempts == 100 && releases == 0);
-    available = true;
-    { FaceRenderGuard guard; assert(guard); assert(releases == 0); }
-    assert(attempts == 101 && releases == 1);
+    assert(attempts == 100 && releases == 0 && depth == 0);
+    externally_owned = false;
+    {
+        FaceRenderGuard outer;
+        assert(outer && depth == 1 && releases == 0);
+        // The pinned LVGL mutex is recursive on its owning thread.
+        {
+            FaceRenderGuard inner;
+            assert(inner && depth == 2 && releases == 0);
+        }
+        assert(outer && depth == 1 && releases == 1);
+    }
+    assert(attempts == 102 && releases == 2 && depth == 0);
+    externally_owned = true;
+    { FaceRenderGuard rejected; assert(!rejected); }
+    assert(attempts == 103 && releases == 2 && depth == 0);
 }
 """
     )
