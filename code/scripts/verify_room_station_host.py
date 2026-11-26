@@ -25,20 +25,23 @@ def run_tests(station: Path, build: Path) -> None:
     (build / "bme_step_under_test.h").write_text(temperature + step)
     # Exercise the actual firmware's default, acquisition and JSON paths,
     # without requiring Arduino or duplicating their decision in a test fake.
-    soil_prefix = "\n".join(
-        line for line in firmware.split("namespace {", 1)[0].splitlines()
-        if not line.startswith("#include ")
-    ) + "\n"
-    report_ms = "constexpr uint32_t kReportMs" + firmware.split(
-        "constexpr uint32_t kReportMs", 1
-    )[1].split(";", 1)[0] + ";\n"
-    jsbool = "void jsbool(" + firmware.split(
-        "void jsbool(", 1
-    )[1].split("void number(", 1)[0]
-    soil = "#if ROOM_SOIL_FITTED\n" + firmware.split(
-        "#if ROOM_SOIL_FITTED\n", 1
-    )[1].split("// The pinned Adafruit AMG88xx", 1)[0]
-    (build / "soil_profile_under_test.h").write_text(soil_prefix + report_ms + jsbool + soil)
+    if any(source.name == "soil_profile_tests.cpp" for source in sources):
+        soil_prefix = "\n".join(
+            line for line in firmware.split("namespace {", 1)[0].splitlines()
+            if not line.startswith("#include ")
+        ) + "\n"
+        report_ms = "constexpr uint32_t kReportMs" + firmware.split(
+            "constexpr uint32_t kReportMs", 1
+        )[1].split(";", 1)[0] + ";\n"
+        jsbool = "void jsbool(" + firmware.split(
+            "void jsbool(", 1
+        )[1].split("void number(", 1)[0]
+        soil = "#if ROOM_SOIL_FITTED\n" + firmware.split(
+            "#if ROOM_SOIL_FITTED\n", 1
+        )[1].split("// The pinned Adafruit AMG88xx", 1)[0]
+        (build / "soil_profile_under_test.h").write_text(
+            soil_prefix + report_ms + jsbool + soil
+        )
     cmd = [
         compiler, "-Wall", "-Wextra", "-Wconversion", "-Werror",
         "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",

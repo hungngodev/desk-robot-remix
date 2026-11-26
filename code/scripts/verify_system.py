@@ -69,7 +69,9 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
                              str(CODE / "firmware/room_station"), "-e", env],
              ROOT, 900)
             for env in ("feather_nrf52840_room_bench",
-                        "feather_nrf52840_room_full")
+                        "feather_nrf52840_room_full",
+                        "feather_nrf52840_room_bench_thermal",
+                        "feather_nrf52840_room_full_thermal")
         ]
     if suite in ("dock", "all"):
         jobs += [

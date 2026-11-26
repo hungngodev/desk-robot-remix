@@ -15,23 +15,30 @@ SPEC.loader.exec_module(RUNNER)
 
 def _assert_compiles_and_runs(calls, sources, build):
     assert sources
-    assert len(calls) == 2 * len(sources)
+    expected_calls = sum(12 if s.name == "soil_profile_tests.cpp" else 2 for s in sources)
+    assert len(calls) == expected_calls
     required_flags = {
-        "-std=c++17", "-Wall", "-Wextra", "-Wconversion", "-Werror",
+        "-Wall", "-Wextra", "-Wconversion", "-Werror",
         "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
         "-fno-omit-frame-pointer",
     }
-    for index, source in enumerate(sources):
-        compile_cmd, compile_options = calls[index * 2]
-        run_cmd, run_options = calls[index * 2 + 1]
+    pos = 0
+    for source in sources:
+        repetitions = 6 if source.name == "soil_profile_tests.cpp" else 1
         executable = str(build / source.stem)
-        assert compile_cmd[0] == "c++"
-        assert required_flags <= set(compile_cmd)
-        assert compile_cmd[-3:] == [str(source), "-o", executable]
-        assert compile_options["check"] and run_options["check"]
-        assert compile_options["timeout"] == 30
-        assert run_options["timeout"] == 15
-        assert run_cmd == [executable]
+        for _ in range(repetitions):
+            compile_cmd, compile_options = calls[pos]
+            run_cmd, run_options = calls[pos + 1]
+            pos += 2
+            assert compile_cmd[0] == "c++"
+            assert required_flags <= set(compile_cmd)
+            if repetitions == 1:
+                assert "-std=c++17" in compile_cmd
+            assert compile_cmd[-3:] == [str(source), "-o", executable]
+            assert compile_options["check"] and run_options["check"]
+            assert compile_options["timeout"] == 30
+            assert run_options["timeout"] == 15
+            assert run_cmd == [executable]
 
 
 def test_room_station_runner_discovers_new_sources(tmp_path, monkeypatch):

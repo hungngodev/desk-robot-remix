@@ -39,11 +39,16 @@ def test_station_has_both_full_soil_and_safe_bench_profiles():
     assert "[env]\n" in ini
     full = ini.split("[env:feather_nrf52840_room_full]", 1)[1].split(
         "[env:feather_nrf52840_room_bench]", 1)[0]
-    bench = ini.split("[env:feather_nrf52840_room_bench]", 1)[1]
-    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=1" in full
-    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=0" in bench
-    assert ini.count("https://github.com/Sensirion/arduino-i2c-scd4x.git#1.1.0") == 1
-    assert ini.count("https://github.com/adafruit/Adafruit_AMG88xx.git#1.3.2") == 1
+    bench = ini.split("[env:feather_nrf52840_room_bench]", 1)[1].split(
+        "[env:feather_nrf52840_room_bench_thermal]", 1)[0]
+    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=1 -DROOM_AMG_FITTED=0" in full
+    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=0 -DROOM_AMG_FITTED=0" in bench
+    assert ini.count(
+        "https://github.com/Sensirion/arduino-i2c-scd4x.git#fd169d39a3dd342ba05feef92d69c36fb3a340ee"
+    ) == 1
+    assert ini.count(
+        "https://github.com/adafruit/Adafruit_AMG88xx.git#d857b8e68dd52026c3dd8e792e7424812ec77043"
+    ) == 1
 
 
 def test_full_soil_adc_is_actual_three_sample_acquisition_not_stub():

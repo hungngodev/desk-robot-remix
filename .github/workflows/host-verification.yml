@@ -334,8 +334,12 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench
       - name: Compile full Feather room station including soil analog ADC
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full
+      - name: Compile Feather room station bench profile with thermal enabled
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench_thermal
+      - name: Compile full Feather room station with thermal enabled
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full_thermal
       - name: Verify resolved room station library inventory
-        run: python3 code/scripts/verify_room_station_dependencies.py feather_nrf52840_room_bench feather_nrf52840_room_full
+        run: python3 code/scripts/verify_room_station_dependencies.py feather_nrf52840_room_bench feather_nrf52840_room_full feather_nrf52840_room_bench_thermal feather_nrf52840_room_full_thermal
       - name: Compile hornless one-shot WROOM MG90S centering fixture
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_servo_center_bench
       - name: Compile preserved DC reference
@@ -460,8 +464,11 @@ jobs:
           # Check the generated standard image before the private bench rebuild.
           test -s sdkconfig
           test -s build/config/sdkconfig.h
+          # AEC PCM capture depends on DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED, so Kconfig
+          # omits it when continuous audio is off; continuous audio depends only on
+          # upstream flags enabled in sense/config.json and must stay explicitly unset.
+          grep -Fxq "# CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED is not set" sdkconfig
           for flag in CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED; do
-            grep -Fxq "# $flag is not set" sdkconfig
             if grep -q "^${flag}=" sdkconfig; then
               echo "::error::Unexpected assignment for $flag in default sdkconfig"
               exit 1

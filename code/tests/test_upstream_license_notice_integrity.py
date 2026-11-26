@@ -38,7 +38,7 @@ def test_ld2410_pin_matches_distribution_notice() -> None:
     config.read(root / "code/firmware/room_station/platformio.ini")
     dependencies = config["env"]["lib_deps"].splitlines()
     assert [dep for dep in dependencies if "ncmreynolds/ld2410" in dep] == [
-        "https://github.com/ncmreynolds/ld2410.git#v0.2.2"
+        "https://github.com/ncmreynolds/ld2410.git#9e202ad6f2340bc79ee0dd802e1ef58b0ae2cfa2"
     ]
     notice = (root / "THIRD_PARTY_NOTICES.md").read_text().split(
         "- Room station mmWave presence library", 1

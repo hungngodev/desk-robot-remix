@@ -301,6 +301,10 @@ def test_default_sense_ci_audio_privacy(tmp_path, flag, fault):
         ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
     )
-    assert (result.returncode == 0) == (fault == "none"), (
+    expected_ok = fault == "none" or (
+        fault == "missing_config"
+        and flag == "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED"
+    )
+    assert (result.returncode == 0) == expected_ok, (
         result.stdout + result.stderr
     )
