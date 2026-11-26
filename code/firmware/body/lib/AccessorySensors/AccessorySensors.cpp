@@ -395,8 +395,8 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   std::uint16_t config = 0;
   const bool status_read = read16(0x48, 0x01, config);
   // Do not increment an acquisition sequence for a cached conversion register.
-  // OS=0 means the previous single-shot conversion is still in progress.
-  // Allow another 84ms mux round, but never wait indefinitely on a dead ADC.
+  // Config bit 15 (0x8000) is OS: zero means conversion in progress.
+  // Retry on a later mux visit, bounded by the 200ms sample deadline.
   if (status_read && (config & 0x8000U) == 0U &&
       now_ms - ads_started_ < 200U) return;
   std::uint16_t value = 0;
@@ -407,6 +407,8 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     // Both FSR channels share this ADC. A transport failure is not an
     // independent channel fault; require two new successful conversions.
     f.valid_mask = 0;
+  // Conversion register codes 0x7fff and 0x8000 are signed full-scale
+  // rails, not OS status bits. Reject them as unqualified FSR evidence.
   } else if (fresh && value != 0x7fffU && value != 0x8000U) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
