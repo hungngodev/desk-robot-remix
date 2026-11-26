@@ -1,4 +1,5 @@
 #include "RangeScanOrder.h"
+#include "TofResult.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -105,6 +106,22 @@ static void check_transport_recovery() {
   }
 }
 
+// The device reports raw millimeters. No software offset is authorized here.
+// Test every wire word, including 0..15 and their hypothetical wrapped
+// values after subtracting 20 mm. Neither may become valid clearance.
+static void check_raw_range_word_domain() {
+  for (std::uint32_t mm = 0; mm <= 65535U; ++mm) {
+    std::uint8_t raw[12]{};
+    raw[0] = 11U << 3;
+    raw[7] = 32;
+    raw[10] = static_cast<std::uint8_t>(mm >> 8);
+    raw[11] = static_cast<std::uint8_t>(mm);
+    const auto result = desk_robot::decode_tof_result(raw);
+    CHECK(result.distance_mm == mm);
+    CHECK(result.accepted == (mm >= 30U && mm <= 1300U));
+  }
+}
+
 int main() {
   try {
     desk_robot::RangeScanOrder five(false);
@@ -123,6 +140,7 @@ int main() {
     check_slow_sweeps();
     check_fault_restart();
     check_transport_recovery();
+    check_raw_range_word_domain();
     std::cout << "PASS all 5 critical ToF channels sampled before one optional direction\n";
     return 0;
   } catch (const std::exception& e) {
