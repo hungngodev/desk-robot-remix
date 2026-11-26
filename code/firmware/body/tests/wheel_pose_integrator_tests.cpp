@@ -499,7 +499,44 @@ static void asymmetric_motion_requires_gyro_agreement() {
   }
 }
 
+static void signed_residual_boundaries_retire_pose() {
+  using Quality = WheelPoseIntegrator::Quality;
+  // Test both directions and both contradictory sources. A zero latest
+  // gyro step must not hide a nonzero cumulative yaw change between pairs.
+  for (int direction : {-1, 1}) {
+    for (bool wheel_only : {false, true}) {
+      for (int residual : {24999, 25000, 25001, 49999, 50000, 50001}) {
+        WheelPoseIntegrator pose;
+        check(pose.configure(calibration()));
+        for (std::uint32_t i = 1; i <= 3; ++i)
+          check(pose.observe(observed(i, i * 100), i * 100 + 10));
+        check(pose.start_origin(310));
+        check(pose.observe(observed(4, 400, 10, -10), 410));
+        check(pose.state().x_mm == 1);
+        // One count is 1000 urad of differential heading. Use a 50 mrad
+        // encoder pivot and adjust gyro yaw for exact one-urad boundaries.
+        const int ticks = wheel_only ? -25 * direction : 0;
+        const auto yaw = direction * ((wheel_only ? 50000 : 0) - residual);
+        auto e = observed(5, 500, ticks, ticks, yaw);
+        const bool accepted = pose.observe(e, 510);
+        check(accepted == (residual <= 50000));
+        if (accepted) {
+          check(pose.state().quality == (residual > 25000
+                    ? Quality::Degraded : Quality::Valid));
+          check(pose.state().origin == 1 && pose.state().sample_seq == 5);
+        } else {
+          check(pose.state().quality == Quality::Unavailable);
+          check(pose.state().origin == 0 && pose.state().sample_seq == 0);
+          check(!pose.observe(e, 510));
+          check(!pose.start_origin(510));
+        }
+      }
+    }
+  }
+}
+
 int main() {
+  signed_residual_boundaries_retire_pose();
   asymmetric_motion_requires_gyro_agreement();
   expired_origin_cannot_be_refreshed_by_late_pair();
   invalid_geometry_cannot_enable_pose();
