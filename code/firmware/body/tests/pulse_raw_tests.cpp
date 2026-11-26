@@ -22,6 +22,13 @@ int main() {
     CHECK(!desk_robot::optical_channels_saturated({262142U, 262142U}));
     CHECK(desk_robot::optical_channels_saturated({262143U, 0U}));
     CHECK(desk_robot::optical_channels_saturated({0U, 262143U}));
+    // Both channels can clip in the same FIFO record; reject either or both.
+    const std::uint8_t both_clipped[6] = {0x03, 0xff, 0xff, 0x03, 0xff, 0xff};
+    for (bool ir_first : {false, true}) {
+      const auto channels = desk_robot::decode_optical_channels(both_clipped, ir_first);
+      CHECK(channels.red == 262143U && channels.ir == 262143U);
+      CHECK(desk_robot::optical_channels_saturated(channels));
+    }
     // Exercise every 18-bit ADC code in both channels. Upper six bits are
     // outside the ADC payload; vary them independently of the sample values.
     // This is a decoder test, not a measurement of conversion or UART jitter.
