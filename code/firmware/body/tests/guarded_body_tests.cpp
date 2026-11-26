@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <initializer_list>
 #include <string>
 
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
@@ -989,6 +990,91 @@ static void cap_petting_zones_are_optional_and_never_arm() {
   body.set_cap(false, 0);
   CHECK(!body.state().cap_valid && body.state().cap_mask == 0);
   CHECK(send(body, "status", 2).find("\"cap_ok\":false") != std::string::npos);
+}
+
+static void stuck_touch_requires_real_release() {
+  for (const std::uint32_t start : {0U, 0xfffffff0U}) {
+    desk_robot::TouchDebounce touch;
+    for (std::uint32_t elapsed = 0; elapsed <= 120000U; elapsed += 25U) {
+      CHECK(!touch.poll(true, start + elapsed));
+      CHECK(!touch.baseline_ready() && !touch.stable());
+    }
+    const std::uint32_t release = start + 120025U;
+    CHECK(!touch.poll(false, release));
+    CHECK(!touch.poll(false, release + 25U));
+    touch.observe(true, release + 26U);
+    CHECK(!touch.poll(false, release + 50U));
+    CHECK(!touch.poll(false, release + 75U));
+    CHECK(!touch.baseline_ready());
+    CHECK(!touch.poll(false, release + 100U));
+    CHECK(touch.baseline_ready() && !touch.stable());
+    CHECK(!touch.poll(true, release + 125U));
+    CHECK(!touch.poll(true, release + 150U));
+    CHECK(touch.poll(true, release + 175U));
+    for (std::uint32_t elapsed = 200U; elapsed <= 120000U; elapsed += 25U) {
+      CHECK(!touch.poll(true, release + elapsed));
+      CHECK(touch.baseline_ready() && touch.stable());
+    }
+    CHECK(!touch.poll(false, release + 120025U));
+    CHECK(!touch.poll(false, release + 120050U));
+    CHECK(touch.poll(false, release + 120075U));
+    CHECK(!touch.stable() && touch.baseline_ready());
+  }
+}
+
+static void rapid_touch_bursts_do_not_forge_edges() {
+  desk_robot::TouchDebounce touch;
+  CHECK(!touch.poll(false, 0U));
+  CHECK(!touch.poll(false, 25U));
+  CHECK(!touch.poll(false, 50U));
+  CHECK(touch.baseline_ready());
+  for (std::uint32_t ms = 100U; ms < 500U; ms += 40U) {
+    CHECK(!touch.poll(true, ms));
+    CHECK(!touch.poll(true, ms + 25U));
+    touch.observe(false, ms + 26U);
+    CHECK(!touch.poll(false, ms + 30U));
+    CHECK(!touch.stable());
+  }
+  // Two real taps, each with independently qualified press and release.
+  for (std::uint32_t ms = 500U; ms <= 650U; ms += 150U) {
+    CHECK(!touch.poll(true, ms));
+    CHECK(!touch.poll(true, ms + 25U));
+    CHECK(touch.poll(true, ms + 50U));
+    CHECK(!touch.poll(false, ms + 60U));
+    CHECK(!touch.poll(false, ms + 85U));
+    CHECK(touch.poll(false, ms + 110U));
+    CHECK(!touch.stable());
+  }
+}
+
+static void touch_sample_boundaries_survive_rollover() {
+  // Every phase can straddle wrap: baseline, press, or release.
+  for (const std::uint32_t start : {0U, 0xfffffff0U, 0xffffff90U, 0xffffff40U}) {
+    desk_robot::TouchDebounce touch;
+    for (std::uint32_t phase = 0; phase < 3U; ++phase) {
+      const bool active = phase == 1U;
+      const std::uint32_t at = start + phase * 80U;
+      touch.observe(active, at);
+      for (unsigned duplicate = 0; duplicate < 8U; ++duplicate) {
+        CHECK(!touch.poll(active, at));
+      }
+      for (unsigned duplicate = 0; duplicate < 8U; ++duplicate) {
+        CHECK(!touch.poll(active, at + 24U));
+      }
+      CHECK(!touch.poll(active, at + 25U));
+      CHECK(!touch.poll(active, at + 49U));
+      CHECK(touch.poll(active, at + 50U) == (phase != 0U));
+      CHECK(touch.baseline_ready());
+      CHECK(touch.stable() == active);
+      CHECK(!touch.poll(active, at + 50U));
+    }
+  }
+  desk_robot::TouchDebounce sparse;
+  CHECK(!sparse.poll(false, 0U));
+  CHECK(!sparse.poll(false, 1000U));
+  CHECK(!sparse.baseline_ready());  // elapsed time cannot replace a sample
+  CHECK(!sparse.poll(false, 1025U));
+  CHECK(sparse.baseline_ready());
 }
 
 static void raw_touch_observations_restart_gesture_debounce() {
@@ -4295,6 +4381,9 @@ int main() {
     side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
     optional_range_replay_preserves_newest_raw_evidence();
     cap_petting_zones_are_optional_and_never_arm();
+    stuck_touch_requires_real_release();
+    rapid_touch_bursts_do_not_forge_edges();
+    touch_sample_boundaries_survive_rollover();
     raw_touch_observations_restart_gesture_debounce();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
