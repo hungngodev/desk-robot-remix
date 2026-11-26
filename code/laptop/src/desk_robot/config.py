@@ -56,7 +56,8 @@ class RobotConfig(BaseModel):
     persona: str = "You are a friendly desk companion. Keep replies to one short sentence."
     head_url: str = "http://127.0.0.1:8081"
     token_env: CredentialEnvName
-    device_id: str = ""
+    # The bridge uses literal identity matching; only an empty string is unmapped.
+    device_id: str = Field(default="", pattern=r"^\S*$")
     motion_enabled: StrictBool = False
     # Set only after verifying installed driver, wiring, and flashed WROOM.
     motor_backend: Literal["stepper_28byj48", "dc_pwm_guarded"] | None = None
