@@ -267,13 +267,14 @@ def test_overlapping_robot_receipt_ids_recover_and_remain_private(tmp_path):
 def test_legacy_pre_spatial_sqlite_migrates_and_reads_back_original_records(tmp_path):
     """Genuine pre-spatial private DB without relay_token or spatial tables upgrades cleanly."""
     import sqlite3
+    from contextlib import closing
 
     root = tmp_path / "legacy_private"
     root.mkdir(mode=0o700, parents=True)
     db_path = root / "robot-01.sqlite3"
     when = time.time() - 5.0
     # Seed the legacy pre-spatial schema (no relay_token, no spatial/provenance tables).
-    with sqlite3.connect(db_path) as legacy:
+    with closing(sqlite3.connect(db_path)) as legacy, legacy:
         legacy.execute(
             """CREATE TABLE memories (
                  event_id TEXT PRIMARY KEY,
@@ -292,6 +293,8 @@ def test_legacy_pre_spatial_sqlite_migrates_and_reads_back_original_records(tmp_
             ("legacy-evt-1", "robot-01", 1, "vision", "Pre-upgrade desk key note", when, 0.9),
         )
         legacy.commit()
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        legacy.execute("SELECT 1")
 
     store = MemoryStore(root, ["robot-01"])
     spatial = SpatialMemory(store)
