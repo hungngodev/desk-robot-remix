@@ -256,16 +256,20 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         src, expected_connector, expected_terminal_roles, reasons,
     )
     reasons.append("physical_harness_wiring_not_verified")
-    if src["ntc"] != "10k":
+    ntc = src.get("ntc")
+    if ntc != "10k":
         reasons.append("pack_ntc_10k_not_fitted_in_exact_variant")
     if model == "THOR-18650-1S2P-5200":
         reasons.append("bare_cell_envelope_not_complete_protected_pack")
         reasons.append("pcm_current_limit_and_connector_configuration_unselected")
-    reasons += ["charger_ntc_circuit_not_qualified",
+    reasons += ["physical_pack_protection_not_verified",
+                "physical_pack_ntc_not_verified",
+                "fuel_gauge_not_qualified",
+                "charger_ntc_circuit_not_qualified",
                 "physical_power_and_fit_trials_not_executed"]
     return {
         "model": model, "vendor_source": src["source"],
-        "protected": protected, "ntc": src["ntc"],
+        "protected": protected, "ntc": ntc,
         "connector_variant": src["connector"],
         "published_terminal_roles": dict(terminal_roles) if terminal_roles else None,
         "connector_matches_selected_harness_on_paper": connector_match,
