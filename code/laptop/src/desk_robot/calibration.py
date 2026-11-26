@@ -10,6 +10,8 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from .private_files import replace_private_text
+
 
 def _unique_calibration_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
     """Do not silently choose a physical permission or geometry value."""
@@ -143,4 +145,4 @@ class Calibration(BaseModel):
         return cls.model_validate_json(contents)
 
     def save(self, path: Path) -> None:
-        path.write_text(json.dumps(self.model_dump(mode="json"), indent=2) + "\n")
+        replace_private_text(path, json.dumps(self.model_dump(mode="json"), indent=2) + "\n")

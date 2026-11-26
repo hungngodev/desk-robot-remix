@@ -1,8 +1,9 @@
-"""Shared stdlib-only private credential reader for Mac and provisioning tools."""
+"""Shared stdlib-only private file utilities for Mac and provisioning tools."""
 
 import os
 import re
 import stat
+import tempfile
 from pathlib import Path
 
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
@@ -29,6 +30,28 @@ def validate_private_directory_ancestry(path: Path) -> None:
             raise ValueError("Memory root ancestry must not contain symlinks")
         if not stat.S_ISDIR(info.st_mode):
             raise ValueError("Memory root ancestry must contain only directories")
+
+
+def replace_private_text(path: Path, contents: str) -> None:
+    """Atomically replace text in a trusted directory with a fresh 0600 file.
+
+    Concurrent writers publish whole files (last replacement wins). This is not
+    an exclusive evidence creator or a directory-entry power-loss guarantee.
+    """
+    stream = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=".desk-robot-", delete=False,
+    )
+    temporary = Path(stream.name)
+    try:
+        with stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 def read_private_text(path: Path, *, missing_ok: bool = False) -> str:
