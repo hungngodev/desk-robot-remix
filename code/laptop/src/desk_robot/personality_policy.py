@@ -11,6 +11,13 @@ def passive_interval(profile: PersonalityProfile, base: float) -> float:
     return base * {"balanced": 1.0, "calm": 1.5, "curious": 1.0, "dramatic": 1.25}[profile]
 
 
+def profile_waits_beyond_fleet_floor(
+    profile: PersonalityProfile, *, elapsed: float, base: float,
+) -> bool:
+    """Skip a locally ineligible pet only after the common floor has opened."""
+    return base <= elapsed < passive_interval(profile, base)
+
+
 def expression_guidance(profile: PersonalityProfile) -> str:
     style = {
         "balanced": "Follow your configured persona naturally.",

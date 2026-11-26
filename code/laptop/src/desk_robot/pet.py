@@ -44,7 +44,11 @@ from .initiative_policy import (
 )
 from .memory import CameraProvenance, MemoryStore
 from .operations import _bounded_head_reply
-from .personality_policy import expression_guidance, passive_interval
+from .personality_policy import (
+    expression_guidance,
+    passive_interval,
+    profile_waits_beyond_fleet_floor,
+)
 from .sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
@@ -2832,6 +2836,7 @@ class PetController:
         if self._closed:
             return
         robots = self.settings.robots
+        now = time.monotonic()
         # Use a stable fleet index and skip locally unavailable pets. A quiet
         # or docked peer must not consume the only fleet reconsideration tick.
         for offset in range(len(robots)):
@@ -2841,19 +2846,22 @@ class PetController:
             if not state.enabled:
                 continue
             state.activity_reevaluations += 1
-            if self.is_quiet(robot_id) or self.is_dock_charging_inhibited(robot_id):
+            if (self.is_quiet(robot_id) or self.is_dock_charging_inhibited(robot_id)
+                    or profile_waits_beyond_fleet_floor(
+                        robots[index].personality_profile,
+                        elapsed=now - self._group_last_spoken, base=self.speech_cooldown,
+                    )):
                 state.last_activity_decision = "defer"
                 continue
             break
         else:
             return
-        now = time.monotonic()
         if (
             not self.voice_monitor_ready
             or self._human_active_in_fleet(now)
             or cooldown_pending(
                 now=now, last=self._group_last_spoken,
-                interval=passive_interval(robots[index].personality_profile, self.speech_cooldown),
+                interval=self.speech_cooldown,
             )
             or self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())

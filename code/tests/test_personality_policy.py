@@ -1,7 +1,11 @@
 """Host-only checks for optional personality policy, not physical qualification."""
 
 import pytest
-from desk_robot.personality_policy import expression_guidance, passive_interval
+from desk_robot.personality_policy import (
+    expression_guidance,
+    passive_interval,
+    profile_waits_beyond_fleet_floor,
+)
 
 
 @pytest.mark.parametrize(
@@ -22,3 +26,12 @@ def test_personality_expression_keeps_physical_truth_contract():
         assert "Never alter measured battery percentages, ToF ranges, safety faults" in prompt
         assert "stop acknowledgments, or tool results" in prompt
         assert "safety always takes priority" in prompt
+
+
+@pytest.mark.parametrize(
+    ("profile", "elapsed", "waits"),
+    [("calm", 119, False), ("calm", 120, True), ("calm", 180, False),
+     ("dramatic", 149, True), ("dramatic", 150, False), ("curious", 120, False)],
+)
+def test_extra_profile_wait_does_not_consume_common_floor(profile, elapsed, waits):
+    assert profile_waits_beyond_fleet_floor(profile, elapsed=elapsed, base=120) is waits

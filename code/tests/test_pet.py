@@ -411,6 +411,37 @@ async def test_activity_skips_quiet_docked_peers_without_consuming_human_priorit
         await pet.close()
 
 
+async def test_activity_skips_extra_personality_wait_without_blocking_peers(fleet, tmp_path):
+    fleet.robots[0] = fleet.robots[0].model_copy(update={"personality_profile": "calm"})
+    fleet.robots[1] = fleet.robots[1].model_copy(update={"personality_profile": "curious"})
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    for robot in fleet.robots[:2]:
+        pet.states[robot.id].enabled = True
+    offers = []
+
+    async def record_offer(robot_id, change, generation, **kwargs):
+        offers.append(robot_id)
+
+    pet._speak = record_offer
+    try:
+        pet._group_last_spoken = time.monotonic() - 130
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        assert offers == ["robot-02"]
+        assert pet.states["robot-01"].last_activity_decision == "defer"
+        pet._group_last_spoken = time.monotonic() - 190
+        pet._reconsider_activity()
+        await pet._speech_task
+        assert offers == ["robot-02", "robot-01"]
+    finally:
+        await pet.close()
+
+
 def test_visual_change_gate_requires_persistent_difference():
     gate = VisualChangeGate(min_changed_fraction=0.008, confirmations=2)
     assert gate.observe(WHITE) is None

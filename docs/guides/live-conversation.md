@@ -26,6 +26,21 @@ is reviewed. No additional microphone or replacement board is required now.
   The default 30-second observation interval does not authorize speech every
   30 seconds: the pet/fleet layer must apply its stricter speech cooldowns.
 
+## Optional personality policy
+
+The Mac pet controller supports a frozen per-robot `personality_profile`.
+The default `balanced` preserves the existing passive speech floor. With a
+120-second fleet baseline, `curious` retains 120 seconds, `dramatic` waits
+150 seconds, and `calm` waits 180 seconds since fleet speech. These are
+admission thresholds, not speech schedules or sensor sampling intervals.
+A pet waiting for its additional personality interval does not block an
+eligible peer; human voice, quiet, shared audio ownership and physical
+safety still take priority. Direct noncamera interactions retain the
+original cooldown. Mood and persona affect expressive guidance only:
+measured battery, range and fault values and completed tool receipts
+must remain attributed physical evidence. Prompt instructions are not
+proof that a generative model will always report the evidence correctly.
+
 ## Adapter responsibilities
 
 1. Use one event-loop owner. Marshal off-thread microphone/camera/codec callbacks
