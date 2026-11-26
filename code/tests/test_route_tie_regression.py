@@ -52,3 +52,18 @@ def test_stationary_request_never_moves_and_walled_goal_is_unreachable():
     assert (result.status, result.reason, result.cells, result.may_execute) == (
         "rejected", "no_safe_route", (), False,
     )
+
+
+def test_stale_queue_entries_do_not_consume_expansion_budget():
+    rows = ("....#", "#....", "..#..", ".....", ".#.##")
+    grid, request, envelope = _fixture()
+    grid = replace(
+        grid, width=5, height=5,
+        support=tuple("safe" if cell == "." else "occupied" for row in rows for cell in row),
+    )
+    request = replace(request, start=(0, 0), heading=0, goal=(2, 4), goal_heading=3)
+    assert plan_route(grid, request, envelope, now_us=2, max_expansions=46).reason == (
+        "search_budget_exhausted"
+    )
+    result = plan_route(grid, request, envelope, now_us=2, max_expansions=47)
+    assert (result.reason, result.cells, result.may_execute) == ("no_safe_route", (), False)
