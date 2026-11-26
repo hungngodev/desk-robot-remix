@@ -940,3 +940,59 @@ def test_missing_freight_cannot_turn_sense_payment_into_under_cap_quote():
     assert out["prior_paid_orders_cents"] == 1367
     assert out["prototype_cumulative_cents"] is None
     assert out["within_prototype_cap"] is False
+
+
+@pytest.mark.parametrize("field", ["sku", "seller", "quote_reference"])
+@pytest.mark.parametrize("bad_suffix", ["\x00", "\n", "\x7f", "\u200b"])
+def test_nonprintable_quote_identifier_fails_closed(field, bad_suffix):
+    ev = sample()
+    ev["lines"][0][field] += bad_suffix
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert result["prototype_cumulative_cents"] is None
+    assert not result["within_prototype_cap"]
+    assert any("nonprintable identifier" in error for error in result["errors"])
+
+
+@pytest.mark.parametrize("field", ["quantity_packages", "units_per_package"])
+@pytest.mark.parametrize("value", [-1, True, False, 1.0, float("nan"), float("inf")])
+def test_invalid_supplier_count_never_yields_payable_total(field, value):
+    ev = sample()
+    ev["lines"][0][field] = value
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert any("positive integer" in error for error in result["errors"])
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf"), "NaN", "Infinity"])
+def test_nonfinite_quote_amount_never_yields_payable_total(value):
+    ev = sample()
+    ev["lines"][0]["package_price_usd"] = value
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert not result["within_prototype_cap"]
+
+
+@pytest.mark.parametrize("currency", [None, "EUR", "usd", True])
+def test_non_usd_quote_cannot_qualify_cost(currency):
+    ev = sample()
+    ev["currency"] = currency
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert "Quote currency must be USD" in result["errors"]
+
+
+def test_exact_landed_cost_ignores_ambient_decimal_precision():
+    from decimal import localcontext
+
+    ev = sample()
+    ev["lines"][0]["package_price_usd"] = "12.34"
+    with localcontext() as context:
+        context.prec = 3
+        result = calculate(ev)
+        assert mod.cents("5.9500", "price") == 595
+        assert mod.cents("1e12", "price") == 100000000000000
+        assert mod.cents("0e-999999", "price") == 0
+    assert result["errors"] == []
+    assert result["payable_now_cents"] == 1713
+    assert result["prototype_cumulative_cents"] == 2963

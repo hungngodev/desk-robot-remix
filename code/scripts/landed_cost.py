@@ -31,19 +31,19 @@ def cents(value: object, label: str) -> int:
     # instead of producing a failed receipt.
     if number > MAX_ACCOUNTING_USD:
         raise ValueError(f"{label}: USD amount exceeds receipt bound")
-    # Inspect the exact Decimal representation before multiplication:
-    # finite nonzero 1e-999999 * 100 silently underflows to 0 under the
-    # default decimal context. A positive subcent quote must not become free.
-    if number and number.as_tuple().exponent < -2:
-        digits = number.as_tuple().digits
-        beyond_cent = -number.as_tuple().exponent - 2
-        if (beyond_cent >= len(digits)
-                or any(digit != 0 for digit in digits[-beyond_cent:])):
+    # Convert the exact representation without ambient Decimal rounding.
+    # Strip only zero subcent digits; the bound keeps integer arithmetic small.
+    if not number:
+        return 0
+    _, digits, exponent = number.as_tuple()
+    cent_exponent = exponent + 2
+    if cent_exponent < 0:
+        if -cent_exponent >= len(digits) or any(digits[cent_exponent:]):
             raise ValueError(f"{label}: subcent amount")
-    scaled = number * 100
-    if scaled != scaled.to_integral_value():
-        raise ValueError(f"{label}: subcent amount")
-    return int(scaled)
+        digits = digits[:cent_exponent]
+        cent_exponent = 0
+    coefficient = int("".join(map(str, digits)))
+    return coefficient * 10**cent_exponent
 
 
 def sum_line_cost_cents(lines: Iterable[tuple[int, int]]) -> int:
@@ -95,6 +95,8 @@ _url = evidence_https_url
 def _nonempty(value: object, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label}: missing identifier")
+    if not value.isprintable():
+        raise ValueError(f"{label}: nonprintable identifier")
     return value.strip()
 
 
