@@ -219,6 +219,33 @@ int main() {
         CHECK(faulty.ranges == 0 && faulty.extras == 0);
       }
     }
+    // Each defined bit must be verified independently. A blanket 0xff
+    // readback fault cannot detect a missing bit in a multi-bit mask.
+    struct OpticalSetting { int reg; unsigned value; unsigned mask; };
+    constexpr OpticalSetting optical_settings[] = {
+        {0x09, 0x03, 0xc7}, // dual LED mode, reset, shutdown
+        {0x08, 0x00, 0xff}, // averaging, rollover, almost-full
+        {0x0a, 0x23, 0x7f}, // ADC range, sample rate, pulse width
+        {0x0c, 0x07, 0xff}, // red LED amplitude
+        {0x0d, 0x07, 0xff}, // IR LED amplitude
+        {0x02, 0x20, 0xe0}, // defined interrupt enable bits
+    };
+    for (const auto& setting : optical_settings) {
+      for (unsigned bit = 1; bit <= 0x80; bit <<= 1) {
+        TwoWire readback;
+        const auto altered = static_cast<std::uint8_t>(setting.value ^ bit);
+        if (setting.reg == 0x02) readback.pulse_interrupt_enable = altered;
+        else readback.pulse_config[setting.reg] = altered;
+        readback.ignore_pulse_config_write_reg = setting.reg;
+        desk_robot::PulsePad candidate;
+        const bool expected = (setting.mask & bit) == 0;
+        CHECK(candidate.begin(readback) == expected);
+        CHECK(candidate.sample().present == expected);
+        CHECK(!candidate.sample().valid && candidate.sample().sample_seq == 0U);
+        CHECK(readback.ranges == 0 && readback.extras == 0);
+        if (!expected) CHECK(!candidate.poll(100));
+      }
+    }
     Wire.cap_input_enable = 0x01;
     CHECK(touch.begin(Wire));
     CHECK(Wire.cap_input_enable == 0xFF);
