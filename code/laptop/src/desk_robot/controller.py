@@ -42,10 +42,14 @@ from .vision import Detection, Vision, validated_camera_sizes
 
 async def _motion_image_size(jpeg: bytes, *, max_bytes: int) -> tuple[int, int]:
     """Validate pixels on the existing bounded native worker, not the motion loop."""
-    (size,) = await _bounded_head_reply(
-        validated_camera_sizes((jpeg,), max_bytes=max_bytes), seconds=2.0,
-        timeout_message="Camera JPEG validation timeout",
-    )
+    try:
+        (size,) = await _bounded_head_reply(
+            validated_camera_sizes((jpeg,), max_bytes=max_bytes), seconds=2.0,
+            timeout_message="Camera JPEG validation timeout",
+        )
+    except TimeoutError as exc:
+        # TimeoutError subclasses OSError; keep timeout distinct from corrupt JPEG.
+        raise OperationError("Camera JPEG validation timeout") from exc
     return size
 
 

@@ -1005,6 +1005,17 @@ async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings)
         await c.close()
 
 
+async def test_motion_camera_validation_timeout_is_not_reported_as_corrupt_jpeg(monkeypatch):
+    from desk_robot import controller
+
+    async def timed_out(*args, **kwargs):
+        raise TimeoutError("native validation deadline")
+
+    monkeypatch.setattr(controller, "validated_camera_sizes", timed_out)
+    with pytest.raises(OperationError, match="Camera JPEG validation timeout"):
+        await controller._motion_image_size(b"frame", max_bytes=512000)
+
+
 @pytest.mark.parametrize("operation", ["explore", "pickup"])
 async def test_motion_camera_validation_runs_outside_event_loop(settings, monkeypatch, operation):
     import threading
