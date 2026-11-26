@@ -19,6 +19,7 @@ def test_rgb565_frame_bounds(tmp_path):
             "-std=c++17",
             "-Wall",
             "-Wextra",
+            "-Wconversion",
             "-Werror",
             "-fsanitize=address,undefined",
             "-fno-sanitize-recover=all",
