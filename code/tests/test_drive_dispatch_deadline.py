@@ -63,3 +63,44 @@ async def test_dispatch_deadline_boundary(monkeypatch, command, age, expired):
             "ok": True, "robot_id": "robot-01", "reply": expected_ack(command),
         }
         assert head.sent == [command]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retire_at", ["before_send", "before_ack"])
+async def test_retired_motion_epoch_rejects_old_drive_or_receipt(monkeypatch, retire_at):
+    """A stale route segment must not survive an authority change at either boundary."""
+    monkeypatch.setattr(operations, "monotonic", lambda: 0.0)
+    epoch = 1
+    admitted_epoch = epoch
+    sent = []
+    suspended = asyncio.Event()
+    release = asyncio.Event()
+
+    def check_authority():
+        if epoch != admitted_epoch:
+            raise asyncio.CancelledError
+
+    class Head:
+        supports_dispatch_check = True
+
+        async def command(self, command, *, dispatch_check):
+            if retire_at == "before_send":
+                suspended.set()
+                await release.wait()
+            dispatch_check()
+            sent.append(command)
+            if retire_at == "before_ack":
+                suspended.set()
+                await release.wait()
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
+
+    old_command = "drive 20 20 100"
+    task = asyncio.create_task(
+        dispatch_job_command(Head(), old_command, check_authority, robot_id="robot-01")
+    )
+    await asyncio.wait_for(suspended.wait(), timeout=1)
+    epoch += 1
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+    assert sent == ([old_command] if retire_at == "before_ack" else [])
