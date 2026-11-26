@@ -10,6 +10,7 @@
 #include "robot_bridge.h"
 #include "stackchan_behavior.hpp"
 #include "face_eye_display.hpp"
+#include "face_panel_flush.hpp"
 #include "face_mood_morph.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
@@ -133,6 +134,7 @@ private:
     Display* display_ = nullptr;
     desk_robot::LocalEyeDisplay* local_eye_display_ = nullptr;
     desk_robot::FaceEyeAnimator eye_animator_{};
+    desk_robot::FacePanelFlushRecovery panel_flush_recovery_{};
     Esp32Camera* camera_ = nullptr;
     Button boot_button_;
     // Pinned Stackchan-agent HSM controls OLED mood only, NEVER tracks/claw.
@@ -408,6 +410,8 @@ private:
                                 return board->ApplyFacePanelMode(mode);
                             });
                     }
+                    // Repair a failed SSD1306 flush using the current, already arbitrated scene.
+                    board->panel_flush_recovery_.Retry(uptime_ms);
                     // Restore the current HSM mood after either local priority clears.
                     last_priority_active = priority_active;
                     last_face_available = face_available;
@@ -467,6 +471,7 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, false));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+        ESP_ERROR_CHECK(panel_flush_recovery_.Install(panel, DISPLAY_WIDTH, DISPLAY_HEIGHT));
         local_eye_display_ = new desk_robot::LocalEyeDisplay(
             panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);

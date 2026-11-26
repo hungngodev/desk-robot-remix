@@ -3058,11 +3058,15 @@ int main() {
     }
     // FaceTask and Xiaozhi are separate callers. A recursive mutex and
     // thread-local ownership check must guard every fake LVGL access.
+    upstream->SetChatMessage("assistant", "caption before fault");
     display.SetLocalStatus(FaceStatus::kBodyFault);
+    assert(display.StatusVisible() && display.Status() == "Body safety stop");
     std::thread upstream_writer([&] {
         for (int i = 0; i < 10000; ++i) {
             upstream->SetStatus("Listening");
             upstream->ShowNotification("Ignored");
+            upstream->SetChatMessage("assistant", "current caption");
+            upstream->RemoveChatMessage("assistant", "caption before fault");
             assert(!upstream->SetEmotion("happy"));
         }
         assert(lock_depth == 0);
@@ -3076,8 +3080,10 @@ int main() {
     face_writer.join();
     assert(layer->hidden && display.StatusVisible());
     assert(display.Status() == "Body safety stop" && display.notification_text.empty());
+    assert(display.subtitle_text == "current caption");
     display.SetLocalStatus(FaceStatus::kNormal);
     assert(display.Status() == "Listening");
+    assert(display.subtitle_text == "current caption");
     assert(lock_depth == 0);
 }
 """
