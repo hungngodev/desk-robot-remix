@@ -32,12 +32,20 @@ def _reject_nonfinite_side_trial_json(token: str) -> None:
     raise ValueError("Nonfinite side-range trial JSON constant: " + token)
 
 
+def _finite_side_trial_float(token: str) -> float:
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("Nonfinite side-range trial JSON number: " + token)
+    return value
+
+
 def load_trial_rows(path: Path) -> list[dict]:
     """Preserve raw left/right/rear trial identity before threshold fitting."""
     return [
         json.loads(
             line, object_pairs_hook=_unique_side_trial_fields,
             parse_constant=_reject_nonfinite_side_trial_json,
+            parse_float=_finite_side_trial_float,
         )
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
@@ -89,7 +97,9 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
     measured_provenance: dict | None = None
     for index, line in enumerate(rows):
         if (not isinstance(line, dict) or line.get("robot_id") != robot_id
+                or type(line.get("direction")) is not str
                 or line.get("direction") not in SIDE
+                or type(line.get("label")) is not str
                 or line.get("label") not in {"near", "far"}):
             raise ValueError("Labeled robot identity, side and near/far required")
         channel = SIDE[line["direction"]]
