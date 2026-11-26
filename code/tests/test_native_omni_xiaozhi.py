@@ -9975,3 +9975,35 @@ async def test_native_late_tool_batch_cannot_cross_owner(native, monkeypatch, in
         if not pending.done():
             pending.cancel()
         await asyncio.gather(pending, return_exceptions=True)
+
+
+@pytest.mark.parametrize("send_fails", [False, True])
+async def test_explicit_native_barge_flushes_even_when_host_flag_is_idle(native, send_fails):
+    """An idle host flag must not suppress the actual head STOP request."""
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    assert conn.client_is_speaking is False
+
+    if send_fails:
+        class FailingSocket:
+            async def send(self, packet):
+                raise ConnectionError("STOP lost")
+
+        conn.websocket = FailingSocket()
+        with pytest.raises(ConnectionError, match="STOP lost"):
+            await module.on_barge(conn)
+        assert module._output_owner_unverified == conn.device_id
+        assert not sent
+    else:
+        assert await module.on_barge(conn) is True
+        assert [json.loads(packet) for packet in sent] == [{
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": conn.session_id,
+        }]
+    assert session._generation == 1

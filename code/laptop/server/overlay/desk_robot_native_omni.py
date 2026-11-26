@@ -2600,7 +2600,7 @@ class NativeOmniSession:
         await asyncio.sleep(remaining_packet_delay(packet_started, time.monotonic()))
         return True
 
-    async def _invalidate_head_first(self) -> tuple[dict, ...]:
+    async def _invalidate_head_first(self, *, force_flush: bool = False) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
         self._clear_head_playback()
@@ -2626,7 +2626,7 @@ class NativeOmniSession:
         if self._user_was_talking:
             self._camera_wakeup.set()
         events = self.wire.interrupt()  # even without a connected backend
-        await flush_head(self)
+        await flush_head(self, force=force_flush)
         return events
 
     async def _cancel_remote(self, events: tuple[dict, ...]) -> None:
@@ -2652,7 +2652,8 @@ class NativeOmniSession:
 
     async def barge(self) -> None:
         """The actual XIAO gets its flush before remote model cancellation."""
-        events = await self._invalidate_head_first()
+        # A false host speaking flag is not proof that the head has drained.
+        events = await self._invalidate_head_first(force_flush=True)
         await self._cancel_remote(events)
 
     async def _cancel_workers(self) -> None:
@@ -3147,10 +3148,10 @@ async def claim_speaker(
             return True
 
 
-async def flush_head(session: NativeOmniSession) -> None:
+async def flush_head(session: NativeOmniSession, *, force: bool = False) -> None:
     """Bound urgent XIAO STOP; preserve fleet ownership on uncertain delivery."""
     global _output_owner, _output_owner_unverified
-    if not session.conn.client_is_speaking:
+    if not force and not session.conn.client_is_speaking:
         return
     import desk_robot_bridge as bridge
     try:
