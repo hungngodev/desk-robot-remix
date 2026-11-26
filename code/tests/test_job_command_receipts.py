@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from desk_robot.command_framing import expected_ack
 from desk_robot.operations import OperationError, _bounded_pulse_stop, dispatch_job_command
 
