@@ -354,7 +354,9 @@ def assess_dock(
     if not 2 <= lateral_tolerance_mm <= 100:
         raise ValueError("Dock lateral tolerance outside bounds")
     if pose is None:
-        return DockAssessment("hold", "No identified, calibrated target")
+        return DockAssessment(
+            "hold", "No identified, calibrated target; IR-only/dead-reckoning fallback unqualified"
+        )
     age = now - pose.captured_at
     if not 0 <= age <= max_age_seconds:
         return DockAssessment("hold", "Marker observation stale or from the future")

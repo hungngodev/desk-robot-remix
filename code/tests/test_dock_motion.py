@@ -947,7 +947,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
 
 @pytest.mark.parametrize(
     "outcome", ["standoff", "contact", "beacon_loss", "ir_replay", "timeout",
-                "marker_loss", "pulse_budget", "receipt_denial",
+                "marker_loss", "terminal_marker_loss", "pulse_budget", "receipt_denial",
                 "queued_camera_expired", "queued_stream_replaced"],
 )
 async def test_public_dock_replay_stops_without_unqualified_recovery(
@@ -961,6 +961,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
     from desk_robot.dock_ir import dock_beacon_code
     from desk_robot.dock_vision import DockPose
 
+    marker_loss = outcome in {"marker_loss", "terminal_marker_loss"}
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     settings.max_job_seconds = 2 if outcome == "timeout" else 20
@@ -1075,7 +1076,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 assert self.armed
                 if command == "drive 10 10 100":
                     # A new explicit operator permit, not automatic dock recovery.
-                    assert outcome == "marker_loss"
+                    assert marker_loss
                     return {"ok": True}
                 assert self.ir_reads == sum(
                     c.startswith("drive ") for c in self.commands
@@ -1117,10 +1118,13 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             }
 
     head = ReplayHead()
-    poses = iter(((0, 500), (0, 450), (0, 150)))
+    # 300 mm tag depth is exactly 100 mm before the calibrated 200 mm standoff.
+    # The generous synthetic front range does not qualify physical seat approach.
+    initial_depth = 300 if outcome == "terminal_marker_loss" else 500
+    poses = iter(((0, initial_depth), (0, 450), (0, 150)))
 
     def detect(_jpeg, _camera, *, captured_at):
-        if outcome == "marker_loss" and head.frames == 2:
+        if marker_loss and head.frames == 2:
             return None
         x, z = (0, 500) if outcome == "pulse_budget" else next(poses)
         return DockPose(x, 0, z, 0.5, captured_at)
@@ -1140,7 +1144,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         elif outcome == "pulse_budget":
             expected = ["arm"] + ["drive 20 20 100", "stop"] * 16
             assert head.frames == head.ir_reads == 16
-        elif outcome == "marker_loss":
+        elif marker_loss:
             assert head.frames == 2 and head.ir_reads == 1
         else:
             if outcome not in {"beacon_loss", "ir_replay"}:
@@ -1149,7 +1153,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         assert commands == expected + ["halt"]
         assert not head.armed
         if outcome in {
-            "standoff", "beacon_loss", "ir_replay", "marker_loss", "pulse_budget",
+            "standoff", "beacon_loss", "ir_replay", "marker_loss",
+            "terminal_marker_loss", "pulse_budget",
             "queued_camera_expired",
         }:
             assert job.state == "succeeded"
@@ -1160,7 +1165,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 "standoff": "contacts unverified",
                 "beacon_loss": "not jointly visible",
                 "ir_replay": "Assigned dock IR replay or stale conversion",
-                "marker_loss": "No identified, calibrated target",
+                "marker_loss": "IR-only/dead-reckoning fallback unqualified",
+                "terminal_marker_loss": "IR-only/dead-reckoning fallback unqualified",
                 "pulse_budget": "Maximum guarded approach pulses reached",
                 "queued_camera_expired": "Dock camera receipt expired before guarded drive",
             }[outcome]
@@ -1195,7 +1201,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         with pytest.raises(OperationError, match="permit"):
             coordinator.manual(robot.id, "drive 10 10 100")
         assert [c for c in head.commands if c != "keepalive"] == commands
-        if outcome == "marker_loss":
+        if marker_loss:
             # Recovery belongs to the operator only after the terminal HALT.
             # A new permit can admit manual movement; it does not restart dock.
             await coordinator.operator_arm(robot.id)
