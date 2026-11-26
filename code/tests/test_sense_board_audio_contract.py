@@ -48,6 +48,11 @@ def test_selected_audio_board_compiles(compile_board):
         ("AUDIO_OUTPUT_SAMPLE_RATE 32000", "AUDIO_OUTPUT_SAMPLE_RATE 24000", "32/16 kHz"),
         ("AUDIO_INPUT_SAMPLE_RATE 16000", "AUDIO_INPUT_SAMPLE_RATE 8000", "32/16 kHz"),
         (
+            "AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_NC",
+            "AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_9",
+            "no qualified MCU shutdown connection",
+        ),
+        (
             "AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_7\n#define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8",
             "AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_8\n#define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7",
             "GPIO4/7/8",
