@@ -98,6 +98,10 @@ class SpatialGrid:
         self._clock_reference: dict[int, tuple[int, int]] = {}
         self._last_update_us = 0
 
+    def _contains_cell(self, x: int, y: int) -> bool:
+        return (type(x) is int and type(y) is int
+                and 0 <= x < self.width and 0 <= y < self.height)
+
     def record(self, batch: RangeCellBatch, *, now_us: int) -> None:
         """Atomically add a projected, qualified WROOM range observation.
 
@@ -122,9 +126,7 @@ class SpatialGrid:
                 or type(batch.cells) is not tuple or not batch.cells
                 or len(batch.cells) > 256
                 or any(not isinstance(cell, tuple) or len(cell) != 2
-                       or any(type(i) is not int for i in cell)
-                       or not 0 <= cell[0] < self.width
-                       or not 0 <= cell[1] < self.height for cell in batch.cells)):
+                       or not self._contains_cell(*cell) for cell in batch.cells)):
             raise GridEvidenceError("Invalid grid source, calibration, timestamp, or cell")
         if len(set(batch.cells)) != len(batch.cells):
             raise GridEvidenceError("Invalid grid source, calibration, timestamp, or cell")
@@ -232,9 +234,7 @@ class SpatialGrid:
         self._last_update_us = max(self._last_update_us, batch.received_us)
 
     def state(self, x: int, y: int, *, now_us: int) -> str:
-        if (type(x) is not int or type(y) is not int
-                or not 0 <= x < self.width or not 0 <= y < self.height
-                or type(now_us) is not int or now_us < 0):
+        if not self._contains_cell(x, y) or type(now_us) is not int or now_us < 0:
             raise ValueError("Cell or clock outside map")
         cell = self._cells.get((x, y))
         if cell is None:
@@ -270,6 +270,8 @@ class SpatialGrid:
         return "unknown"
 
     def log_odds(self, x: int, y: int) -> float:
+        if not self._contains_cell(x, y):
+            raise ValueError("Cell outside map")
         cell = self._cells.get((x, y))
         if cell is None or cell.obstacle_epoch != self.epoch:
             return 0.0
