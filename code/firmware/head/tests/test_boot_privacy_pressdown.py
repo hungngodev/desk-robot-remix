@@ -90,16 +90,23 @@ def test_boot_privacy_gesture_native_adversarial(tmp_path):
 #include <cassert>
 int main() {
     BootPrivacyGesture g;
+    assert(!g.Held());
     assert(!g.TakeClick());
+    g.PressUp(); assert(!g.Held()); assert(!g.TakeClick());
+    assert(g.PressDown()); assert(g.Held()); assert(!g.TakeClick());
+    g.PressUp(); assert(!g.Held()); assert(g.TakeClick()); assert(!g.TakeClick());
+    assert(g.PressDown()); assert(g.Held()); assert(!g.PressDown());
+    assert(!g.Held()); g.PressUp(); assert(!g.TakeClick());
+    assert(g.PressDown()); assert(g.Held()); g.Cancel(); assert(!g.Held());
     g.PressUp(); assert(!g.TakeClick());
-    assert(g.PressDown()); assert(!g.TakeClick());
-    g.PressUp(); assert(g.TakeClick()); assert(!g.TakeClick());
-    assert(g.PressDown()); assert(!g.PressDown());
-    g.PressUp(); assert(!g.TakeClick());
-    assert(g.PressDown()); g.Cancel(); g.PressUp(); assert(!g.TakeClick());
-    assert(g.PressDown()); g.PressUp(); assert(g.TakeClick());
+    assert(g.PressDown()); assert(g.Held()); g.PressUp(); assert(g.TakeClick());
     assert(g.PressDown()); g.PressUp(); g.PressUp(); assert(!g.TakeClick());
     assert(g.PressDown()); g.PressUp(); g.Cancel(); assert(!g.TakeClick());
+    // A cancelled hold cannot grant bench consent until a fresh press.
+    g.Cancel(); assert(!g.Held());
+    assert(g.PressDown()); assert(g.Held()); g.PressUp(); assert(!g.Held());
+    assert(g.PressDown()); assert(g.Held()); assert(!g.TakeClick());
+    g.Cancel(); assert(!g.Held()); g.PressUp(); assert(!g.TakeClick());
     for (int i=0;i<100000;++i) {
         assert(g.PressDown()); assert(!g.PressDown()); g.PressUp(); assert(!g.TakeClick());
         assert(g.PressDown()); g.PressUp(); assert(g.TakeClick());
