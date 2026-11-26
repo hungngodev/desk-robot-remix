@@ -313,7 +313,8 @@ def source_unchanged_since_test(
         return False
 
 
-def verified_regular_record_path(url: str, sha: str, lookup) -> bool:
+def verified_regular_record_path(url: str, sha: str, lookup, *,
+                                 expected_blob_sha: str | None = None) -> bool:
     """Reject symlinks and submodules hidden behind a Contents API file response."""
     if type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha):
         return False
@@ -346,7 +347,8 @@ def verified_regular_record_path(url: str, sha: str, lookup) -> bool:
         entry = matches[0]
         blob_sha = entry.get("sha")
         return (entry.get("type") == "blob" and entry.get("mode") == "100644"
-                and type(blob_sha) is str and SHA.fullmatch(blob_sha) is not None)
+                and type(blob_sha) is str and SHA.fullmatch(blob_sha) is not None
+                and (expected_blob_sha is None or blob_sha == expected_blob_sha))
     except (ValueError, TypeError, AttributeError, KeyError):
         return False
 

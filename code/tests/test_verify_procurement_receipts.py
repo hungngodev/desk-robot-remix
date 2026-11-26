@@ -133,15 +133,6 @@ def receipt(scope, gate):
 
 
 def lookup(url, records=None):
-    if "/git/commits/" in url:
-        revision = url.rsplit("/", 1)[1]
-        return {"sha": revision, "tree": {"sha": "d" * 40}}
-    if url.endswith("/git/trees/" + "d" * 40 + "?recursive=1"):
-        return {
-            "sha": "d" * 40, "truncated": False,
-            "tree": [{"path": "docs/records/release-evidence.json", "mode": "100644",
-                      "type": "blob", "sha": "e" * 40}],
-        }
     if records is None:
         records = [receipt("part:imu", gate) for gate in release.PART_GATES]
         records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
@@ -152,6 +143,19 @@ def lookup(url, records=None):
                 receipt(scope, "decision_receipt"),
                 receipt(scope, "alternative_or_parent_receipt"),
             ]
+    raw = json.dumps({"receipts": records}).encode("utf-8")
+    blob_sha = hashlib.sha1(
+        f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False,
+    ).hexdigest()
+    if "/git/commits/" in url:
+        revision = url.rsplit("/", 1)[1]
+        return {"sha": revision, "tree": {"sha": "d" * 40}}
+    if url.endswith("/git/trees/" + "d" * 40 + "?recursive=1"):
+        return {
+            "sha": "d" * 40, "truncated": False,
+            "tree": [{"path": "docs/records/release-evidence.json", "mode": "100644",
+                      "type": "blob", "sha": blob_sha}],
+        }
     if url.endswith("/issues/comments/42"):
         return {
             "html_url": REVIEW_URL,
@@ -161,7 +165,6 @@ def lookup(url, records=None):
         }
     assert url.endswith("/contents/docs/records/"
                         "release-evidence.json?ref=" + SHA)
-    raw = json.dumps({"receipts": records}).encode("utf-8")
     return {
         "type": "file", "size": len(raw), "encoding": "base64",
         "content": base64.b64encode(raw).decode("ascii"),
@@ -1635,3 +1638,22 @@ def test_optional_parent_deferral_does_not_waive_explicit_room_receipts(parent, 
     )
     assert any("room:" + parent in error and "missing receipt" in error
                for error in errors)
+
+
+@pytest.mark.parametrize("wrong_blob", [False, True])
+def test_purchase_audit_binds_decoded_record_to_git_tree_blob(wrong_blob):
+    gate = release.PART_GATES[0]
+    row = receipt("part:imu", gate)
+
+    def source(url):
+        response = lookup(url, records=[row])
+        if wrong_blob and "/git/trees/" in url:
+            response["tree"][0]["sha"] = "f" * 40
+        return response
+
+    assert release.verified_scoped_record(
+        row, SHA, source, require_git_blob=True,
+    ) is not wrong_blob
+    errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, source)
+    assert any(f"part:imu.{gate}: immutable scoped record" in error
+               for error in errors) is wrong_blob

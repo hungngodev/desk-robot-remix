@@ -586,7 +586,8 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
     return bounds[1] <= bounds[0] <= bounds[2]
 
 
-def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
+def verified_scoped_record(receipt: dict, sha: str, lookup, *,
+                           require_git_blob: bool = False) -> bool:
     """Require one matching record in a versioned docs/records/*.json file.
 
     The file must contain {"receipts": [record, ...]}, with an explicit
@@ -620,6 +621,12 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
+        if require_git_blob:
+            # Git object identity binds the exact decoded bytes to the regular tree entry.
+            blob_header = f"blob {len(raw)}\0".encode("ascii")
+            blob_sha = hashlib.sha1(blob_header + raw, usedforsecurity=False).hexdigest()
+            if not verified_regular_record_path(url, sha, lookup, expected_blob_sha=blob_sha):
+                return False
         source_revision = receipt.get("source_sha")
         digest = receipt.get("artifact_sha256")
         if digest is not None and not evidence_digest_matches(raw, digest):
@@ -792,9 +799,7 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
             errors.append(f"{scope}.{gate}: unpinned or generic signoff")
             continue
         try:
-            if (not verified_scoped_record(receipt, sha, cached_lookup)
-                    or not verified_regular_record_path(
-                        receipt["evidence_url"], sha, cached_lookup)):
+            if not verified_scoped_record(receipt, sha, cached_lookup, require_git_blob=True):
                 errors.append(f"{scope}.{gate}: immutable scoped record absent or mismatched")
             elif not verified_procurement_review(receipt, cached_lookup):
                 errors.append(f"{scope}.{gate}: authorized reviewer approval missing or mismatched")
