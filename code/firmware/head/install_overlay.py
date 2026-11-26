@@ -612,14 +612,15 @@ public:
             '''    size_t bytes_written = 0;
 #ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
     // Bound urgent-stop latency when the underlying TX channel does not
-    // drain. A 120 ms ceiling reserves time for VAD, bridge dispatch and
+    // drain. ESP-IDF takes milliseconds, not FreeRTOS ticks.
+    // A 120 ms ceiling reserves time for VAD, bridge dispatch and
     // decoder flush within the 500 ms acoustic interruption budget.
     // Physical trials must still measure underruns and audible STOP.
     // Do not ESP_ERROR_CHECK(timeout): a transient stalled TX must not
     // reboot the face or erase evidence from the microphone task.
     const esp_err_t err = i2s_channel_write(
         tx_handle_, buffer.data(), samples * sizeof(int32_t),
-        &bytes_written, pdMS_TO_TICKS(120));
+        &bytes_written, 120);
     if (err != ESP_OK) {
         // SenseReferenceCodec counts this failure without serial I/O.
         // The driver may have queued a partial frame before its error.
@@ -664,7 +665,7 @@ public:
     // a software fault fence, not a measured acoustic interruption time.
     const esp_err_t read_status = i2s_channel_read(
         rx_handle_, dest, samples * sizeof(int16_t), &bytes_read,
-        pdMS_TO_TICKS(120));
+        120);
 #else
     const esp_err_t read_status = i2s_channel_read(
         rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY);
@@ -700,9 +701,9 @@ public:
         codec_source = replace_once(
             codec_source,
             "        tx_handle_, buffer.data(), samples * sizeof(int32_t),\n"
-            "        &bytes_written, pdMS_TO_TICKS(120));",
+            "        &bytes_written, 120);",
             "        tx_handle_, buffer, samples * sizeof(int32_t),\n"
-            "        &bytes_written, pdMS_TO_TICKS(120));",
+            "        &bytes_written, 120);",
         )
         # Lock the actual PDM codec TX framing, not the Opus transport rate.
         # Keep mono DMA samples and the pinned 32-bit I2S wire format.

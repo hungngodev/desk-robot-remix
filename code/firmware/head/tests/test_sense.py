@@ -655,7 +655,9 @@ int main() {
         codec = (self.root / 'main/audio/codecs/no_audio_codec.cc').read_text()
         reader = codec.split('int NoAudioCodecSimplexPdm::Read(', 1)[1]
         self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', reader)
-        self.assertIn('pdMS_TO_TICKS(120)', reader)
+        sense_read = reader.split('#else', 1)[0]
+        self.assertIn('&bytes_read,\n        120);', sense_read)
+        self.assertNotIn('pdMS_TO_TICKS', sense_read)
         self.assertIn('read_status != ESP_OK', reader)
         sense_error = reader.split('// All Sense read errors return no samples.', 1)[1]
         self.assertNotIn('ESP_LOG', sense_error.split('#else', 1)[0])
@@ -1059,7 +1061,11 @@ int main() {
         assert "output_volume_" not in writer
         assert "PublishAcceptedLocked(sense_tx_scratch_, accepted, accepted_at_us)" in writer
         assert "i2s_channel_write(" not in writer
-        assert "pdMS_TO_TICKS(120)" in installer
+        tx = installer.split("const esp_err_t err = i2s_channel_write(", 1)[1].split(
+            "#else", 1
+        )[0]
+        assert "&bytes_written, 120);" in tx
+        assert "pdMS_TO_TICKS" not in tx
         assert "bytes_written = 0;" in installer
         assert "bytes_written % sizeof(int32_t) != 0" in installer
         assert "bytes_written > static_cast<size_t>(samples)" in installer
