@@ -785,10 +785,12 @@ bool finite_temperature(float t) { return isfinite(t) && t >= -40 && t <= 125; }
 struct FakeScd {
   bool ready = true;
   int status = 0, measurement_status = 0;
+  unsigned reads = 0;
   uint16_t ppm = 700;
   float temp = 22, humidity = 40;
   int getDataReadyStatus(bool& r) { clock_ms += 3; r = ready; return status; }
   int readMeasurement(uint16_t& p, float& t, float& rh) {
+    ++reads;
     clock_ms += 7; p = ppm; t = temp; rh = humidity; return measurement_status;
   }
 } scd;
@@ -865,6 +867,21 @@ void run_boundaries(uint32_t start) {
     assert(!scd_started && !scd_valid && last_scd_ms == sample);
     check_report(clock_ms, false);
   }
+  // The driver may populate plausible output arguments even when its
+  // transport/CRC status is nonzero. Those outputs must never commit.
+  for (int error : {1, 4, 256, -1}) {
+    for (bool readiness_failed : {false, true}) {
+      reset();
+      scd.ppm = 999; scd.temp = 31; scd.humidity = 61;
+      scd.status = readiness_failed ? error : 0;
+      scd.measurement_status = readiness_failed ? 0 : error;
+      scd_step(clock_ms);
+      assert(scd.reads == (readiness_failed ? 1U : 2U));
+      assert(!scd_started && !scd_valid && last_scd_ms == sample);
+      assert(co2_ppm == 700 && scd_temp == 22 && scd_humidity == 40);
+      check_report(clock_ms, false);
+    }
+  }
 }
 int main() {
   run(100); run(UINT32_MAX - 5);
@@ -877,11 +894,15 @@ int main() {
     source.write_text(harness)
     executable = tmp_path / "scd_completion"
     includes = ROOT / "code/firmware/room_station/src"
-    subprocess.run(
-        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
-         f"-I{includes}", str(source), "-o", str(executable)],
-        check=True, capture_output=True, text=True, timeout=30,
-    )
+    cmd = [
+        compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{includes}", str(source), "-o", str(executable),
+    ]
+    if platform.system() == "Linux":
+        cmd.append("-no-pie")
+    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
 
