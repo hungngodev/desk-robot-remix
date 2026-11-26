@@ -10,7 +10,6 @@ from typing import Awaitable, Callable
 
 from .calibration import Calibration
 from .command_framing import (
-    command_ack_matches,
     drive_duration_ms,
     expected_ack,
     validate_command,
@@ -32,6 +31,7 @@ from .operations import (
     OperationError,
     _bounded_head_reply,
     _bounded_pulse_stop,
+    _require_command_receipt,
     dispatch_job_command,
     require_active_operation,
 )
@@ -50,9 +50,10 @@ async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
         head.command("halt"), seconds=1.0,
         timeout_message="WROOM STOP transport acknowledgement unconfirmed",
     )
-    if not command_ack_matches(receipt, robot_id, expected_ack("halt")):
-        raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched")
-    return receipt
+    try:
+        return _require_command_receipt(receipt, robot_id, expected_ack("halt"))
+    except OperationError as exc:
+        raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched") from exc
 
 
 def _require_safe_fuel_sample(

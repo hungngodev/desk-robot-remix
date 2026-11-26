@@ -87,3 +87,18 @@ def test_matching_pulse_stop_is_only_a_command_receipt():
     head = ReplyHead(reply, supports_dispatch_check=False)
     assert asyncio.run(_bounded_pulse_stop(head, "robot-01")) == reply
     assert head.calls == 1
+
+
+@pytest.mark.parametrize("command", ["drive 20 20 100", "grip 90", "stop", "halt"])
+def test_command_receipts_cannot_forward_adapter_physical_claims(command):
+    reply = {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
+    head = ReplyHead(
+        {**reply, "status": "succeeded", "grasped": True, "charged": True,
+         "physical_acceptance_pass": True},
+        supports_dispatch_check=False,
+    )
+    if command == "stop":
+        result = asyncio.run(_bounded_pulse_stop(head, "robot-01"))
+    else:
+        result = asyncio.run(dispatch_job_command(head, command, lambda: None, robot_id="robot-01"))
+    assert result == reply

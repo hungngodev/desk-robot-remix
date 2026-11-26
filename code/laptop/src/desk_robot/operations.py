@@ -50,7 +50,8 @@ async def dispatch_job_command(
 def _require_command_receipt(reply: dict, robot_id: str, expected: str) -> dict:
     if type(reply) is not dict or not command_ack_matches(reply, robot_id, expected):
         raise OperationError(f"Unmatched or failed command ACK: {expected}; movement not retried")
-    return reply
+    # Only the wire acknowledgement is established; adapter extras are not evidence.
+    return {"ok": True, "robot_id": robot_id, "reply": expected}
 
 
 async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
