@@ -317,7 +317,46 @@ static void exhaustive_magnet_status_and_replay() {
   }
 }
 
+// Exercise repeated full revolutions at a qualified synthetic rate, with
+// exact one-sample speed boundaries across the 12-bit register rollover.
+static void fast_wrap_trajectories() {
+  for (int direction : {-1, 1}) {
+    for (int step : {257, 511, 600}) {
+      WheelAngleCapture wheel;
+      check(wheel.configure(12000, 100, 60));
+      const int start = direction > 0 ? 4095 : 0;
+      check(wheel.observe(angle(static_cast<std::uint16_t>(start), 1, 100), 100) ==
+            Result::Baseline);
+      for (std::uint32_t i = 1; i <= 64; ++i) {
+        const int expected = direction * step * static_cast<int>(i);
+        const auto raw = static_cast<std::uint16_t>((start + expected + 4096 * 64) % 4096);
+        const auto at = 100U + i * 50U;
+        const auto sample = angle(raw, i + 1U, at);
+        check(wheel.observe(sample, at) == Result::Delta);
+        check(wheel.last_delta() == direction * step);
+        check(wheel.angular_counts() == expected);
+        check(wheel.continuous() && wheel.segment() == 1);
+        check(wheel.observe(sample, at + 1U) == Result::Duplicate);
+        check(wheel.last_delta() == 0 && wheel.angular_counts() == expected);
+      }
+    }
+    WheelAngleCapture wheel;
+    check(wheel.configure(12000, 100, 60));
+    const auto start = static_cast<std::uint16_t>(direction > 0 ? 4095 : 0);
+    const auto beyond = static_cast<std::uint16_t>(direction > 0 ? 600 : 3495);
+    check(wheel.observe(angle(start, 1, 100), 100) == Result::Baseline);
+    // 601 counts in 50ms exceeds the 600-count bound, in either direction.
+    const auto rejected = angle(beyond, 2, 150);
+    check(wheel.observe(rejected, 150) == Result::Invalid);
+    check(!wheel.continuous() && wheel.angular_counts() == 0 && wheel.last_delta() == 0);
+    check(wheel.observe(rejected, 151) == Result::Invalid);
+    check(wheel.observe(angle(beyond, 3, 200), 200) == Result::Baseline);
+    check(wheel.segment() == 2 && wheel.angular_counts() == 0);
+  }
+}
+
 int main() {
+  fast_wrap_trajectories();
   exhaustive_magnet_status_and_replay();
   paired_delta_bounds_and_asymmetric_timeout();
   reject_zero_elapsed_new_sequence();
