@@ -103,6 +103,18 @@ def _require_fresh_auto_dock_fuel(
         raise OperationError("Autonomous dock requires fresh low battery evidence")
 
 
+def _body_fault_suffix(body: object, robot_id: str) -> str:
+    """Preserve a bounded, same-robot WROOM fault code in host job errors."""
+    if not isinstance(body, dict) or body.get("robot_id") != robot_id:
+        return ""
+    safety = body.get("safety")
+    fault = safety.get("fault") if isinstance(safety, dict) else None
+    if (type(fault) is str and fault != "none" and 0 < len(fault) <= 40
+            and fault.isascii() and fault.isidentifier() and fault.islower()):
+        return f"; WROOM safety fault={fault}"
+    return ""
+
+
 class _DockIrQueueExpired(Exception):
     pass
 
@@ -1002,8 +1014,11 @@ class Coordinator:
         active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
         if active is not None and active.robot_id == robot_id:
             self._require_navigation_body_boot(active, body)
+        fault_suffix = (
+            _body_fault_suffix(body, robot_id) if self.settings.mode == "hardware" else ""
+        )
         if not isinstance(body, dict) or body.get("armed") is not True:
-            raise OperationError("Operation stopped: body disarmed or unavailable")
+            raise OperationError("Operation stopped: body disarmed or unavailable" + fault_suffix)
         if self.settings.mode != "hardware":
             return body
         # Preflight identity alone is insufficient. Every subsequent motion
@@ -1040,7 +1055,7 @@ class Coordinator:
             or not isinstance(touch, dict)
             or touch.get("active") is not False
         ):
-            raise OperationError("Operation blocked by local sensor or corridor")
+            raise OperationError("Operation blocked by local sensor or corridor" + fault_suffix)
         _require_safe_fuel_sample(
             body.get("power"), min_cell_mv=3300, min_soc_centi=300,
             context="Operation blocked",

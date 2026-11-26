@@ -179,3 +179,24 @@ def test_invalid_aux_monitor_fault_rejects_before_context_admission(power):
     assert heard == []
     assert result.status_code == 503
     assert result.json() == {"error": "Invalid INA226 monitor fault provenance"}
+
+
+@pytest.mark.parametrize("fault", [
+    "floor_out_of_range", "front_obstacle", "stale_sample",
+    "missing_sample", "bus_failure",
+])
+def test_status_retains_reported_wroom_fault_code(fault):
+    async def status():
+        return {
+            "robot_id": "robot-01", "armed": False,
+            "safety": {"required": True, "ready": False, "fault": fault},
+        }
+
+    client, heard = _status_client({"robot-01": SimpleNamespace(status=status)})
+    with client:
+        result = client.get("/v1/robots/robot-01/status")
+    assert result.status_code == 200
+    assert result.json()["safety"]["fault"] == fault
+    assert result.json()["armed"] is False
+    assert result.json()["health"]["physical_acceptance_pass"] is False
+    assert heard[0][-1].endswith(f"safety_fault={fault}")

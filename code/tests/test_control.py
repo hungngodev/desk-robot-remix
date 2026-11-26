@@ -2814,3 +2814,48 @@ async def test_five_contenders_hold_fleet_until_matched_terminal_halt(settings, 
         for head in heads.values():
             head.reject_halt = False
         await c.close()
+
+
+@pytest.mark.parametrize("armed", [True, False])
+@pytest.mark.parametrize("fault", [
+    "floor_out_of_range", "front_obstacle", "stale_sample",
+    "missing_sample", "bus_failure",
+])
+async def test_running_health_preserves_reported_wroom_fault(settings, armed, fault):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["armed"] = armed
+    head.body_status["safety"] = {"required": True, "ready": False, "fault": fault}
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match=f"WROOM safety fault={fault}$"):
+            await coordinator._assert_armed_health("robot-01")
+        assert not head.commands
+    finally:
+        await coordinator.close()
+
+
+@pytest.mark.parametrize(("reported_id", "fault"), [
+    ("robot-02", "floor_out_of_range"),
+    ("robot-01", "none"),
+    ("robot-01", "bad\nvalue"),
+    ("robot-01", True),
+    ("robot-01", "a" * 41),
+    ("robot-01", None),
+])
+async def test_running_health_does_not_attribute_foreign_or_invalid_fault(
+    settings, reported_id, fault,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["robot_id"] = reported_id
+    head.body_status["armed"] = False
+    head.body_status["safety"] = {"fault": fault}
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError) as exc:
+            await coordinator._assert_armed_health("robot-01")
+        assert str(exc.value) == "Operation stopped: body disarmed or unavailable"
+        assert not head.commands
+    finally:
+        await coordinator.close()
