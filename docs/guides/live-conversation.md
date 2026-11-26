@@ -126,3 +126,27 @@ Observe the OLED for at least five minutes, confirm independent local motor
 stop on control loss, confirm no autonomous rearm on reconnection, and confirm
 ordinary connected quiet mode does not show the offline cue. Record the actual
 panel and motor behavior; host simulation does not qualify the physical test.
+
+## Native voice latency diagnostics
+
+The optional native overlay exposes `voice_stage_latency_ms` in its existing
+status response. This is a bounded, pull-based set of the latest observed
+monotonic spans, not per-frame logs. New human turns and invalidation discard
+obsolete timing state. Missing values mean the corresponding stage was not
+observed; they are not zero-latency results.
+
+* `vad_commit_started_to_intent_ms`: local audio commit initiation to an
+  admitted, current ASR tool intent.
+* `intent_to_tool_model_request_ms`: admitted intent to the grounded tool
+  response's HTTP model request, including tool and context work.
+* `tool_model_request_to_pcm_ms`: that HTTP request to validated decoded PCM.
+* `native_response_created_to_pcm_ms`: accepted realtime response creation
+  to its first queued PCM; this is not proof of a causal human VAD binding.
+* `native_pcm_to_first_opus_send_return_ms` and
+  `tool_pcm_to_first_opus_send_return_ms`: PCM ready to the first successful
+  Opus send return, including pacing. Neither measures acoustic playback.
+
+The provider does not expose a reliable independent inference/TTS boundary
+on every native response. No inferred stage is filled in, and no physical
+speaker acknowledgement, AEC quality or safety qualification follows from
+these timings.
