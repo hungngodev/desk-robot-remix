@@ -147,17 +147,19 @@ static void fast_floor_lane_swap() {
     Wire = TwoWire{};
     fake_i2c_lines() = FakeI2cLines{};
     fake_arduino_millis() = 100;
-    Wire.tof_lane_mm[0] = 36;
-    Wire.tof_lane_mm[1] = 79;
     desk_robot::TofBus bus;
     desk_robot::CliffGuard guard;
-    CHECK(guard.configure(calibration()));
-    CHECK(bus.begin(21, 22, -1));
+    ready(bus, guard);
+    bus.poll(guard, 60); // complete side-lane slot before next floor sweep
+    Wire.tof_lane_mm[0] = 36;
+    Wire.tof_lane_mm[1] = 79;
     const auto now = millis();
     bus.poll(guard, now);
     CHECK(Wire.ranges == 1 && bus.last_channel() == 0);
     CHECK(guard.diagnostic(0, now).distance_mm == 36);
-    CHECK(!guard.diagnostic(1, now).present);
+    CHECK(guard.diagnostic(1, now).distance_mm == 45);
+    CHECK(guard.diagnostic(1, now).age_ms > 0);
+    CHECK(guard.evaluate(now));
     const auto samples = Wire.tof_samples;
     const auto clears = Wire.tof_register_stop_transmissions;
     const auto errors = bus.errors();
@@ -175,6 +177,8 @@ static void fast_floor_lane_swap() {
       CHECK(bus.new_optical_channel() == 1);
       CHECK(guard.diagnostic(0, now).distance_mm == 36);
       CHECK(guard.diagnostic(1, now).distance_mm == 79);
+      CHECK(guard.diagnostic(1, now).age_ms == 0);
+      CHECK(guard.evaluate(now));
     } else {
       CHECK(Wire.ranges == (failure == 3 ? 2 : 1));
       CHECK(bus.errors() == errors + 1);
@@ -185,6 +189,7 @@ static void fast_floor_lane_swap() {
       CHECK(!bus.optical_diagnostic(1, now).valid);
       CHECK(!guard.diagnostic(0, now).present);
       CHECK(!guard.diagnostic(1, now).present);
+      CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
       CHECK(!guard.evaluate(now) && !guard.try_rearm(now));
     }
   }
