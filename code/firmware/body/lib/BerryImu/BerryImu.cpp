@@ -99,7 +99,9 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
     // Official InvenSense RM-MPU-6000A register map, not BerryIMU registers.
     // Wake from default sleep; all six axes; 1 kHz internal sample with
     // DLPF=3, +/-2 g and +/-250 degrees/s. No DMP or extra task.
-    ok = write_byte(gyro_address_, 0x6b, 0x01) &&
+    // Confirm the selected device before writing to it; no second bus scan.
+    ok = matches(gyro_address_, 0x75, 0x68) &&
+         write_byte(gyro_address_, 0x6b, 0x01) &&
          write_byte(gyro_address_, 0x6c, 0x00) &&
          write_byte(gyro_address_, 0x1a, 0x03) &&
          write_byte(gyro_address_, 0x19, 0x09) &&  // output rate 100Hz
@@ -153,13 +155,23 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
   return ok;
 }
 
+// A successful I2C transaction may still contain only stuck-bus fill bytes.
+// Reject the entire degenerate frame, not legitimate zero-valued axes.
+static bool ghost_mpu_frame(const std::uint8_t (&frame)[14]) {
+  if (frame[0] != 0x00 && frame[0] != 0xff) return false;
+  for (const auto byte : frame) {
+    if (byte != frame[0]) return false;
+  }
+  return true;
+}
+
 void BerryImu::poll(std::uint32_t now_ms) {
   if (!configured_ || (ever_polled_ && now_ms - last_poll_ms_ < 50U)) return;
   last_poll_ms_ = now_ms;
   ever_polled_ = true;
   if (reading_.model == BerryModel::Mpu6050) {
     std::uint8_t frame[14]{};
-    if (!read_bytes(gyro_address_, 0x3b, frame, 14)) {
+    if (!read_bytes(gyro_address_, 0x3b, frame, 14) || ghost_mpu_frame(frame)) {
       // An unreadable conversion cannot carry a previous IRQ/status forward
       // as evidence for this failed sample. Keep the historical event count
       // and edge state, so an interrupted read cannot duplicate an old IRQ.
@@ -172,7 +184,8 @@ void BerryImu::poll(std::uint32_t now_ms) {
     // event bit is independent of whether the current 20 Hz snapshot is
     // still near zero g. A failed optional status read never invents one.
     std::uint8_t status = 0;
-    reading_.low_g_status_valid = read_bytes(gyro_address_, 0x3a, &status, 1);
+    reading_.low_g_status_valid =
+        read_bytes(gyro_address_, 0x3a, &status, 1) && status != 0xff;
     reading_.low_g_irq = reading_.low_g_status_valid &&
                           (status & 0x80U) != 0U;
     if (reading_.low_g_status_valid) {

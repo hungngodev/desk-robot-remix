@@ -56,7 +56,7 @@ class BerryImu {
   }
 #if defined(ARDUINO)
   // Call only after TofBus initializes Wire on the same upstream GPIO21/22.
-  // Reuse the existing ToF owner's one-time WHO_AM_I probe, not a second scan.
+  // Reuse the ToF owner's selected address; verify MPU identity before writes.
   bool begin(TwoWire& wire, BerryModel model, std::uint8_t gyro_address,
              std::uint8_t extra_address);
   // One bounded six-axis sample at most every 50 ms. No busy waits or retry.

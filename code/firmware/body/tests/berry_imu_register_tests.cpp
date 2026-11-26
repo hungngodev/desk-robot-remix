@@ -5,14 +5,68 @@
 
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 
+static TwoWire mpu_fixture() {
+  TwoWire wire;
+  wire.registers[0x75] = 0x68;
+  wire.registers[0x3f] = 0x40; // accel Z = 1g; zero gyro is legitimate
+  return wire;
+}
+static void check_mpu_ghost_reads() {
+  using desk_robot::BerryImu;
+  using desk_robot::BerryModel;
+  for (const auto address : {0x68, 0x69}) {
+    for (const auto id : {0x00, 0xff, 0x69, 0x70}) {
+      auto wire = mpu_fixture();
+      wire.registers[0x75] = static_cast<std::uint8_t>(id);
+      BerryImu imu;
+      CHECK(!imu.begin(wire, BerryModel::Mpu6050, address, 0));
+      CHECK(!imu.configured() && wire.writes.empty());
+    }
+    auto missing_id = mpu_fixture();
+    missing_id.reject_read_reg = 0x75;
+    BerryImu missing;
+    CHECK(!missing.begin(missing_id, BerryModel::Mpu6050, address, 0));
+    CHECK(missing_id.writes.empty());
+
+    auto wire = mpu_fixture();
+    BerryImu imu;
+    CHECK(imu.begin(wire, BerryModel::Mpu6050, address, 0));
+    wire.registers[0x3a] = 0x80;
+    imu.poll(100);
+    CHECK(imu.fresh(100) && imu.reading().low_g_event_seq == 1);
+    for (const auto fill : {0x00, 0xff}) {
+      for (int i = 0; i < 14; ++i)
+        wire.registers[0x3b + i] = static_cast<std::uint8_t>(fill);
+      imu.poll(fill == 0 ? 150 : 200);
+      CHECK(!imu.reading().valid && !imu.reading().low_g_status_valid);
+      CHECK(!imu.reading().low_g_irq && imu.reading().low_g_event_seq == 1);
+      CHECK(imu.reading().at_ms == 100 && imu.reading().accel[2] == 16384);
+    }
+    for (int i = 0; i < 14; ++i) wire.registers[0x3b + i] = 0;
+    wire.registers[0x3f] = 0x40;
+    wire.registers[0x3a] = 0xff;
+    imu.poll(250);
+    CHECK(imu.fresh(250) && !imu.reading().low_g_status_valid);
+    CHECK(!imu.reading().low_g_irq && imu.reading().low_g_event_seq == 1);
+    wire.registers[0x3a] = 0x80;
+    imu.poll(300);
+    CHECK(imu.fresh(300) && imu.reading().low_g_status_valid);
+    CHECK(imu.reading().low_g_irq && imu.reading().low_g_event_seq == 1);
+    imu.poll(350);
+    CHECK(imu.fresh(350) && !imu.reading().low_g_irq);
+    CHECK(imu.reading().gyro[0] == 0 && imu.reading().accel[2] == 16384);
+  }
+}
+
 int main() {
   try {
+    check_mpu_ghost_reads();
     using desk_robot::BerryImu;
     using desk_robot::BerryModel;
     // External bus loss must invalidate current IRQ evidence, but preserve
     // the historical counter and edge fence across uint32_t rollover.
     {
-      TwoWire wire;
+      auto wire = mpu_fixture();
       BerryImu imu;
       CHECK(imu.begin(wire, BerryModel::Mpu6050, 0x69, 0));
       wire.registers[0x3a] = 0x80;
@@ -38,7 +92,7 @@ int main() {
     // An ACK without verified scale, rate or power configuration must
     // not permit calibrated MPU6050 data or any fresh sample.
     for (int reg : {0x6b, 0x6c, 0x19, 0x1a, 0x1b, 0x1c}) {
-      TwoWire unreadable;
+      auto unreadable = mpu_fixture();
       unreadable.reject_read_reg = reg;
       BerryImu candidate;
       CHECK(!candidate.begin(unreadable, BerryModel::Mpu6050, 0x68, 0));
@@ -46,7 +100,7 @@ int main() {
       candidate.poll(100);
       CHECK(!candidate.fresh(100));
 
-      TwoWire ignored;
+      auto ignored = mpu_fixture();
       ignored.ignore_write_reg = reg;
       ignored.registers[reg] = 0xff;
       CHECK(!candidate.begin(ignored, BerryModel::Mpu6050, 0x68, 0));
@@ -131,7 +185,7 @@ int main() {
                          0x68, 0x1d));
     CHECK(invalid_wire.writes.empty());
     // Real MPU register sequencing, adapted from InvenSense and i2cdevlib.
-    TwoWire mpu_wire;
+    auto mpu_wire = mpu_fixture();
     BerryImu mpu;
     CHECK(mpu.begin(mpu_wire, BerryModel::Mpu6050, 0x68, 0x00));
     CHECK(mpu.configured());
@@ -191,7 +245,7 @@ int main() {
     // INT_STATUS bit 4 (FIFO_OFLOW_INT) must not be mistaken for bit 7
     // (FF_INT), nor invalidate or replace a successful direct conversion.
     // Synthetic status bits exercise decoding, not actual FIFO draining.
-    TwoWire direct_wire;
+    auto direct_wire = mpu_fixture();
     BerryImu direct;
     CHECK(direct.begin(direct_wire, BerryModel::Mpu6050, 0x68, 0x00));
     for (const auto& write : direct_wire.writes) {
@@ -303,7 +357,7 @@ int main() {
     CHECK(fault_wire.endTransmission(true) == 5);
     CHECK(fault_wire.writes.empty() && fault_wire.registers[0x1d] == 0);
 
-    TwoWire timeout_wire;
+    auto timeout_wire = mpu_fixture();
     timeout_wire.next_stop_status = 5;
     BerryImu timeout_imu;
     CHECK(!timeout_imu.begin(timeout_wire, BerryModel::Mpu6050, 0x68, 0));
@@ -323,13 +377,13 @@ int main() {
     CHECK(timeout_imu.fresh(200));
     CHECK(timeout_imu.reading().accel[0] == 16384);
 
-    TwoWire bad_readback;
+    auto bad_readback = mpu_fixture();
     bad_readback.reject_read_reg = 0x1d;
     BerryImu unverified_ff;
     CHECK(!unverified_ff.begin(bad_readback, BerryModel::Mpu6050, 0x68, 0x00));
     CHECK(!unverified_ff.configured());
 
-    TwoWire wrong_clear_mode;
+    auto wrong_clear_mode = mpu_fixture();
     wrong_clear_mode.reject_read_reg = 0x37;
     BerryImu cannot_prove_latched_status;
     CHECK(!cannot_prove_latched_status.begin(
