@@ -17,7 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .api_dock_routes import register_dock_routes
-from .api_ingress import APIIngress, authorized_token, token_matches
+from .api_ingress import APIIngress, authorized_token, require_configured_robot, token_matches
 from .api_lifecycle import require_runtime_ready, runtime_ready
 from .api_memory_routes import (
     CoreMemoryRequest as CoreMemoryRequest,
@@ -562,6 +562,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
     async def pet_status(robot_id: str):
+        require_configured_robot(settings, robot_id)
         coordinator().robot(robot_id)
         return app.state.runtime.pet.status(robot_id)
 
@@ -594,6 +595,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.get("/v1/pet/{robot_id}/vision-status", dependencies=[Depends(authorize)])
     async def vision_status(robot_id: str):
+        require_configured_robot(settings, robot_id)
         coordinator().robot(robot_id)
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:

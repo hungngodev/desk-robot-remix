@@ -8,12 +8,23 @@ import math
 import secrets
 from collections.abc import Callable
 
+from fastapi import HTTPException
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
+
+from .config import RobotConfig, Settings
 
 MAX_REQUEST_BYTES = 64 * 1024
 BODY_TIMEOUT_SECONDS = 5.0
 MAX_JSON_DEPTH = 64
+
+
+def require_configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
+    """Resolve an exact configured identity before touching runtime state."""
+    try:
+        return settings.robot(robot_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Robot not found") from exc
 
 
 def _safe_json_body(body: bytearray) -> bool:

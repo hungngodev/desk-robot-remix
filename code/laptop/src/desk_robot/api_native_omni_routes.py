@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .api_ingress import require_configured_robot
 from .brain_context import compose_brain_context
 from .config import Settings
 from .controller import OperationError
@@ -55,6 +56,7 @@ def register_native_omni_routes(
         Images, microphones, position, charging or actuator permissions are
         not in this prompt. This is spoken personality, not physical authority.
         """
+        require_configured_robot(settings, robot_id)
         robot = coordinator().robot(robot_id)
         if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Native voice and camera need explicit opt in")

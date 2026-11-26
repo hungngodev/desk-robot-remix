@@ -12,6 +12,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .api_ingress import require_configured_robot
 from .aux import _aux_boot_epoch, _fresh_aux_acquisition, ina226_monitor_warning
 from .config import Settings
 from .transport import HeadError
@@ -101,6 +102,7 @@ def register_robot_status_routes(
         )
 
     def telemetry_head(robot_id: str):
+        require_configured_robot(settings, robot_id)
         owner = coordinator()
         owner.robot(robot_id)
         head = owner.heads.get(robot_id)
@@ -125,6 +127,7 @@ def register_robot_status_routes(
 
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
     async def status(robot_id: str, request: Request):
+        require_configured_robot(settings, robot_id)
         owner = coordinator()
         owner.robot(robot_id)
         context = requested_tool_context(request, robot_id)

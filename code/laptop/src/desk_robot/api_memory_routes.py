@@ -11,6 +11,7 @@ import time
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .api_ingress import require_configured_robot
 from .brain_context import (
     is_camera_derived_timeline_item,
     live_asr_in_current_grant,
@@ -140,10 +141,7 @@ def register_memory_routes(
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
         # Explicit operator view of bounded text provenance, never raw media.
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         records = await asyncio.to_thread(
             app.state.runtime.memory.recent, robot_id, limit=limit
         )
@@ -166,10 +164,7 @@ def register_memory_routes(
 
     @app.get("/v1/pet/{robot_id}/core-memory", dependencies=[Depends(operator)])
     async def operator_core_memory(robot_id: str):
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         facts = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=24
         )
@@ -186,10 +181,7 @@ def register_memory_routes(
              dependencies=[Depends(operator)])
     async def set_core_memory(robot_id: str, slot: str,
                               request: CoreMemoryRequest):
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         try:
             # Record authenticated request order BEFORE dispatch to a worker.
             # A delayed PUT must never restore a completed newer DELETE.
@@ -209,10 +201,7 @@ def register_memory_routes(
     @app.delete("/v1/pet/{robot_id}/core-memory/{slot}",
                 dependencies=[Depends(operator)])
     async def delete_core_memory(robot_id: str, slot: str):
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         try:
             removed = await apply_mutation(
                 app.state.runtime.memory.reserve_core_fact_mutation,
@@ -230,10 +219,7 @@ def register_memory_routes(
     async def correct_episode(
         robot_id: str, event_id: str, request: EpisodeMemoryCorrectionRequest,
     ):
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         try:
             # Reserve request order before asynchronously scheduling SQLite.
             corrected = await apply_mutation(
@@ -258,10 +244,7 @@ def register_memory_routes(
     @app.delete("/v1/pet/{robot_id}/memories/{event_id}",
                 dependencies=[Depends(operator)])
     async def delete_episode(robot_id: str, event_id: str):
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         try:
             # Even a missing episode gets a durable tombstone, so retract
             # the volatile event regardless of the returned row count.
@@ -291,10 +274,7 @@ def register_voice_context_route(
     ):
         # The language model cannot read persistent memories by default.
         # Explicit opt-in applies to the one authenticated robot identity only.
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Opt in to voice memory retrieval first")
         memory_consent_generation = settings.voice_memory_consent_generation

@@ -10,6 +10,7 @@ import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
+from .api_ingress import require_configured_robot
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
@@ -63,6 +64,7 @@ def register_readonly_context_routes(
         pack-current calibration. They NEVER certify charge, safe voltage,
         a working battery, battery capacity, or an actuator permit.
         """
+        require_configured_robot(settings, robot_id)
         coordinator().robot(robot_id)
         if settings.mode != "hardware":
             raise HTTPException(403, "Only a real WROOM fuel gauge is reported")
@@ -127,10 +129,7 @@ def register_readonly_context_routes(
         granting the model permission to inspect persistent SQLite memories.
         No raw JPEG/PCM, camera exposure claim or actuator permit is returned.
         """
-        try:
-            settings.robot(robot_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Robot not found") from exc
+        require_configured_robot(settings, robot_id)
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No current multimodal camera/sensor owner")
