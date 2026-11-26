@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from typing import Iterable, Sequence
 
 from .memory import FICTIONAL_MEMORY_KINDS, PEER_MEMORY_KINDS, CoreFact, Memory
+from .range_context import visual_range_caveat
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS
 
 
@@ -528,6 +529,9 @@ def compose_brain_context(
                 )
         elif channel == "tool":
             phrase = _format_tool_receipt(kind, item.get("content"))
+            if (phrase and kind == "visual_look"
+                    and item.get("content") != "observation_unavailable"):
+                phrase = visual_range_caveat(item, bounded_timeline) + phrase
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
