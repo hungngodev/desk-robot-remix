@@ -28,7 +28,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3.
 | WROOM GPIO | Proposed use |
 | --- | --- |
 | 16 RX / 17 TX | Sense head UART TX / RX, 115200 8N1, 3.3 V; Sense TX2 / RX1, compiled allocation |
-| 18 / 19 | Lift / grip MG90S signal |
+| 18 / 19 | Lift / grip MG90S signal (GPIO18 / LEDC4 lift, GPIO19 / LEDC5 jaw; both 50 Hz, 16 bit) |
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
 | 21 / 22 | Body I²C SDA / SCL to mux upstream |
@@ -72,15 +72,20 @@ WROOM GPIO21/22 -> selected MPU6050 0x68/0x69 on the UPSTREAM body I2C bus
   -> TCA9548A ACCESSORY mux 0x71
      CH0 CAP1188 0x29 default / 0x28 strapped + MAX30102 0x57
      CH1 APDS9960 0x39 + AS5600 nose 0x36
-     CH2 ADS1115 force 0x48
+     CH2 ADS1115 force 0x48 (AIN0 belly FSR, AIN1 jaw FSR; single-ended to GND)
      CH3 SHT41 0x44 + BMP280 0x76 (verify breakout)
      CH4 INA226 0x40 + MAX17048 0x36
-     CH5 MCP23017 0x20 (GPIOA mandatory dock, GPIOB slow reed/PIR)
+     CH5 MCP23017 0x20 (GPIOA mandatory dock, GPB0/GPB1 slow reed/PIR,
+         GPB2 lab-only haptic edge)
          + PN532 0x24 toy NFC only
      CH6 AS5600 left wheel 0x36
      CH7 AS5600 right wheel 0x36
 XIAO -> independent HEAD-owned OLED GPIO5/6 bus; NOT connected to WROOM SDA/SCL
 ```
+
+The haptic edge drives only the CD74HC123/AO3400 bench candidate described in
+[haptic-one-shot-wiring.md](haptic-one-shot-wiring.md). DRV2605L is not allocated
+in this harness. Haptic motor power and force calibration remain unqualified.
 
 The earlier ST VL6180X proposal has been superseded by the selected
 **VL53L0X**. The current `esp32_full` source scans **eight 0x29
