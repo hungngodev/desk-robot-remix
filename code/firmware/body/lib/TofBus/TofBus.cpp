@@ -161,10 +161,10 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   if (!wire_started_) return false;
   wire_.setTimeOut(10);
   if (!bus_accessible()) return false;
-  // Optional second mux: 0x71 (A0 high, A1/A2 low). No second board is
-  // required for the existing five sensor firmware, and an absent board NACK
-  // must not block prototype diagnostics. A fitted board is always set to
-  // zero selected lanes before any critical ranging transaction.
+  // TCA9548A straps: 0x70 (A2/A1/A0 low) ranges; 0x71 (A0 high) accessories.
+  // Only the five-ranger bench may omit 0x71; the eight-ranger build
+  // predeclares it in main.cpp. Clear and verify its channel mask to prevent
+  // simultaneous 0x29 responders (VL53L0X and CAP1188) on the shared bus.
   wire_.beginTransmission(kOptionalMuxAddress);
   const bool detected_optional_mux = wire_.endTransmission(true) == 0;
   // Once another accessory has observed 0x71, a later transient NACK
