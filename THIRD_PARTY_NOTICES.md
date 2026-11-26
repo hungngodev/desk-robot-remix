@@ -54,6 +54,13 @@ fonts, or other assets.
   Commercial release remains on hold until rights are resolved or
   independently licensed replacement geometry is qualified.
 
+Room station: the [toolchain lock](code/toolchain-lock.json) records the four
+commit-pinned direct drivers, the twelve historically resolved transitive
+library versions, and revision-specific upstream notice sources for all sixteen,
+including the Bosch BME68x notice. CI rejects library inventory drift. Registry
+archive bytes and the full binary redistribution bundle are not yet verified;
+retain the actual notices and satisfy the LGPL obligations before distribution.
+
 Keep dependency and model notices from the exact distributed revisions.
 Research references are not automatically incorporated dependencies.
 Generated concept layouts retain upstream mesh provenance and are not
