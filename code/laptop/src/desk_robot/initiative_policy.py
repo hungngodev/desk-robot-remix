@@ -27,8 +27,8 @@ def quiet_voice_veto(
 
 
 def cooldown_pending(*, now: float, last: float, interval: float) -> bool:
-    """The exact boundary is eligible; only admitted speech advances its clock."""
-    return now - last < interval
+    """Only a receipt in the current monotonic epoch can consume optional budget."""
+    return 0 <= now - last < interval
 
 
 def event_cooldown(
@@ -91,6 +91,9 @@ def event_window_has_capacity(
 ) -> bool:
     """Make room only by expiring old keys, never evict live admission fences."""
     if len(entries) >= _EVENT_WINDOW_CAPACITY:
-        for expired in [key for key, stamp in entries.items() if now - stamp >= window]:
+        for expired in [
+            key for key, stamp in entries.items()
+            if not cooldown_pending(now=now, last=stamp, interval=window)
+        ]:
             del entries[expired]
     return key in entries or len(entries) < _EVENT_WINDOW_CAPACITY
