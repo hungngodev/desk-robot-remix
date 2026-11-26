@@ -1,6 +1,14 @@
 #include "../src/vl53l0x_bench.cpp"
 #include <cassert>
 
+// One shared fake hardware state, without C++17 inline variables.
+bool stuck_bus = false;
+uint32_t clock_ms = 0;
+unsigned outputs_low = 0;
+std::array<unsigned, 40> low_writes{}, output_modes{}, input_reads{};
+FakeSerial Serial;
+FakeWire Wire;
+
 static void reset() {
   ready = optional_mux_present = false;
   last_report_ms = 0;

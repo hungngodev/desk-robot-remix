@@ -6,10 +6,11 @@
 #include <string>
 
 constexpr int LOW = 0, HIGH = 1, OUTPUT = 3;
-inline bool stuck_bus = false;
-inline uint32_t clock_ms = 0;
-inline unsigned outputs_low = 0;
-inline std::array<unsigned, 40> low_writes{}, output_modes{}, input_reads{};
+// Defined once by the bench test, also under C++11.
+extern bool stuck_bus;
+extern uint32_t clock_ms;
+extern unsigned outputs_low;
+extern std::array<unsigned, 40> low_writes, output_modes, input_reads;
 inline void digitalWrite(int pin, int level) {
   assert(pin >= 0 && pin < 40 && level == LOW);
   ++outputs_low;
@@ -37,4 +38,4 @@ struct FakeSerial {
     ++samples;
   }
 };
-inline FakeSerial Serial;
+extern FakeSerial Serial;

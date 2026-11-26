@@ -152,8 +152,34 @@ static void check_corrupt_complements_and_empty_batch() {
   }
 }
 
+static void check_expiry_survives_full_clock_wrap() {
+  constexpr std::uint32_t code = 0xcb34ed12U;
+  const std::uint32_t codes[2] = {code, code};
+  const bool both[2] = {true, true}, empty[2] = {false, false};
+  desk_robot::DualIrEvidence evidence;
+  evidence.accept_batch(codes, both, 100U, 10U);
+  CHECK(evidence.assess(110U).same_code);
+  evidence.accept_batch(codes, empty, 290U, 10U);
+  CHECK(evidence.assess(300U).same_code);
+  evidence.accept_batch(codes, empty, 291U, 10U);
+  CHECK(!evidence.assess(301U).same_code);
+  // Empty polls after expiry cannot make the original observations fresh
+  // again when the 32-bit clock eventually reaches the same value.
+  evidence.accept_batch(codes, empty, 100U, 10U);
+  const auto expired = evidence.assess(110U);
+  CHECK(!expired.left_fresh && !expired.right_fresh && !expired.same_code);
+  CHECK(expired.left_seq == 1 && expired.right_seq == 1);
+  CHECK(expired.left_code == 0 && expired.right_code == 0 && expired.code == 0);
+  CHECK(!expired.motor_authorized && !expired.charging_authorized);
+  evidence.accept_batch(codes, both, 100U, 10U); // duplicate watermark
+  CHECK(!evidence.assess(110U).same_code);
+  evidence.accept_batch(codes, both, 120U, 10U);
+  CHECK(evidence.assess(130U).same_code);
+}
+
 int main() {
   try {
+    check_expiry_survives_full_clock_wrap();
     check_corrupt_complements_and_empty_batch();
     check_atomic_receiver_batch();
     check_envelope_and_noise();

@@ -191,6 +191,16 @@ class DualIrEvidence {
       return;
     }
     DualIrEvidence next = *this;
+    // Retire expired sightings even during empty polls, before the 32-bit
+    // clock can wrap all the way back to their original timestamps. Preserve
+    // acquisition watermarks and diagnostic sequences for replay rejection.
+    const std::uint32_t observed_at_ms = now_ms + receipt_window_ms;
+    for (auto& side : next.sides_) {
+      if (side.valid && observed_at_ms - side.at_ms > 200U) {
+        side.code = 0;
+        side.valid = false;
+      }
+    }
     for (unsigned side = 0; side != 2; ++side) {
       if (valid[side] && !next.accept(side, codes[side], now_ms, receipt_window_ms)) {
         invalidate();

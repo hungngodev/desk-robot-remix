@@ -202,7 +202,8 @@ target_compile_options(servo_center_bench_tests PRIVATE -Wall -Wextra -Wpedantic
 add_executable(vl53l0x_bench_tests tests/vl53l0x_bench_tests.cpp)
 target_include_directories(vl53l0x_bench_tests PRIVATE tests/fakes/vl53_bench include)
 target_compile_definitions(vl53l0x_bench_tests PRIVATE DESK_ROBOT_STEPPER=1)
-target_compile_features(vl53l0x_bench_tests PRIVATE cxx_std_17)
+set_target_properties(vl53l0x_bench_tests PROPERTIES
+  CXX_STANDARD 11 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
 target_compile_options(vl53l0x_bench_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 add_executable(guarded_body_tests tests/guarded_body_tests.cpp)
 target_include_directories(guarded_body_tests PRIVATE lib/ReplyTxQueue)

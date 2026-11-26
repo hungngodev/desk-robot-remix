@@ -97,4 +97,4 @@ struct FakeWire {
   std::array<uint8_t, 12> rx_{};
   std::size_t size_ = 0, pos_ = 0;
 };
-inline FakeWire Wire;
+extern FakeWire Wire;
