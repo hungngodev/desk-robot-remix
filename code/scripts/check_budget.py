@@ -18,7 +18,7 @@ MAX_BUDGET_CENTS = int(MAX_BUDGET_USD) * 100
 MAX_BUDGET_UNITS = MAX_ACCOUNTING_UNITS
 
 
-def _money(value, *, label: str) -> int:
+def _money(value: object, *, label: str) -> int:
     """Finite nonnegative planning money, not a proof of a payable quote."""
     if value is None or type(value) is bool:
         raise ValueError(f"{label} must be a finite non-negative amount")
@@ -41,26 +41,12 @@ def _money(value, *, label: str) -> int:
         raise ValueError(f"{label} must use exact USD cents") from exc
 
 
-def budget(data, shipping=None, tax=None):
-    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-        raise ValueError("Historical budget needs an items list")
-    if data.get("currency", "USD") != "USD":
-        raise ValueError("Historical budget currency must be USD")
-    cap = _money(data.get("cap_usd"), label="Budget cap")
-    freight = _money(shipping, label="Shipping") if shipping is not None else None
-    taxes = _money(tax, label="Tax") if tax is not None else None
-    fit = data.get("fit_confirmed", False)
-    checks = data.get("readiness_checks", {})
-    if type(fit) is not bool:
-        raise ValueError("Mechanical fit must be a boolean")
-    if (not isinstance(checks, dict)
-            or any(not isinstance(name, str) or type(passed) is not bool
-                   for name, passed in checks.items())):
-        raise ValueError("Readiness checks must contain boolean results")
+def _item_totals(items: list[object]) -> tuple[int, list[str], list[str]]:
+    """Validate historical rows and return known cents and unresolved item names."""
     known_subtotal = 0
-    unknown_prices = []
-    unresolved = []
-    for row in data["items"]:
+    unknown_prices: list[str] = []
+    unresolved: list[str] = []
+    for row in items:
         if not isinstance(row, dict):
             raise ValueError("Historical budget row must be an object")
         name = row.get("item")
@@ -91,6 +77,27 @@ def budget(data, shipping=None, tax=None):
     # Bound aggregate costs too, so JSON floats retain cent resolution.
     if known_subtotal > MAX_BUDGET_CENTS:
         raise ValueError("Historical budget subtotal exceeds historical USD bound")
+    return known_subtotal, unknown_prices, unresolved
+
+
+def budget(data: object, shipping: object = None, tax: object = None) -> dict[str, object]:
+    """Report historical planning costs without granting purchase authority."""
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise ValueError("Historical budget needs an items list")
+    if data.get("currency", "USD") != "USD":
+        raise ValueError("Historical budget currency must be USD")
+    cap = _money(data.get("cap_usd"), label="Budget cap")
+    freight = _money(shipping, label="Shipping") if shipping is not None else None
+    taxes = _money(tax, label="Tax") if tax is not None else None
+    fit = data.get("fit_confirmed", False)
+    checks = data.get("readiness_checks", {})
+    if type(fit) is not bool:
+        raise ValueError("Mechanical fit must be a boolean")
+    if (not isinstance(checks, dict)
+            or any(not isinstance(name, str) or type(passed) is not bool
+                   for name, passed in checks.items())):
+        raise ValueError("Readiness checks must contain boolean results")
+    known_subtotal, unknown_prices, unresolved = _item_totals(data["items"])
     unknown_fees = [
         label for label, fee in (("shipping", freight), ("tax", taxes)) if fee is None
     ]
