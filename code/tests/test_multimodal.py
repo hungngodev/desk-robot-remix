@@ -12,7 +12,7 @@ from desk_robot.multimodal import (
     MultimodalOrchestrator,
     _frame_is_fresh,
     _prepare,
-    _score_scene_change,
+    _scene_change_mask,
     _validate_camera_raster,
     _validate_prepared_raster,
     change_fraction,
@@ -4295,9 +4295,10 @@ def test_prepared_raster_rejects_invalid_payload(jpeg, gray):
 
 
 def test_scene_score_preserves_threshold_and_clipping():
-    assert _score_scene_change(bytes([10, 20]), bytes([26, 35]), 1, 0, 16) == 1
-    assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16) == 1
-    assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16, clamp=True) == 0
+    assert _scene_change_mask(bytes([10, 20]), bytes([26, 35]), 1, 0, 16) == bytes([1, 0])
+    assert _scene_change_mask(bytes([30]), bytes([14]), 1, 0, 16) == bytes([2])
+    assert _scene_change_mask(bytes([250]), bytes([255]), 2, 0, 16) == bytes([2])
+    assert _scene_change_mask(bytes([250]), bytes([255]), 2, 0, 16, clamp=True) == bytes([0])
 
 
 @pytest.mark.parametrize("stage", ["queued", "followup"])
