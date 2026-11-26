@@ -210,16 +210,9 @@ class VisualChangeGate:
     def _reduced(jpeg: bytes) -> bytes:
         from PIL import ImageOps
 
-        # Match the shared camera hub's cheap header checks before Pillow
-        # allocates the full raster. Direct pet observations can reach this
-        # gate without passing through multimodal._prepare first.
-        if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
-            raise ValueError("Camera JPEG size invalid")
-        with Image.open(BytesIO(jpeg)) as image:
-            if image.format != "JPEG":
-                raise ValueError("Authenticated camera source must return JPEG")
-            if not 1 <= image.width <= 4096 or not 1 <= image.height <= 4096:
-                raise ValueError("Camera dimensions invalid")
+        # Direct pet observations need the same complete JPEG and bounded
+        # raster checks as native detection, before any grayscale allocation.
+        with _open_camera_jpeg(jpeg, max_bytes=4_000_000) as image:
             return ImageOps.grayscale(image).resize((64, 48)).tobytes()
 
     def observe(self, jpeg: bytes) -> bytes | None:
@@ -418,7 +411,8 @@ class OllamaScene:
         kind, summary, confidence = (
             value.get("kind"), value.get("description"), value.get("confidence")
         )
-        if type(kind) is not str or kind not in {"person", "hand", "key", "candy", "object", "scene"}:
+        if (type(kind) is not str
+                or kind not in {"person", "hand", "key", "candy", "object", "scene"}):
             return None
         if not valid_visual_text(summary, 5, 180):
             return None

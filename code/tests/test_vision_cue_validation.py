@@ -108,3 +108,19 @@ def test_negative_decoded_dimensions_are_rejected(frame, monkeypatch):
     with pytest.raises(ValueError, match="Camera dimensions invalid"):
         image_size(frame)
     candidate.verify.assert_not_called()
+
+
+def test_visual_reduction_rejects_truncated_jpeg_before_open(frame, monkeypatch):
+    from desk_robot.vision import VisualChangeGate
+
+    opener = Mock(wraps=Image.open)
+    monkeypatch.setattr(Image, "open", opener)
+    gate = VisualChangeGate()
+    with pytest.raises(ValueError, match="Bounded JPEG"):
+        gate.observe(frame[:-2])
+    opener.assert_not_called()
+    assert gate._baseline is None
+    assert gate._pixel_baseline is None
+    assert gate.observe(frame) is None
+    assert gate._baseline == frame
+    assert len(gate._pixel_baseline) == 64 * 48
