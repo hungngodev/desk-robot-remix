@@ -42,6 +42,14 @@ def test_fresh_calibrated_sighting_is_not_an_arrival_or_motor_permit():
     assert result.request_fence == fixtures()[0]
 
 
+@pytest.mark.parametrize("label", ["coin", "key", "card"])
+def test_flat_object_floor_projection_does_not_authorize_grasp(label):
+    query, owner, seen = fixtures()
+    result = resolve([replace(seen, label=label)], query=replace(query, label=label), owner=owner)
+    assert result.confirmed_floor_mm == seen.floor_mm
+    assert not result.arrived and not result.may_execute
+
+
 def test_fresh_unprojected_view_is_not_a_metric_target():
     _, _, seen = fixtures()
     result = resolve([replace(seen, projection_qualified=False)])

@@ -274,6 +274,29 @@ async def test_real_pickup_rejects_sub_three_second_hold(settings, tmp_path):
         await c.close()
 
 
+@pytest.mark.parametrize("target", ["key", "candy", "coin", "card"])
+async def test_pickup_refuses_unqualified_floor_clearance_before_motion(settings, tmp_path, target):
+    import json
+
+    config = json.loads(settings.robots[0].calibration.read_text())
+    config.update(
+        measured=True, simulation_only=False, hold_seconds=3,
+        grip_force_delta_raw=100, grip_force_limit_raw=500,
+    )
+    measured = tmp_path / "uncleared.json"
+    measured.write_text(json.dumps(config))
+    settings.mode = "hardware"
+    settings.robots[0].calibration = measured
+    c, head = make(settings)
+    try:
+        reason = "floor clearance" if target in {"key", "candy"} else "key or candy"
+        with pytest.raises(OperationError, match=reason):
+            c.pickup("robot-01", target)
+        assert not head.commands
+    finally:
+        await c.close()
+
+
 async def test_emergency_stop_reaches_body_before_blocking_job_cleanup(settings):
     from desk_robot.controller import Job
 
@@ -2365,6 +2388,7 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
     calibration.update(
         simulation_only=False, hold_seconds=3,
         grip_force_delta_raw=100, grip_force_limit_raw=500,
+        pickup_floor_clearance_mm=0.25,
     )
     measured = tmp_path / "synthetic-grasp-calibration.json"
     measured.write_text(json.dumps(calibration))

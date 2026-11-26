@@ -21,6 +21,18 @@ stands, set conservative open/closed/lift angles and measure the raised-jaw imag
 region. Set `measured=true` only after verification; reference that file in
 `local.toml`. `calibration.simulation.json` is rejected in hardware mode.
 
+Hardware pickup additionally requires `pickup_floor_clearance_mm` in the private
+measured calibration. Record the conservative minimum clearance of the complete
+jaw and lift sweep above the actual desk, including loaded deflection, assembly
+tolerances, desk unevenness and measurement error. Use an isolated fixture and
+the existing servo travel qualification; do not estimate this value from a
+camera box or homography. Missing or nonpositive clearance refuses pickup before
+jaw/lift commands. Requalify after changes to the jaw tips, linkage, endpoints,
+mount or work surface. A positive clearance does not establish object thickness
+or successful grip: a flat key may still be too thin, and the existing bounded
+tactile and visual verification must refuse an unconfirmed grasp. Coins and
+cards remain outside the supported pickup target allowlist.
+
 First verify that both the raised object and the released object will be visible
 to the fixed camera. The pickup algorithm checks upward displacement into the
 raised-jaw region, stable in two fresh frames and outside the calibrated floor

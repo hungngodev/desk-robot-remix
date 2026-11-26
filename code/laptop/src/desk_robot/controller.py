@@ -1690,6 +1690,8 @@ class Coordinator:
         if self.settings.mode == "hardware" and calibration.grip_force_delta_raw is None:
             raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
         if self.settings.mode == "hardware":
+            if not calibration.has_pickup_floor_clearance():
+                raise OperationError("Real pickup requires measured positive floor clearance")
             self._pickup_live_media(robot_id)
         camera_grant = self._camera_motion_grant()
         return self._submit(
@@ -1794,6 +1796,8 @@ class Coordinator:
         if self.settings.mode == "hardware":
             # A missing camera must stop BEFORE jaw or lift preposition.
             self._pickup_live_media(job.robot_id, camera_grant)
+            if not c.has_pickup_floor_clearance():
+                raise OperationError("Real pickup requires measured positive floor clearance")
         last_live_frame_at = float("-inf")
 
         async def observe() -> tuple[Detection, float]:

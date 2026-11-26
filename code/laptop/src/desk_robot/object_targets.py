@@ -3,6 +3,8 @@
 This accepts typed observations from the future per-robot spatial store. It
 never decodes camera frames, manufactures floor projection, or permits motion.
 A remembered position is only a search hint, never proof of arrival.
+A qualified 2D floor projection does not measure object thickness, jaw height,
+or swept clearance. Pickup must independently qualify its physical geometry.
 """
 
 from __future__ import annotations

@@ -35,6 +35,10 @@ class Calibration(BaseModel):
     ground_points_mm: list[tuple[float, float]] = Field(min_length=4)
     work_area_mm: tuple[float, float, float, float]
     grip_ground_mm: tuple[float, float]
+    # Conservative measured lower bound over the loaded jaw/lift sweep, after
+    # desk unevenness, assembly tolerance and measurement error are deducted.
+    # A 2D homography or commanded servo angle cannot supply this evidence.
+    pickup_floor_clearance_mm: float | None = Field(default=None, strict=True, gt=0)
     lifted_roi_px: tuple[float, float, float, float]
     grip_open: int = Field(default=60, strict=True, ge=60, le=120)
     grip_closed: int = Field(default=110, strict=True, ge=60, le=120)
@@ -134,6 +138,11 @@ class Calibration(BaseModel):
 
         if self.expires_at is not None and datetime.now(UTC) >= self.expires_at:
             raise ValueError("Calibration expired; re-calibrate this robot before pickup")
+
+    def has_pickup_floor_clearance(self) -> bool:
+        """Require positive measured sweep clearance, not object thickness."""
+        margin = self.pickup_floor_clearance_mm
+        return self.measured is True and type(margin) is float and 0 < margin < math.inf
 
     @classmethod
     def load(cls, path: Path) -> Self:
