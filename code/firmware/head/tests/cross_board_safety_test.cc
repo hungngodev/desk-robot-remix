@@ -45,6 +45,76 @@ void observe(BodyControl& body, LineReceiver& head, std::uint32_t now,
     }
 }
 
+void verify_urgent_stop(BodyControl& body, LineReceiver& head, LineReceiver& usb,
+                        CliffGuard& guard, std::uint32_t now) {
+    fresh(guard, now);
+    assert(frame(body, usb, "rearm\r\n", now) == "OK rearm");
+    assert(head_command(body, head, "arm", true, now) == "OK arm");
+    assert(head_command(body, head, "drive 20 20 250", true, now) ==
+           "OK drive left=20 right=20 ms=250");
+    UrgentStopGate gate;
+    UrgentStopGate::Request queued(gate, false);
+    assert(!queued.preempted());
+    {
+        UrgentStopGate::Request urgent(gate, true);
+        assert(!urgent.preempted());
+        assert(queued.preempted());
+        assert(head_command(body, head, "stop", false, now + 1) == "OK stop");
+        assert(body.state().armed);
+        assert(body.state().left == 0 && body.state().right == 0);
+        assert(body.drive_remaining(now + 1) == 0);
+    }
+    assert(queued.preempted());
+    UrgentStopGate::Request new_request(gate, false);
+    assert(!new_request.preempted());
+    assert(head_command(body, head, "drive 20 20 250", true, now + 2) ==
+           "OK drive left=20 right=20 ms=250");
+    {
+        UrgentStopGate::Request urgent(gate, true);
+        assert(new_request.preempted());
+        assert(head_command(body, head, "halt", false, now + 3) == "OK halt");
+    }
+    assert(new_request.preempted());
+    assert(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+    assert(head_command(body, head, "drive 20 20 250", true, now + 4) ==
+           "ERR drive disarmed");
+}
+
+void verify_dock_contact(BodyControl& body, LineReceiver& head, CliffGuard& guard,
+                         std::uint32_t now) {
+    body.require_dock_monitor(true);
+    AccessoryReadings readings{};
+    readings.dock.present = readings.dock.valid = true;
+    readings.dock.sample_seq = 1;
+    readings.dock.at_ms = now;
+    fresh(guard, now);
+    body.set_accessories(readings, now);
+    for (const auto contact : {&DockPinRaw::left_seated, &DockPinRaw::right_seated,
+                               &DockPinRaw::input_good}) {
+        assert(head_command(body, head, "arm", true, now) == "OK arm");
+        assert(head_command(body, head, "drive 20 20 250", true, now) ==
+               "OK drive left=20 right=20 ms=250");
+        readings.dock.*contact = true;
+        readings.dock.at_ms = ++now;
+        ++readings.dock.sample_seq;
+        fresh(guard, now);
+        body.set_accessories(readings, now);
+        assert(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+        assert(body.drive_remaining(now) == 0);
+        const auto status = head_command(body, head, "status", false, now);
+        assert(status.find("\"safety\":{\"required\":true,\"ready\":false,"
+                           "\"fault\":\"dock_power_connected\"") != std::string::npos);
+        assert(head_command(body, head, "arm", true, now) == "ERR arm dock_power_connected");
+        assert(head_command(body, head, "drive 20 20 250", true, now) == "ERR drive disarmed");
+        readings.dock.*contact = false;
+        readings.dock.at_ms = ++now;
+        ++readings.dock.sample_seq;
+        fresh(guard, now);
+        body.set_accessories(readings, now);
+        assert(!body.state().armed && body.drive_remaining(now) == 0);
+    }
+}
+
 void verify(BodyProfile profile, std::uint32_t start) {
     CliffConfig config;
     config.calibrated = true;
@@ -131,6 +201,8 @@ void verify(BodyProfile profile, std::uint32_t start) {
     }
     assert(head_command(body, head, "arm", true, now) == "ERR arm command_timeout_latched");
     assert(frame(body, head, "rearm\r\n", now) == "ERR rearm local_only");
+    verify_urgent_stop(body, head, usb, guard, now + 1);
+    verify_dock_contact(body, head, guard, now + 10);
 }
 }  // namespace
 
