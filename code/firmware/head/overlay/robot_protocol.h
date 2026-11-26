@@ -153,7 +153,7 @@ inline CosmeticMood ParseCosmeticMood(std::string_view event) {
 class CosmeticMoodCue {
 public:
     void offer(CosmeticMood mood, std::uint32_t now_ms) {
-        if (mood == CosmeticMood::kNone) return;
+        if (mood < CosmeticMood::kNeutral || mood > CosmeticMood::kSurprised) return;
         // Four moods fit in three bits. Store the remaining 29 bits as
         // eight-millisecond ticks, so the modulus EXACTLY matches the full
         // uint32_t millisecond clock wrap. The old 100 ms division did not:
