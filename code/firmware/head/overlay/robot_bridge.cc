@@ -1108,8 +1108,9 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
             camera_busy_.store(false);
             return Json(req, 503, Envelope(false, "stream worker unavailable"));
         }
+        // Optional JPEG work must yield even to Xiaozhi Opus (priority 2).
         if (xTaskCreate(CameraStreamTask, "robot_stream", 8192, async_req,
-                        3, nullptr) != pdPASS) {
+                        1, nullptr) != pdPASS) {
             Json(async_req, 503, Envelope(false, "stream task unavailable"));
             httpd_req_async_handler_complete(async_req);
             camera_busy_.store(false);
@@ -1125,7 +1126,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
             camera_busy_.store(false);
             return Json(req, 503, Envelope(false, "camera worker unavailable"));
         }
-        if (xTaskCreate(CameraTask, "robot_camera", 8192, async_req, 3, nullptr) != pdPASS) {
+        // Match the stream worker: never outrank the Opus codec task.
+        if (xTaskCreate(CameraTask, "robot_camera", 8192, async_req, 1, nullptr) != pdPASS) {
             Json(async_req, 503, Envelope(false, "camera task unavailable"));
             httpd_req_async_handler_complete(async_req);
             camera_busy_.store(false);
