@@ -53,7 +53,10 @@ class TofBus {
   // A stuck line first faults the guard; a later poll may clear the bus.
   // Any bus fault or invalid data immediately feeds the local CliffGuard.
   void poll(CliffGuard& guard, std::uint32_t now_ms);
-  bool ready() const { return initialized_; }
+  bool ready() const { return initialized_ && boot_health_mask_ == kRequiredBootMask; }
+  // Startup diagnostics only; fresh optical clearance and local rearm
+  // remain separate requirements. A failed boot can expose a partial mask.
+  std::uint8_t boot_health_mask() const { return boot_health_mask_; }
   // Other synchronous Wire clients must never run while recovery owns GPIOs
   // or when Wire initialization failed. No motion authorization follows.
   bool bus_accessible() const {
@@ -96,6 +99,8 @@ class TofBus {
   static constexpr std::uint8_t kSensorAddress = 0x29;
   static constexpr std::uint8_t kFloorAndFrontCount = 5;
   static constexpr std::uint8_t kRangeCount = 5 + (DESK_ROBOT_EXTRA_RANGERS ? 3 : 0);
+  static constexpr std::uint8_t kRequiredBootMask =
+      static_cast<std::uint8_t>((1U << kRangeCount) - 1U);
   static constexpr std::uint8_t kMaxSampleBytes = 12;
   TwoWire& wire_ = Wire;
   VL53L0X devices_[kRangeCount]{};
@@ -120,6 +125,7 @@ class TofBus {
   };
   ExtraSample extra_[3]{};
   bool initialized_ = false;
+  std::uint8_t boot_health_mask_ = 0;
   bool wire_started_ = false;
   int sda_pin_ = -1;
   int scl_pin_ = -1;

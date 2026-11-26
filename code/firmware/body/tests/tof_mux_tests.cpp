@@ -23,6 +23,7 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(guard.configure(calibration()));
   CHECK(bus.begin(21, 22, -1));
   CHECK(bus.ready());
+  CHECK(bus.boot_health_mask() == (DESK_ROBOT_EXTRA_RANGERS ? 0xffU : 0x1fU));
   CHECK(Wire.getTimeOut() == 10);
   CHECK(Wire.tof_init_timeouts.size() == (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U));
   for (auto timeout : Wire.tof_init_timeouts) CHECK(timeout == 80);
@@ -1055,6 +1056,7 @@ int main() {
         desk_robot::TofBus bus;
         CHECK(!bus.begin(21, 22, -1));
         CHECK(!bus.ready());
+        CHECK(bus.boot_health_mask() == 0 && Wire.ranges == 0);
         injected = false;
         desk_robot::CliffGuard guard;
         CHECK(guard.configure(calibration()));
@@ -1067,6 +1069,20 @@ int main() {
         for (std::uint8_t lane = 0; lane < 5; ++lane)
           CHECK(!guard.diagnostic(lane, 50).present);
       }
+    }
+    {
+      // Restarting the same instance must discard prior successful lane bits.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      CHECK(bus.begin(21, 22, -1));
+      CHECK(bus.boot_health_mask() == (DESK_ROBOT_EXTRA_RANGERS ? 0xffU : 0x1fU));
+      Wire.tof_missing_lanes = 1;
+      CHECK(!bus.begin(21, 22, -1));
+      CHECK(!bus.ready() && bus.boot_health_mask() == 0 && Wire.ranges == 0);
+      Wire.tof_missing_lanes = 0;
+      CHECK(bus.begin(21, 22, -1));
+      CHECK(bus.ready());
     }
     {
       // Per-lane faults must not be hidden by a healthy shared mux or by
@@ -1083,6 +1099,8 @@ int main() {
           desk_robot::TofBus bus;
           CHECK(!bus.begin(21, 22, -1));
           CHECK(!bus.ready());
+          CHECK(bus.boot_health_mask() == static_cast<unsigned>(mask - 1U));
+          CHECK(Wire.ranges == 0);
           const bool missing = fault == &TwoWire::tof_missing_lanes;
           CHECK(Wire.tof_init_timeouts.size() == static_cast<unsigned>(lane) + (missing ? 0U : 1U));
           const bool calibration_timeout = fault == &TwoWire::tof_spad_timeout_lanes ||

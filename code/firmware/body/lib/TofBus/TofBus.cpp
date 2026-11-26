@@ -141,6 +141,7 @@ bool TofBus::recover_bus() {
 
 bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   initialized_ = false;
+  boot_health_mask_ = 0;
   sda_pin_ = sda;
   scl_pin_ = scl;
   mux_reset_pin_ = mux_reset_pin;
@@ -185,10 +186,19 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
     VL53L0X& sensor = devices_[channel];
     sensor.setBus(&wire_);
     sensor.setTimeout(80);
-    if (!select(channel) || !sensor.init() || sensor.timeoutOccurred() ||
-        !sensor.setMeasurementTimingBudget(33000)) return false;
+    if (!select(channel)) return false;
+    if (!sensor.init() || sensor.timeoutOccurred() ||
+        !sensor.setMeasurementTimingBudget(33000)) {
+      if (!quiesce_range_mux()) recovery_quarantine_ = true;
+      return false;
+    }
     sensor.startContinuous();
-    if (sensor.last_status != 0 || sensor.timeoutOccurred()) return false;
+    if (sensor.last_status != 0 || sensor.timeoutOccurred()) {
+      if (!quiesce_range_mux()) recovery_quarantine_ = true;
+      return false;
+    }
+    // Record startup evidence only after this isolated sensor is started.
+    boot_health_mask_ |= static_cast<std::uint8_t>(1U << channel);
   }
   // Continuous ranging runs inside each sensor with its mux lane closed.
   // Verify both muxes are isolated before reporting startup ready.
@@ -196,8 +206,8 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   const bool range_closed = quiesce_range_mux();
   if (!optional_closed || !range_closed) return false;
   next_channel_ = 0;
-  initialized_ = true;
-  return true;
+  initialized_ = boot_health_mask_ == kRequiredBootMask;
+  return ready();
 }
 
 ImuIdentity TofBus::probe_imu() {
@@ -340,7 +350,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
   rejected_channel_ = 255;
-  if (!initialized_) {
+  if (!ready()) {
     failed(guard);
     return;
   }
