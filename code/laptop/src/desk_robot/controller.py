@@ -35,6 +35,7 @@ from .operations import (
     dispatch_job_command,
     require_active_operation,
 )
+from .sensor_event_contract import is_valid_fuel_measurement
 from .transport import Head, HeadError
 from .vision import Detection, Vision, image_size
 
@@ -73,8 +74,7 @@ def _require_safe_fuel_sample(
         return
     cell_mv = power.get("cell_mv")
     soc_centi = power.get("soc_centi")
-    if (type(cell_mv) is not int or not 2500 <= cell_mv <= 4500
-            or type(soc_centi) is not int or not 0 <= soc_centi <= 10000):
+    if not is_valid_fuel_measurement(cell_mv, soc_centi):
         raise OperationError(f"{context}: malformed battery telemetry")
     if cell_mv < min_cell_mv or soc_centi < min_soc_centi:
         raise OperationError(depleted_message)
@@ -91,8 +91,8 @@ def _require_fresh_auto_dock_fuel(
             or not 0 <= power["fuel_age_ms"] < 500
             or type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms < 500
             or power["fuel_age_ms"] + elapsed_ms >= 500
-            or type(power.get("soc_centi")) is not int
-            or not 0 <= power["soc_centi"] <= max_soc_centi):
+            or not is_valid_fuel_measurement(power.get("cell_mv"), power.get("soc_centi"))
+            or power["soc_centi"] > max_soc_centi):
         raise OperationError("Autonomous dock requires fresh low battery evidence")
 
 

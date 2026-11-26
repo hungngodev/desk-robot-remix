@@ -49,6 +49,12 @@ def is_uint(value: object, upper: int) -> TypeGuard[int]:
     """Accept a nonnegative wire integer with an inclusive upper bound."""
     return is_int_in_range(value, 0, upper)
 
+
+def is_valid_fuel_measurement(cell_mv: object, soc_centi: object) -> bool:
+    """Match the WROOM MAX17048 claimed-valid measurement envelope."""
+    return is_int_in_range(cell_mv, 2500, 4500) and is_int_in_range(soc_centi, 0, 10000)
+
+
 class _ClimateReading(TypedDict):
     temp_centi: int
     rh_centi: int

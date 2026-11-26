@@ -1638,7 +1638,8 @@ def test_autonomous_dock_retry_rejects_malformed_recovery(tmp_path, boot, seq, p
 def test_auto_dock_fuel_preflight_rejects_stale_or_recovered_evidence(changes, elapsed):
     from desk_robot.controller import _require_fresh_auto_dock_fuel
 
-    power = {"fuel_valid": True, "fuel_seq": 7, "fuel_age_ms": 10, "soc_centi": 1800}
+    power = {"fuel_valid": True, "fuel_seq": 7, "fuel_age_ms": 10,
+             "soc_centi": 1800, "cell_mv": 3800}
     _require_fresh_auto_dock_fuel(power, max_soc_centi=2000, elapsed_ms=0)
     with pytest.raises(OperationError, match="fresh low battery"):
         _require_fresh_auto_dock_fuel(
