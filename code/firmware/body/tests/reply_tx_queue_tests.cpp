@@ -55,7 +55,93 @@ void test_distinct_urgent_receipt_survives_duplicate_burst() {
   }
 }
 
+// Move the next round's normal ring start exactly one byte forward modulo 17.
+void advance_ring(desk_robot::ReplyTxQueue<17>& queue, FakeSerial& serial,
+                  std::string& expected, std::size_t refill_bytes) {
+  const auto send = [&](std::size_t length) {
+    const std::string frame(length - 2, 'a');
+    assert(queue.enqueue_line(frame.c_str()));
+    expected += frame + "\r\n";
+    while (queue.pending()) {
+      serial.free = 32;
+      assert(queue.drain(serial) == 1);
+    }
+  };
+  if (refill_bytes == 0) {
+    send(3);
+    send(15);
+  } else {
+    send(18 - refill_bytes);
+  }
+  assert(serial.sent == expected);
+}
+
+// Cover every physical ring start and every split of the first status frame.
+// Refill freed normal bytes before the urgent burst and keep flooding while
+// the UART alternates between blocked and single-byte writes.
+void test_urgent_under_sustained_ring_pressure() {
+  for (std::size_t split = 0; split <= 8; ++split) {
+    desk_robot::ReplyTxQueue<17> queue;
+    FakeSerial serial;
+    std::string expected;
+    std::size_t drops = 0;
+    for (std::size_t round = 0; round < 17; ++round) {
+      assert(queue.enqueue_line("abcdef"));
+      assert(queue.enqueue_line("1234567"));
+      assert(queue.pending() == 17);
+      serial.per_write = 1;
+      for (std::size_t i = 0; i < split; ++i) {
+        serial.free = 1;
+        assert(queue.drain(serial) == 1);
+      }
+      const std::string refill(split >= 3 ? split - 2 : 0, 'r');
+      if (!refill.empty()) assert(queue.enqueue_line(refill.c_str()));
+      const char* first = round % 2 ? "OK halt" : "OK stop";
+      const char* other = round % 2 ? "OK stop" : "OK halt";
+      assert(queue.enqueue_priority_line(first));
+      assert(queue.enqueue_priority_line(first));
+      assert(queue.enqueue_priority_line(other));  // replace only duplicate tail
+      ++drops;
+      const std::size_t before = queue.pending();
+      for (const int free : {0, -1, 0}) {
+        serial.free = free;
+        assert(queue.drain(serial) == 0);
+        assert(queue.pending() == before);
+      }
+      // At most the already-started status and first urgent receipt precede
+      // the second urgent slot. Flood attempts cannot extend this bound.
+      const std::size_t first_end = (split > 0 && split < 8 ? 8 - split : 0) + 9;
+      serial.per_write = 7;
+      for (std::size_t i = 0; i < first_end;) {
+        assert(!queue.enqueue_line("012345678901234"));
+        ++drops;
+        serial.free = 32;
+        const auto written = queue.drain(serial, first_end - i);
+        assert(written > 0 && written <= 7);
+        i += written;
+        assert(queue.pending() == before - i);
+      }
+      serial.per_write = 1;
+      assert(queue.enqueue_priority_line(first));  // reuse the freed urgent slot
+      assert(!queue.enqueue_priority_line(other));
+      ++drops;
+      const std::string urgent = std::string(first) + "\r\n" + other + "\r\n" + first + "\r\n";
+      expected += split == 0 ? urgent + "abcdef\r\n" : "abcdef\r\n" + urgent;
+      expected += "1234567\r\n";
+      if (!refill.empty()) expected += refill + "\r\n";
+      for (std::size_t i = 0; queue.pending() && i < 44; ++i) {
+        serial.free = 32;
+        assert(queue.drain(serial) == 1);
+      }
+      assert(queue.pending() == 0 && queue.dropped() == drops);
+      assert(serial.sent == expected);
+      advance_ring(queue, serial, expected, refill.empty() ? 0 : split);
+    }
+  }
+}
+
 int main() {
+  test_urgent_under_sustained_ring_pressure();
   test_distinct_urgent_receipt_survives_duplicate_burst();
   desk_robot::ReplyTxQueue<128> head, usb;
   const std::string status(94, 's');
