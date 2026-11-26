@@ -30,7 +30,8 @@ floor clearance and gripping ability are unproven.
 5. Follow [wiring](../hardware/wiring.md) and [body build](build.md). Physically
    unplug drive motors and remove **both** servo horns, then use only the
    isolated USB one-shot fixture to command each unloaded servo to nominal
-   90 degrees. Confirm its 400 ms PWM output has detached and **remove
+   90 degrees. The WROOM fixture uses GPIO18 for lift and GPIO19 for jaw,
+   with 50 Hz PWM, as defined in `BodyPins.h`. Confirm its 400 ms PWM output has detached and **remove
    servo power** before attaching the horns or linkage. `arm` on the normal
    body firmware cannot be used for this unqualified step. Measure the
    actual safe lift travel and jaw geometry on a collision-free fixture
@@ -69,6 +70,12 @@ python3 code/scripts/check_trials.py --robot robot-01 --require-pass
 
 For a separate private record, supply `--file` with its actual CSV path.
 A nonzero result is a hold; do not replace measured rows with simulated trials.
+A zero exit from `--require-pass` alone is only the outcome score, not physical
+qualification. For manifest-backed A5 evidence, also supply
+`--run-manifest PATH --require-manifest` with the real run manifest binding the
+CSV SHA-256, firmware, calibration, assembly, commit and named reviewer. The
+script reports `MANIFEST_VERIFIED_PENDING_SIGNOFF`, not completed physical
+signoff, even when the manifest and outcome score pass.
 
 Allowed remedies are small jaw tips, clearances, spacers and brackets. Fusion MCP
 must be available before CAD editing; inspect the active design and preserve
