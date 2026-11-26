@@ -1078,3 +1078,54 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_partial_room_profile_is_explicit_at_receipt_and_after_expiry():
+    from desk_robot.room_station import SENSORS, RoomStationDecoder, fresh_room_summary
+
+    decoder = RoomStationDecoder()
+    readings = {
+        "scd40": {"valid": True, "sample_ms": 1000, "co2_ppm": 630,
+                  "temp_c": 22, "humidity_pct": 40},
+        "bme688": {"valid": True, "sample_ms": 1000, "temp_c": 22,
+                   "humidity_pct": 40, "pressure_pa": 100000, "gas_ohms": 12345},
+        "ld2410c": {"valid": True, "sample_ms": 1000, "presence": False,
+                    "moving": False, "stationary": False,
+                    "moving_cm": 0, "stationary_cm": 0},
+        "soil": {"valid": True, "sample_ms": 1000, "raw_adc": 2100},
+        "amg8833": {"valid": True, "sample_ms": 1000, "pixels_c": [22] * 64},
+    }
+    payload = {"v": 1, "station": "room-pod-01", "seq": 1,
+               "at_ms": 1000, "readings": readings}
+    full = decoder.accept(json.dumps(payload), now=10.0)
+    assert set(full.sensor_ages_ms) == set(SENSORS)
+    assert not full.summary.startswith("Partial room profile")
+    assert fresh_room_summary(full, now=13.001) == (
+        "Partial room profile (1/5 fresh sensors): Station CO2 630 ppm"
+    )
+    assert fresh_room_summary(full, now=18.501) is None
+
+    # Explicitly invalidated sources must not inherit the fresh BME sample.
+    for sensor in SENSORS:
+        readings[sensor] = {"valid": False}
+    readings["bme688"] = {
+        "valid": True, "sample_ms": 2000, "temp_c": 23, "humidity_pct": 41,
+        "pressure_pa": 100001, "gas_ohms": 12346,
+    }
+    payload.update(seq=2, at_ms=2000)
+    partial = decoder.accept(json.dumps(payload), now=11.0)
+    assert partial.readings["scd40"] == {"valid": False}
+    assert partial.readings["soil"] == {"valid": False}
+    assert partial.sensor_ages_ms == {"bme688": 0}
+    assert partial.summary.startswith("Partial room profile (1/5 fresh sensors): ")
+    assert "Station air 23.0 C" in partial.summary
+    assert "CO2" not in partial.summary
+    assert "soil" not in partial.summary
+    assert fresh_room_summary(partial, now=11.0) == partial.summary
+
+    readings["bme688"] = {"valid": False}
+    payload.update(seq=3, at_ms=3000)
+    empty = decoder.accept(json.dumps(payload), now=12.0)
+    assert empty.sensor_ages_ms == {}
+    assert empty.summary == "No fresh room station measurements"
+    assert fresh_room_summary(empty, now=12.0) is None

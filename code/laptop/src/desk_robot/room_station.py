@@ -206,7 +206,12 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
         pixels = thermal["pixels_c"]
         bits.append(f"Station thermal raw {min(pixels):.1f}..{max(pixels):.1f} C "
                     "(64 unclassified pixels)")
-    return "; ".join(bits)[:400] if bits else "No fresh room station measurements"
+    if not bits:
+        return "No fresh room station measurements"
+    fresh_count = sum(readings[sensor]["valid"] for sensor in SENSORS)
+    prefix = (f"Partial room profile ({fresh_count}/{len(SENSORS)} fresh sensors): "
+              if fresh_count < len(SENSORS) else "")
+    return (prefix + "; ".join(bits))[:400]
 
 
 def fresh_room_summary(observation: RoomObservation, *, now: float) -> str | None:
