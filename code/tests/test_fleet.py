@@ -1101,3 +1101,28 @@ async def test_group_budget_counts_streamed_turn_once(fleet):
     assert len(await conversation.run(IDS[:2], "Stream")) == 6
     assert len(speaker.spoken) == 12
     assert await conversation.run(IDS[:2], "No new allowance") == []
+
+
+def test_five_pet_motion_fence_requires_each_missing_stop_receipt():
+    from desk_robot.motion_authority import StopConfirmationTracker
+
+    ids = [f"robot-{i:02}" for i in range(1, 6)]
+    tracker = StopConfirmationTracker(ids)
+    first, second, *peers = ids
+    # A disconnected owner and another unconfirmed body independently fence
+    # fleet admission, even after the job owner has been cleared.
+    for robot_id in (first, second):
+        tracker.finish(robot_id, tracker.begin(robot_id), acknowledged=False)
+    for robot_id in peers:
+        tracker.finish(robot_id, tracker.begin(robot_id), acknowledged=True)
+        assert tracker.fleet_block_reason(None) is not None
+    recovery = tracker.begin(first)
+    assert tracker.fleet_block_reason(None) is not None
+    tracker.finish(first, recovery, acknowledged=True)
+    assert not tracker.blocked(first)
+    assert tracker.blocked(second)
+    assert tracker.fleet_block_reason(None) is not None
+    recovery = tracker.begin(second)
+    assert tracker.fleet_block_reason(None) is not None
+    tracker.finish(second, recovery, acknowledged=True)
+    assert tracker.fleet_block_reason(None) is None
