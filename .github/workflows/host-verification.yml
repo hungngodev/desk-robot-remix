@@ -466,7 +466,8 @@ jobs:
               echo "::error::Unexpected assignment for $flag in default sdkconfig"
               exit 1
             fi
-            awk -v flag="$flag" '$1 == "#define" && $2 == flag && $3 != "0" { bad = 1 } END { exit bad }' build/config/sdkconfig.h
+            # Firmware uses #ifdef: even a definition of 0 enables the feature.
+            awk -v flag="$flag" '$1 == "#define" && $2 == flag { bad = 1 } END { exit bad }' build/config/sdkconfig.h
           done
 
       - name: Prepare private opt-in Sense PCM compiler coverage

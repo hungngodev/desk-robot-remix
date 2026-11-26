@@ -301,6 +301,6 @@ def test_default_sense_ci_audio_privacy(tmp_path, flag, fault):
         ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
     )
-    assert (result.returncode == 0) == (fault in {"none", "zero_header"}), (
+    assert (result.returncode == 0) == (fault == "none"), (
         result.stdout + result.stderr
     )
