@@ -460,9 +460,9 @@ def register(conn):
         existing = connections.get(conn.device_id)
         if existing is not None and existing is not conn:
             raise RuntimeError("Duplicate live Xiaozhi device identity")
-        if connections.get(conn.device_id) is not conn:
-        _retire_session_context(conn.device_id)
-    connections[conn.device_id] = conn
+        if existing is not conn:
+            _retire_session_context(conn.device_id)
+        connections[conn.device_id] = conn
 
 
 def unregister(conn):

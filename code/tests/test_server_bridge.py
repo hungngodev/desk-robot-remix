@@ -4179,10 +4179,10 @@ async def test_peer_reconnect_preserves_active_speaker_lease(bridge, monkeypatch
         assert not first_tool.is_set()
 
 
-def test_unmapped_session_replacement_retires_only_its_tool_context(bridge, monkeypatch):
+def test_session_replacement_retires_only_its_tool_context(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
-    old = conn("unmapped")
-    replacement = conn("unmapped")
+    old = conn("mac-01")
+    replacement = conn("mac-01")
     peer = conn("mac-02")
     bridge.register(old)
     bridge.register(peer)
@@ -4190,9 +4190,13 @@ def test_unmapped_session_replacement_retires_only_its_tool_context(bridge, monk
     peer_signal = bridge.tool_turn_cancel_event(peer.device_id)
     bridge.register(old)
     assert bridge.tool_turn_cancel_event(old.device_id) is old_signal
-    bridge.register(replacement)
-    assert old_signal.is_set()
+    with pytest.raises(RuntimeError, match="Duplicate"):
+        bridge.register(replacement)
+    assert not old_signal.is_set()
+    # A registry replacement by an integration must not inherit an old event.
+    bridge.connections[old.device_id] = replacement
     successor_signal = bridge.tool_turn_cancel_event(replacement.device_id)
+    assert old_signal.is_set()
     assert successor_signal is not old_signal and not successor_signal.is_set()
     bridge.unregister(old)
     assert bridge.connections[replacement.device_id] is replacement
@@ -4203,3 +4207,5 @@ def test_unmapped_session_replacement_retires_only_its_tool_context(bridge, monk
     bridge.unregister(replacement)
     assert successor_signal.is_set()
     assert not peer_signal.is_set()
+    bridge.register(conn("unmapped"))
+    assert "unmapped" not in bridge.connections
