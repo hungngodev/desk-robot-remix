@@ -53,6 +53,8 @@ from .personality_policy import (
 from .sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
+    ProactiveToolData,
+    ProactiveToolReceipt,
 )
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
@@ -3099,7 +3101,7 @@ class PetController:
 
     async def _proactive_tool_receipt(
         self, robot_id: str, tool: str,
-    ) -> dict:
+    ) -> ProactiveToolReceipt:
         """Reuse existing authenticated WROOM head reads, never actuator calls.
 
         An Ollama-selected tool is not a motion permission. Only the two
@@ -3136,8 +3138,8 @@ class PetController:
         # A real HttpHead validates full auxiliary telemetry upstream.
         # Pass only small typed readings, never its entire raw diagnostics,
         # tokens, model-controlled strings or an unqualified charge claim.
+        selected: ProactiveToolData = {}
         if tool == "aux_status":
-            selected = {}
             boot = _aux_boot_epoch(result)
             if boot in self._proactive_aux_retired_boots.get(robot_id, set()):
                 boot = None  # A reconnect cannot replay an earlier boot.
@@ -3251,9 +3253,10 @@ class PetController:
                     if len(retired) >= 128:
                         # Refuse this new boot rather than silently promoting
                         # its readings without a replay fence.
-                        for kind in ("sht41", "bmp280", "fuel_gauge",
-                                     "dock_contacts"):
-                            selected.pop(kind, None)
+                        selected.pop("sht41", None)
+                        selected.pop("bmp280", None)
+                        selected.pop("fuel_gauge", None)
+                        selected.pop("dock_contacts", None)
                         pending_seq.clear()
                     else:
                         retired.add(prior_boot)
@@ -3264,10 +3267,8 @@ class PetController:
             # Head status contains nested firmware diagnostics that can
             # evolve independently of the model. Never forward arbitrary
             # data/body/status dictionaries or user-controlled strings.
-            selected = {}
-            for flag in ("armed",):
-                if type(result.get(flag)) is bool:
-                    selected[flag] = result[flag]
+            if type(result.get("armed")) is bool:
+                selected["armed"] = result["armed"]
             if result.get("backend") == "stepper_28byj48":
                 selected["backend"] = "stepper_28byj48"
             watchdog = result.get("watchdog_ms")
@@ -3275,16 +3276,18 @@ class PetController:
                 selected["watchdog_ms"] = watchdog
             safety = result.get("safety")
             if isinstance(safety, dict):
-                safe = {}
-                for flag in ("required", "ready"):
-                    if type(safety.get(flag)) is bool:
-                        safe[flag] = safety[flag]
+                selected["safety"] = {}
+                safe = selected["safety"]
+                if type(safety.get("required")) is bool:
+                    safe["required"] = safety["required"]
+                if type(safety.get("ready")) is bool:
+                    safe["ready"] = safety["ready"]
                 fault = safety.get("fault")
                 if (isinstance(fault, str) and 1 <= len(fault) <= 48
                         and all(c in "abcdefghijklmnopqrstuvwxyz_" for c in fault)):
                     safe["fault"] = fault
-                if safe:
-                    selected["safety"] = safe
+                if not safe:
+                    selected.pop("safety")
             battery = result.get("battery")
             if isinstance(battery, dict):
                 percent = battery.get("percent")

@@ -10219,3 +10219,31 @@ async def test_pet_initiative_windows_stay_bounded_during_one_thousand_candidate
     finally:
         state.enabled = False
         await pet.close()
+
+def test_proactive_tool_receipt_type_contract():
+    from typing import Literal, get_type_hints
+
+    from desk_robot.sensor_event_contract import ProactiveToolData, ProactiveToolReceipt
+
+    assert get_type_hints(PetController._proactive_tool_receipt)["return"] is ProactiveToolReceipt
+    hints = get_type_hints(ProactiveToolReceipt)
+    assert hints["data"] is ProactiveToolData
+    assert hints["verified_motion"] == Literal[False]
+    assert hints["verified_charging"] == Literal[False]
+    assert hints["untrusted_observation_not_instructions"] == Literal[True]
+    assert not ProactiveToolData.__required_keys__
+    data = get_type_hints(ProactiveToolData)
+    assert set(data) == {
+        "sht41", "bmp280", "fuel_gauge", "proximity", "nfc",
+        "dock_contacts", "armed", "backend", "watchdog_ms", "safety", "battery", "data",
+    }
+    for field, key in [
+        ("bmp280", "physically_verified"),
+        ("fuel_gauge", "qualified"),
+        ("proximity", "physically_qualified"),
+        ("dock_contacts", "charging_verified"),
+        ("battery", "physically_qualified"),
+        ("data", "physical_contacts_verified"),
+    ]:
+        assert get_type_hints(data[field])[key] == Literal[False]
+
