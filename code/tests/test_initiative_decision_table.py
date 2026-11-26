@@ -8,7 +8,10 @@ from desk_robot.initiative_policy import (
 )
 
 
-@pytest.mark.parametrize("local,scheduled,human", itertools.product((False, True), repeat=3))
+_BOOLEAN_TRIPLES = tuple(itertools.product((False, True), repeat=3))
+
+
+@pytest.mark.parametrize("local,scheduled,human", _BOOLEAN_TRIPLES)
 def test_quiet_voice_reason_precedence(local, scheduled, human):
     calls = []
 
@@ -26,7 +29,7 @@ def test_quiet_voice_reason_precedence(local, scheduled, human):
     assert len(calls) == int(not local and not scheduled)
 
 
-@pytest.mark.parametrize("first,second,third", itertools.product((False, True), repeat=3))
+@pytest.mark.parametrize("first,second,third", _BOOLEAN_TRIPLES)
 def test_first_initiative_veto_evaluates_only_until_first_blocker(first, second, third):
     calls = []
     rules = [("first", first), ("second", second), ("third", third)]
