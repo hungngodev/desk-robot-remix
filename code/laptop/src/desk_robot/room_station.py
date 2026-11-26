@@ -273,7 +273,10 @@ class RoomStationDecoder:
             if len(line) > MAX_FRAME_BYTES:
                 raise ValueError("Oversized room station USB frame")
             line = line.decode("utf-8", errors="strict")
-        if not isinstance(line, str) or not 1 <= len(line.encode("utf-8")) <= MAX_FRAME_BYTES:
+        # Text callers (including offline diagnostics) must not allocate an
+        # unbounded UTF-8 copy merely to check the frame's byte limit.
+        if (not isinstance(line, str) or not 1 <= len(line) <= MAX_FRAME_BYTES
+                or len(line.encode("utf-8")) > MAX_FRAME_BYTES):
             raise ValueError("Invalid station USB line")
         # Only a single optional LF or CRLF terminator is part of the wire format.
         # json.loads otherwise accepts embedded tabs, carriage returns and LF

@@ -78,3 +78,20 @@ def test_usb_recovery_after_split_line_64k_garbage_and_duplicate_keys(monkeypatc
     assert feed.received == 1
     assert feed.rejected == 4  # split, entire garbage line, duplicate, control
     assert feed.callback_failures == 0
+
+
+def test_oversized_text_rejected_before_utf8_allocation():
+    class OversizedText(str):
+        def encode(self, *args, **kwargs):
+            pytest.fail("Oversized text must not be encoded")
+
+    with pytest.raises(ValueError, match="Invalid station USB line"):
+        RoomStationDecoder().accept(OversizedText("x" * 65536), now=1.0)
+
+
+def test_text_frame_limit_counts_utf8_bytes_not_characters():
+    raw = _frame().decode()
+    text = raw.replace("room-pod-01", "é" * (MAX_FRAME_BYTES // 2))
+    assert len(text) < MAX_FRAME_BYTES < len(text.encode())
+    with pytest.raises(ValueError, match="Invalid station USB line"):
+        RoomStationDecoder().accept(text, now=1.0)
