@@ -317,11 +317,6 @@ private:
 #else
             const bool face_available = idle;
 #endif
-            // Consume every pending decision, even while speaking or in a
-            // body fault, so stale facial requests never replay after recovery.
-            const auto requested_mood = board->body_bridge_ ?
-                board->body_bridge_->TakeCosmeticMoodCue() :
-                desk_robot::CosmeticMood::kNone;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
             const bool mic_privacy_on = board->audio_operator_muted_.load(
                 std::memory_order_acquire);
@@ -338,6 +333,14 @@ private:
                     esp_timer_get_time()) : desk_robot::SpeechLevel{};
             {
                 FaceRenderGuard render_lock;
+                // Retain the newest unexpired cue during transient OLED lock
+                // contention. Drain suppressed cues even if the lock is busy,
+                // so safety, speech or link recovery cannot replay stale moods.
+                const auto requested_mood = board->body_bridge_ &&
+                    (render_lock || priority_active || !face_available ||
+                     voice_link_lost || board->display_ == nullptr) ?
+                    board->body_bridge_->TakeCosmeticMoodCue() :
+                    desk_robot::CosmeticMood::kNone;
                 if (!render_lock) {
                     // Drop cosmetic work rather than delaying the next audio retry.
                     // Reconcile the latest status and HSM mood on the next frame.
