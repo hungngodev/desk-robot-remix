@@ -1,4 +1,5 @@
 """Live Mac camera and vision preflight never issues motor, charger or pickup commands."""
+import json
 import sys
 from types import SimpleNamespace
 
@@ -550,3 +551,50 @@ async def test_simulation_runtime_never_constructs_physical_transports(settings,
         assert all(isinstance(head, SimulatedHead) for head in owner.coordinator.heads.values())
     finally:
         await owner.close()
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "exit_code", "report"),
+    [
+        (200, {"robot_id": "pet", "health": {"state": "ready"}}, 0, True),
+        (200, {"robot_id": "pet", "health": {"state": "degraded"}}, 1, True),
+        (503, {"robot_id": "pet", "health": {"state": "degraded"}}, 1, True),
+        (503, {"robot_id": "other", "health": {"state": "degraded"}}, 1, False),
+        (503, {"robot_id": "pet", "health": "degraded"}, 1, False),
+        (503, None, 1, False),
+        (409, {"robot_id": "pet", "health": {"state": "degraded"}}, 1, False),
+    ],
+)
+def test_cli_status_preserves_only_matching_degraded_error_report(
+    status, body, exit_code, report, monkeypatch, capsys,
+):
+    import desk_robot.cli as cli
+
+    response = httpx.Response(
+        status, request=httpx.Request("GET", "http://127.0.0.1:8765/v1/robots/pet/status"),
+        **({"content": b"not JSON"} if body is None else {"json": body}),
+    )
+
+    async def request_status(args, settings):
+        assert (args.action, args.robot) == ("status", "pet")
+        response.raise_for_status()
+        return response.json()
+
+    monkeypatch.setattr(cli, "load_settings", lambda _: SimpleNamespace(mode="hardware"))
+    monkeypatch.setattr(cli, "load_env", lambda _: None)
+    monkeypatch.setattr(cli, "request", request_status)
+    monkeypatch.setattr(sys, "argv", ["desk-robot", "status", "pet"])
+    if exit_code:
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == exit_code
+    else:
+        cli.main()
+    captured = capsys.readouterr()
+    if report:
+        assert json.loads(captured.out) == body
+        assert not captured.err
+    else:
+        assert not captured.out
+        assert str(status) in captured.err
+        assert "Traceback" not in captured.err
