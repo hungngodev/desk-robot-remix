@@ -139,7 +139,7 @@ void apply_outputs();
 
 bool sample_raw_touch(std::uint32_t now_ms) {
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
-  control.sample_touch_input(active, now_ms);
+  control.sample_touch_input(active, now_ms, touch_debounce.baseline_ready());
   touch_debounce.observe(active, now_ms);
   return active;
 }
@@ -148,7 +148,7 @@ void poll_touch(std::uint32_t now_ms) {
   // Independent wheel inhibition must not wait for the 25 ms gesture timer.
   const bool was_armed = control.state().armed;
   const bool active = sample_raw_touch(now_ms);
-  if (active && was_armed) {
+  if (was_armed && !control.state().armed) {
     apply_outputs();
     // apply_outputs resamples GPIO; do not feed its predecessor back into
     // the gesture classifier with an older timestamp.
@@ -464,7 +464,7 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     // Do not acknowledge a motion/recovery decision that this new sample vetoed.
     if (completed && control.state().bumper_raw)
       desk_robot::veto_motion_ack(reply, sizeof(reply), desk_robot::MotionAckVeto::BumperActive);
-    if (completed && control.state().touch_raw_active)
+    if (completed && control.state().touch_blocked())
       desk_robot::veto_motion_ack(reply, sizeof(reply), desk_robot::MotionAckVeto::TouchActive);
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
@@ -834,7 +834,7 @@ void loop() {
   if (cap_events != last_haptic_cap_events) {
     last_haptic_cap_events = cap_events;
     if (control.state().cap_valid && control.state().cap_mask != 0U &&
-        !control.state().touch_raw_active)
+        !control.state().touch_blocked())
       accessories.request_haptic(millis());
   }
 #endif

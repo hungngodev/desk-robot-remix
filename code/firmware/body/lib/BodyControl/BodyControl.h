@@ -67,6 +67,10 @@ struct State {
   bool servos_attached = false;
   bool touch_active = false;       // gesture-debounced input
   bool touch_raw_active = false;   // immediate electrical interlock
+  bool touch_baseline_pending = false; // startup release not yet confirmed
+  bool touch_blocked() const noexcept {
+    return touch_active || touch_raw_active || touch_baseline_pending;
+  }
   std::uint32_t touch_count = 0;  // debounced rising edges
   std::uint32_t touch_taps = 0;
   std::uint32_t touch_double_taps = 0;
@@ -130,7 +134,8 @@ class BodyControl {
   // Un-debounced local reflex: even one sensed high stops wheels and ramp,
   // without fabricating a recognized gesture or releasing servo holding PWM.
   void touch_trip();
-  void sample_touch_input(bool active, std::uint32_t now_ms);  // raw GPIO level, no gesture count
+  // The GPIO adapter supplies baseline readiness; legacy direct callers default ready.
+  void sample_touch_input(bool active, std::uint32_t now_ms, bool baseline_ready = true);
   // Optional multi-zone petting. No movement authority and no fabricated reads.
   void set_cap(bool valid, std::uint8_t zones);
   // Raw optical paw telemetry; never infer BPM or heartbeat from one FIFO read.

@@ -229,10 +229,15 @@ constexpr int HIGH=1;
 bool raw=false;
 int digitalRead(int pin) { assert(pin == body_pins::kTouchOutput); return raw; }
 struct Control {
-  struct State { bool armed=true; bool touch_raw_active=false; } s;
+  struct State {
+    bool armed=true; bool touch_raw_active=false; bool touch_baseline_pending=false;
+  } s;
   unsigned edges=0;
   State const& state() const { return s; }
-  void sample_touch_input(bool a, std::uint32_t = 0) { s.touch_raw_active=a; if(a) s.armed=false; }
+  void sample_touch_input(bool a, std::uint32_t, bool ready) {
+    s.touch_raw_active=a; s.touch_baseline_pending=!ready;
+    if(a || !ready) s.armed=false;
+  }
   void set_touch(bool a, std::uint32_t) { if(a) ++edges; }
 } control;
 desk_robot::TouchDebounce touch_debounce;
@@ -255,7 +260,11 @@ void apply_outputs() {
 void sample(std::uint32_t t,bool a){sample_ms=t;raw=a;poll_touch(t);}
 int main(){
   // Three 1ms pulses coincident with nominal 25ms sample instants.
-  for(std::uint32_t t=0;t<=150;++t) sample(t,t==75||t==100||t==125);
+  control.s.armed=false;
+  for(std::uint32_t t=0;t<=51;++t) sample(t,false);
+  assert(!control.s.touch_baseline_pending);
+  control.s.armed=true;
+  for(std::uint32_t t=52;t<=150;++t) sample(t,t==75||t==100||t==125);
   assert(control.edges==0);
   assert(!control.state().armed);
   assert(output_calls==1);
@@ -272,7 +281,9 @@ int main(){
   // A stale predecessor must not count as the first gesture sample.
   control=Control{};
   touch_debounce=desk_robot::TouchDebounce{};
+  control.s.armed=false;
   sample(99900,false); sample(99925,false); sample(99950,false);
+  sample(99951,false); control.s.armed=true;
   release_during_output=true;
   sample(100000,true);
   assert(!control.state().armed && !control.state().touch_raw_active);
@@ -290,10 +301,15 @@ int main(){
   for(std::uint32_t t=0;t<=60000;t+=25) sample(t,true);
   assert(!control.state().armed && control.state().touch_raw_active);
   assert(output_calls==3 && control.edges==0 && !touch_debounce.stable());
-  sample(60025,false); sample(60050,false); sample(60074,true);
+  sample(60025,false);
+  assert(!control.s.touch_raw_active && control.s.touch_baseline_pending);
+  sample(60050,false); sample(60074,true);
   sample(60100,true); sample(60125,true);
   assert(control.edges==0 && !touch_debounce.stable());
   sample(60150,false); sample(60175,false); sample(60200,false);
+  assert(control.s.touch_baseline_pending);
+  sample(60201,false);
+  assert(!control.s.touch_baseline_pending);
   assert(control.edges==0 && !control.state().armed);
   sample(60225,true); sample(60250,true); sample(60275,true);
   assert(control.edges==1 && touch_debounce.stable());

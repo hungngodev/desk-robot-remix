@@ -33,6 +33,7 @@ class TouchDebounce {
   }
 
   bool stable() const noexcept { return stable_; }
+  bool baseline_ready() const noexcept { return released_; }
 
  private:
   bool observed_ = false;

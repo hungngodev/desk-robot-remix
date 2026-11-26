@@ -282,10 +282,14 @@ void BodyControl::touch_trip() {
   }
 }
 
-void BodyControl::sample_touch_input(bool active, std::uint32_t now_ms) {
-  if (active) latch_expired_control_lease(now_ms);
+void BodyControl::sample_touch_input(bool active, std::uint32_t now_ms,
+                                     bool baseline_ready) {
   state_.touch_raw_active = active;
-  if (active) touch_trip();  // before debounce and before motor output
+  state_.touch_baseline_pending = !baseline_ready;
+  if (active || !baseline_ready) {
+    latch_expired_control_lease(now_ms);
+    touch_trip();  // before debounce and before motor output
+  }
 }
 
 void BodyControl::sample_range_optics(
@@ -545,7 +549,7 @@ bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
   if (!wheel_pose_configured_ || !wheel_pairs_.ready_for_origin() ||
       (guarded_motion_profile() && !floor_supports_pose(guard_, now_ms)) ||
       state_.armed || state_.servos_attached ||
-      state_.touch_raw_active || state_.bumper_raw ||
+      state_.touch_blocked() || state_.bumper_raw ||
       imu_low_g_latched_ || imu_attitude_latched_ ||
       imu_sensor_fault_latched_ || motor_watchdog_latched_ ||
       command_timeout_latched_ || imu_provenance_bad_ ||
@@ -1626,7 +1630,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         !imu_low_g_latched_ && !imu_attitude_latched_ &&
         !imu_sensor_fault_latched_ &&
         (!imu_attitude_required_ || attitude_recovery_ready(now_ms)) &&
-        !dock_unhealthy && !bumper_hit && !touch_hit &&
+        !dock_unhealthy && !bumper_hit && !state_.touch_blocked() &&
         !battery_below_arm_min &&
         (!imu_motion_required_ || imu_valid);
     // A critical cliff/bus fault takes precedence over a simultaneous
@@ -1645,6 +1649,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         bumper_hit ? "bumper_active" :
         bumper_fault_latched_ ? "bumper_latched" :
         touch_hit ? "touch_active" :
+        state_.touch_baseline_pending ? "touch_baseline_pending" :
         imu_low_g_latched_ ? "imu_low_g_latched" :
         imu_attitude_latched_ ? "imu_attitude_latched" :
         imu_attitude_required_ && !imu_attitude_configured_ ?
@@ -1799,8 +1804,9 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm bumper_active");
       return;
     }
-    if (state_.touch_active || state_.touch_raw_active) {
-      std::snprintf(reply, capacity, "ERR rearm touch_active");
+    if (state_.touch_blocked()) {
+      std::snprintf(reply, capacity, state_.touch_raw_active || state_.touch_active ?
+                    "ERR rearm touch_active" : "ERR rearm touch_baseline_pending");
       return;
     }
     if (imu_motion_required_ && !imu_fresh(now_ms)) {
@@ -1936,8 +1942,9 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR arm bumper_active");
       return;
     }
-    if (state_.touch_active || state_.touch_raw_active) {
-      std::snprintf(reply, capacity, "ERR arm touch_active");
+    if (state_.touch_blocked()) {
+      std::snprintf(reply, capacity, state_.touch_raw_active || state_.touch_active ?
+                    "ERR arm touch_active" : "ERR arm touch_baseline_pending");
       return;
     }
     if (guarded_motion_profile() &&

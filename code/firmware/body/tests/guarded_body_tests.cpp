@@ -188,7 +188,14 @@ static void usb_rearm_refuses_unsafe_physical_interlocks() {
   body.sample_touch_input(true, 100);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm touch_active");
   CHECK(send(body, "arm", 100) == "ERR arm touch_active");
-  body.sample_touch_input(false, 100);
+  body.sample_touch_input(false, 100, false); // boot release not yet qualified
+  CHECK(!body.state().touch_raw_active && body.state().touch_blocked());
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm touch_baseline_pending");
+  CHECK(send(body, "arm", 100) == "ERR arm touch_baseline_pending");
+  CHECK(send(body, "status", 100).find("\"touch\":{\"active\":false,\"count\":0") !=
+        std::string::npos);
+  body.sample_touch_input(false, 100, true);
+  CHECK(!body.state().touch_blocked() && !body.state().armed);
   body.sample_optional_inputs(1U, true, false, false);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm bumper_active");
   body.sample_optional_inputs(1U, false, false, false);
