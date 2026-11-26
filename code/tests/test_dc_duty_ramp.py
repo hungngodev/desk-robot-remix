@@ -33,7 +33,15 @@ int main() {
             CHECK(ramp.update(now, request, true) == duty);
             CHECK(ramp.update(now, request, true) == duty);
         }
-        const auto reverse = start + 601000U;
+        // A smaller same-direction command must also slew, not jump.
+        CHECK(ramp.update(start + 601000U, sign * 10, true) == sign * 39);
+        for (std::uint32_t elapsed = 602000; elapsed <= 1100000; elapsed += 1000) {
+            const int expected = 40 - static_cast<int>(((elapsed - 600000U) * 80U +
+                                                       999999U) / 1000000U);
+            const int duty = sign * (expected > 10 ? expected : 10);
+            CHECK(ramp.update(start + elapsed, sign * 10, true) == duty);
+        }
+        const auto reverse = start + 1101000U;
         CHECK(ramp.update(reverse, -sign * 40, true) == 0);
         CHECK(ramp.update(reverse + 12499U, -sign * 40, true) == 0);
         CHECK(ramp.update(reverse + 12500U, -sign * 40, true) == -sign);
