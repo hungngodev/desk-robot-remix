@@ -1,6 +1,8 @@
 """Keep shared hardware guards enabled in every full drivetrain image."""
 
 import shlex
+import shutil
+import subprocess
 from configparser import ConfigParser
 from pathlib import Path
 
@@ -90,3 +92,37 @@ def test_all_environments_classified_and_bench_sources_isolated():
         flags = _defines(config, f"env:{name}")
         assert flags["STEPPER"] == "1"
         assert flags.get("STEPPER_HARDWARE_CUTOFF_QUALIFIED", "0") == "0"
+
+
+def test_pin_header_compiles_under_every_environment():
+    """Compile actual GPIO ownership assertions with the resolved profile flags."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for pin matrix")
+    config = _config()
+    source = r'''
+#include "BodyPins.h"
+using namespace body_pins;
+static_assert(kUartRx == 16 && kUartTx == 17);
+static_assert(kLiftServo == 18 && kGripServo == 19);
+#if DESK_ROBOT_STEPPER || DESK_ROBOT_FULL_SENSORS
+static_assert(kSensorSda == 21 && kSensorScl == 22);
+static_assert(kTouchOutput == 34 && kBumperInput == 35);
+static_assert(kTerminalIrLeftInput == 36 && kTerminalIrRightInput == 39);
+#endif
+#if DESK_ROBOT_STEPPER
+static_assert(kRightStepperPins[3] == 23 && count(kMotorPins) == 8);
+#elif DESK_ROBOT_ENABLE_DC_WATCHDOG
+static_assert(kDcHeartbeatPin == 23 && count(kMotorPins) == 4);
+#endif
+int main() { return 0; }
+'''
+    for section in config.sections():
+        if not section.startswith("env:"):
+            continue
+        result = subprocess.run(
+            [compiler, "-std=c++17", "-Werror", "-fsyntax-only",
+             "-I", str(BODY / "include"), *_flags(config, section), "-x", "c++", "-"],
+            input=source, text=True, capture_output=True, check=False, timeout=10,
+        )
+        assert result.returncode == 0, (section, result.stderr)
