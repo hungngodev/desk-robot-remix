@@ -8,6 +8,17 @@ from typing import Protocol
 import httpx
 
 from .aux import validate_aux
+from .command_framing import (
+    MAX_DRIVE_DURATION_MS as MAX_DRIVE_DURATION_MS,
+)
+from .command_framing import (
+    command_ack_matches,
+    expected_ack,
+)
+from .command_framing import (
+    drive_duration_ms as drive_duration_ms,
+    validate_command as validate_command,
+)
 from .config import RobotConfig, secret
 from .dock_ir import validate_ir
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
@@ -20,10 +31,6 @@ _REQUEST_DEADLINE_SECONDS = 3.0
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
 # Bound time without a complete JPEG, not merely time without network bytes.
 _MJPEG_FRAME_TIMEOUT_SECONDS = 3.0
-
-# Wire contract: omitted duration uses the same bound as WROOM kMaxDriveMs.
-MAX_DRIVE_DURATION_MS = 250
-
 
 class HeadError(RuntimeError):
     """A failed request may already have actuated: never automatically retry it."""
@@ -41,54 +48,6 @@ class Head(Protocol):
     async def ir_status(self) -> dict: ...
     async def pose_status(self) -> PoseReceipt: ...
     async def snapshot(self) -> bytes: ...
-
-
-def _drive_duration_ms(args: list[str]) -> int:
-    return int(args[2]) if len(args) == 3 else MAX_DRIVE_DURATION_MS
-
-
-def validate_command(command: str) -> str:
-    if (
-        not isinstance(command, str)
-        or len(command) > 95
-        or not re.fullmatch(r"[a-z0-9 -]+", command)
-    ):
-        raise ValueError("Invalid command")
-    tokens = command.split(" ")
-    op = tokens[0]
-    if op in {"ping", "status", "arm", "disarm", "stop", "halt", "keepalive"} and len(tokens) == 1:
-        return op
-    if op == "drive" and len(tokens) in (3, 4):
-        values = tokens[1:]
-        if not all(re.fullmatch(r"-?[0-9]{1,3}", x) for x in values):
-            raise ValueError("drive arguments must be integers")
-        left, right = map(int, values[:2])
-        duration = _drive_duration_ms(values)
-        if -40 <= left <= 40 and -40 <= right <= 40 and 1 <= duration <= MAX_DRIVE_DURATION_MS:
-            return op
-    if op in {"lift", "grip"} and len(tokens) == 2 and tokens[1].isdigit():
-        if 60 <= int(tokens[1]) <= 120:
-            return op
-    raise ValueError("Command exceeds conservative bounds")
-
-
-def drive_duration_ms(command: str) -> int:
-    """Return the validated explicit or default wire duration of a drive command."""
-    if validate_command(command) != "drive":
-        raise ValueError("Expected a drive command")
-    return _drive_duration_ms(command.split()[1:])
-
-
-def expected_ack(command: str) -> str:
-    op = validate_command(command)
-    args = command.split()[1:]
-    if op == "drive":
-        left, right = map(int, args[:2])
-        ms = _drive_duration_ms(args)
-        return f"OK drive left={left} right={right} ms={ms}"
-    if op in {"lift", "grip"}:
-        return f"OK {op} angle={int(args[0])}"
-    return f"OK {op}"
 
 
 class _MjpegFrames:
@@ -287,10 +246,7 @@ class HttpHead:
                     "POST", "/api/command", json={"command": command}
                 )
                 data = _response_object(response)
-                reply = data.get("reply", "")
-                if (data.get("ok") is not True
-                        or data.get("robot_id") != self.config.id
-                        or reply != expected):
+                if not command_ack_matches(data, self.config.id, expected):
                     raise HeadError("Unmatched or failed command ACK; movement not retried")
             except (Exception, asyncio.CancelledError):
                 # Cancellation or failure AFTER admission cannot prove that a
