@@ -67,5 +67,5 @@ honest partial concept deliverable; use [the product definition](../../../produc
 Reproduce from the project root with the already-installed Blender launcher:
 
 ```sh
-/Users/hung/.local/bin/blender-keycap --factory-startup --disable-autoexec --background --python-exit-code 1 --python scripts/render_product_concept.py -- --head sparky
+/Users/hung/.local/bin/blender-keycap --factory-startup --disable-autoexec --background --python-exit-code 1 --python code/scripts/render_product_concept.py -- --head sparky
 ```
