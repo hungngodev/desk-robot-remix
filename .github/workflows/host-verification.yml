@@ -178,6 +178,8 @@ jobs:
             tests/test_server_bridge.py::test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice \
             tests/test_ci_python_imports.py \
             tests/test_ci_upstream_fixture.py \
+            tests/test_ci_collection_scope.py \
+            tests/test_ci_python_dependencies.py \
             tests/test_ci_lane_concurrency.py
 
   python-and-head-host:

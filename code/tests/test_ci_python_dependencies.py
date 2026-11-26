@@ -8,7 +8,10 @@ import pytest
 import yaml
 
 
-@pytest.mark.parametrize("fault", ["none", "numpy-drift", "missing-opencv", "bad-metadata"])
+@pytest.mark.parametrize(
+    "fault",
+    ["none", "numpy-drift", "missing-opencv", "bad-metadata", "extra-package", "wrong-opencv"],
+)
 def test_opencv_install_preserves_locked_environment(tmp_path, fault):
     code = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load(
@@ -26,7 +29,12 @@ case "$1 $2" in
   'pip freeze')
     if [ -f installed ]; then
       if [ "$FAULT" = numpy-drift ]; then echo 'numpy==9.9'; else echo 'numpy==2.4.6'; fi
-      if [ "$FAULT" != missing-opencv ]; then echo 'opencv-python-headless==4.13.0.92'; fi
+      case "$FAULT" in
+        missing-opencv) ;;
+        wrong-opencv) echo 'opencv-python-headless==4.0.0' ;;
+        *) echo 'opencv-python-headless==4.13.0.92' ;;
+      esac
+      if [ "$FAULT" = extra-package ]; then echo 'unexpected-package==1.0'; fi
     else
       echo 'numpy==2.4.6'
     fi
@@ -48,6 +56,6 @@ esac
     env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FAULT": fault}
     result = subprocess.run(
         ["bash", "-c", step["run"]], cwd=tmp_path, env=env,
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=30,
     )
     assert (result.returncode == 0) == (fault == "none"), result.stdout + result.stderr
