@@ -44,6 +44,8 @@ def capture(
         raise ValueError("invalid capture limits")
     frame_bytes = channels * 2
     remaining = int(samplerate * duration) * frame_bytes
+    if not remaining:
+        raise ValueError("invalid capture limits: duration below one PCM frame")
     written = 0
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind((bind, port))

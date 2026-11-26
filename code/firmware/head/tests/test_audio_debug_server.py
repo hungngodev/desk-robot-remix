@@ -125,9 +125,9 @@ def test_consent_required_before_socket(tmp_path, monkeypatch, kwargs):
     "field, value",
     [("port", True), ("port", 8000.0), ("samplerate", 8000.0),
      ("channels", True), ("channels", 1.0), ("duration", True),
-     ("duration", "0.1")],
+     ("duration", "0.1"), ("duration", 1e-6)],
 )
-def test_capture_rejects_invalid_numeric_types_before_io(tmp_path, monkeypatch, field, value):
+def test_capture_rejects_invalid_limits_before_io(tmp_path, monkeypatch, field, value):
     def unexpected_socket(*args, **kwargs):
         pytest.fail("socket opened before numeric validation")
 
