@@ -7,6 +7,7 @@
 
 #include "display/oled_display.h"
 #include "face_eye_animator.hpp"
+#include "face_idle_power.hpp"
 
 // Short eye gestures cover only Xiaozhi's 32-pixel emotion slot.
 // All display mutations share Xiaozhi's LVGL lock. Local safety/privacy status
@@ -135,6 +136,18 @@ public:
         if (NormalizeSubtitle(content) == subtitle_) subtitle_.clear();
     }
 
+    // Keep actual panel I/O under the existing LVGL lock. A subtitle,
+    // notification or battery popup is never eligible for idle blanking.
+    template <typename Apply>
+    void UpdateIdlePower(uint64_t now, bool can_rest, bool sleeping, Apply apply) {
+        DisplayLockGuard lock(this);
+        if (!lock) return;
+        const bool clear = local_status_ == FaceStatus::kNormal && subtitle_.empty() &&
+            status_label_ && !lv_obj_has_flag(status_label_, LV_OBJ_FLAG_HIDDEN) &&
+            (!low_battery_popup_ || lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN));
+        idle_power_.Update(now, can_rest && clear, sleeping, apply);
+    }
+
     void ShowEyes(const EyeFrame& frame) {
         DisplayLockGuard lock(this);
         if (!lock) return;
@@ -210,6 +223,7 @@ private:
     lv_obj_t* eye_layer_ = nullptr;
     lv_obj_t* eye_[2] = {nullptr, nullptr};
     lv_obj_t* pupil_[2] = {nullptr, nullptr};
+    FaceIdlePower idle_power_;
     EyeFrame last_{};
     bool frame_known_ = false;
     FaceStatus local_status_ = FaceStatus::kNormal;

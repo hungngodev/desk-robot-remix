@@ -2557,6 +2557,7 @@ inline void lv_obj_align(lv_obj_t* n, int, int x, int y) {
 }
 inline void lv_obj_add_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = true; }
 inline void lv_obj_remove_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = false; }
+inline bool lv_obj_has_flag(lv_obj_t* n, int) { assert(lock_depth > 0); return n->hidden; }
 inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 2;
 inline constexpr int LV_SCROLLBAR_MODE_OFF = 3, LV_OBJ_FLAG_HIDDEN = 4;
 inline int lv_color_white() { return 1; }
@@ -2685,6 +2686,41 @@ int main() {
         assert(early.Status() == "Face task unavailable");
         early.SetLocalStatus(FaceStatus::kNormal);
         assert(early.Status() == "Connecting");
+    }
+    {
+        using desk_robot::FacePanelMode;
+        desk_robot::LocalEyeDisplay resting;
+        resting.SetupUI();
+        std::vector<FacePanelMode> modes;
+        auto apply = [&](FacePanelMode mode) {
+            assert(lock_depth > 0);
+            modes.push_back(mode);
+            return true;
+        };
+        resting.UpdateIdlePower(0, true, false, apply);
+        resting.UpdateIdlePower(60000, true, false, apply);
+        resting.UpdateIdlePower(300000, true, true, apply);
+        assert(modes.size() == 3 && modes.back() == FacePanelMode::kOff);
+        resting.SetLocalStatus(FaceStatus::kBodyFault);
+        resting.UpdateIdlePower(300001, true, true, apply);
+        assert(modes.size() == 4 && modes.back() == FacePanelMode::kAwake);
+        resting.SetLocalStatus(FaceStatus::kNormal);
+        resting.UpdateIdlePower(300002, true, true, apply);
+        resting.UpdateIdlePower(360002, true, true, apply);
+        assert(modes.back() == FacePanelMode::kOff);
+        resting.SetChatMessage("user", "wake");
+        resting.UpdateIdlePower(360003, true, true, apply);
+        assert(modes.back() == FacePanelMode::kAwake);
+        resting.SetChatMessage("user", nullptr);
+        resting.UpdateIdlePower(360004, true, true, apply);
+        resting.UpdateIdlePower(420004, true, true, apply);
+        assert(modes.back() == FacePanelMode::kOff);
+        {
+            DisplayLockGuard lock(&resting);
+            lv_obj_remove_flag(resting.BatteryPopup(), LV_OBJ_FLAG_HIDDEN);
+        }
+        resting.UpdateIdlePower(420005, true, true, apply);
+        assert(modes.back() == FacePanelMode::kAwake);
     }
     desk_robot::LocalEyeDisplay display;
     OledDisplay* upstream = &display;

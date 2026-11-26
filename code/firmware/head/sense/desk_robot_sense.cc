@@ -127,6 +127,9 @@ private:
 class DeskRobotSenseBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
+    // Non-owning aliases: the upstream OledDisplay owns both handles.
+    esp_lcd_panel_io_handle_t display_panel_io_ = nullptr;
+    esp_lcd_panel_handle_t display_panel_ = nullptr;
     Display* display_ = nullptr;
     desk_robot::LocalEyeDisplay* local_eye_display_ = nullptr;
     desk_robot::FaceEyeAnimator eye_animator_{};
@@ -378,6 +381,14 @@ private:
                             now_ms, local_mood, face_available && !priority_active);
                         if (height != 0) eyes = {true, false, 0, 0, height};
                         board->local_eye_display_->ShowEyes(eyes);
+                        const auto hsm_state = board->face_behavior_.state();
+                        const bool sleeping = hsm_state == State::kSleeping;
+                        board->local_eye_display_->UpdateIdlePower(
+                            uptime_ms, idle && !priority_active && !model_mood_active &&
+                                (hsm_state == State::kIdle || sleeping), sleeping,
+                            [board](desk_robot::FacePanelMode mode) {
+                                return board->ApplyFacePanelMode(mode);
+                            });
                     }
                     // Restore the current HSM mood after either local priority clears.
                     last_priority_active = priority_active;
@@ -386,6 +397,21 @@ private:
             }
             vTaskDelay(pdMS_TO_TICKS(100));
         }
+    }
+
+    bool ApplyFacePanelMode(desk_robot::FacePanelMode mode) {
+        using desk_robot::FacePanelMode;
+        if (!display_panel_ || !display_panel_io_) return false;
+        if (mode == FacePanelMode::kOff)
+            return esp_lcd_panel_disp_on_off(display_panel_, false) == ESP_OK;
+        // SSD1306 SETCONTRAST (0x81). Explicit provisional defaults; the
+        // actual panel brightness/current still requires bench measurement.
+        const uint8_t contrast = mode == FacePanelMode::kDim ? 0x20 : 0x80;
+        const auto contrast_result =
+            esp_lcd_panel_io_tx_param(display_panel_io_, 0x81, &contrast, sizeof(contrast));
+        // Always attempt wake even when contrast fails; the policy retries.
+        const auto wake_result = esp_lcd_panel_disp_on_off(display_panel_, true);
+        return contrast_result == ESP_OK && wake_result == ESP_OK;
     }
 
     void InitializeDisplay() {
@@ -425,6 +451,8 @@ private:
         local_eye_display_ = new desk_robot::LocalEyeDisplay(
             panel_io, panel, DISPLAY_WIDTH, DISPLAY_HEIGHT,
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        display_panel_io_ = panel_io;
+        display_panel_ = panel;
         display_ = local_eye_display_;
     }
 
