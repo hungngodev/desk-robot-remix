@@ -50,6 +50,20 @@ def is_uint(value: object, upper: int) -> TypeGuard[int]:
     return is_int_in_range(value, 0, upper)
 
 
+def has_upright_floor_loss(ranges: object, imu: object) -> bool:
+    """Classify optional fault context only from explicit wire fields."""
+    if not isinstance(ranges, dict) or not isinstance(imu, dict):
+        return False
+    mm, mask = ranges.get("mm"), ranges.get("valid_mask")
+    acc = imu.get("acc")
+    if (not is_uint(mask, 31) or not isinstance(mm, list) or len(mm) != 5
+            or not all(is_uint(value, 65535) for value in mm)
+            or imu.get("valid") is not True or not isinstance(acc, list) or len(acc) != 3
+            or not all(is_int_in_range(value, -32768, 32767) for value in acc)):
+        return False
+    lost = sum(not (mask & (1 << ch)) or mm[ch] > 120 for ch in range(4))
+    return lost >= 2 and abs(acc[2]) >= 12000
+
 
 # Match the WROOM MAX17048 acquisition lifetime, not the motor watchdog.
 FUEL_SAMPLE_MAX_AGE_MS = 500

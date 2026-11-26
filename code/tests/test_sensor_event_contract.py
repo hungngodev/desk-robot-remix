@@ -4,7 +4,12 @@ import sys
 from decimal import Decimal
 
 import pytest
-from desk_robot.sensor_event_contract import is_finite_number, is_int_in_range, is_uint
+from desk_robot.sensor_event_contract import (
+    has_upright_floor_loss,
+    is_finite_number,
+    is_int_in_range,
+    is_uint,
+)
 
 
 class IntSubclass(int):
@@ -51,3 +56,25 @@ def test_zero_width_integer_ranges():
     assert is_uint(0, 0) is True
     assert is_uint(1, 0) is False
     assert is_uint(0, -1) is False
+
+
+@pytest.mark.parametrize(
+    "ranges, expected",
+    [({"mm": [40, 40, 40, 40, 40]}, False),
+     ({"mm": [40, 40, 40, 40, 40], "valid_mask": 0}, True),
+     ({"mm": [121, 121, 40, 40, 40], "valid_mask": 31}, True),
+     ({"mm": [120, 121, 40, 40, 40], "valid_mask": 31}, False),
+     ({"mm": [121, 121, 40, 40, 40], "valid_mask": True}, False),
+     ({"mm": [121, 121, 40, 40, 40], "valid_mask": -1}, False),
+     ({"mm": [121, 121, 40, 40, 40], "valid_mask": 32}, False),
+     ({"mm": [121, 121, False, 40, 40], "valid_mask": 31}, False),
+     ({"mm": [121, 121, 40, 40], "valid_mask": 31}, False)],
+)
+def test_floor_loss_requires_explicit_valid_range_wire_fields(ranges, expected):
+    assert has_upright_floor_loss(ranges, {"valid": True, "acc": [0, 0, 12000]}) is expected
+
+
+@pytest.mark.parametrize("acc", [[0, 0, 11999], [0, False, 12000], [0, 0, 32768]])
+def test_floor_loss_rejects_bad_or_non_upright_acceleration(acc):
+    ranges = {"mm": [121, 121, 40, 40, 40], "valid_mask": 31}
+    assert not has_upright_floor_loss(ranges, {"valid": True, "acc": acc})

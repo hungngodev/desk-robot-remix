@@ -59,6 +59,7 @@ from .sensor_event_contract import (
     ProactiveToolData,
     ProactiveToolReceipt,
     fuel_sample_is_fresh,
+    has_upright_floor_loss,
 )
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
@@ -1894,25 +1895,10 @@ class PetController:
         )
         detail = f"{fault}_ch{sensor}" if type(sensor) is int and 0 <= sensor <= 4 else fault
         if fault == "floor_out_of_range" and state.handling_gate.reference is not None:
-            ranges = body.get("ranges")
-            imu = body.get("imu")
-            if isinstance(ranges, dict) and isinstance(ranges.get("mm"), list):
-                mm = ranges["mm"]
-                v_mask = ranges.get("valid_mask", 0)
-                if len(mm) >= 4 and type(v_mask) is int:
-                    cliff_lost = sum(
-                        not (v_mask & (1 << ch)) or (type(mm[ch]) is int and mm[ch] > 120)
-                        for ch in range(4)
-                    )
-                    imu_upright = (
-                        isinstance(imu, dict) and imu.get("valid") is True
-                        and isinstance(imu.get("acc"), list) and len(imu["acc"]) == 3
-                        and type(imu["acc"][2]) is int and abs(imu["acc"][2]) >= 12000
-                        and state.handling_gate.tilt_hits == 0
-                        and state.handling_gate.shake_hits == 0
-                    )
-                    if cliff_lost >= 2 and imu_upright:
-                        detail = "floor_out_of_range_upright_lift"
+            if (state.handling_gate.tilt_hits == 0
+                    and state.handling_gate.shake_hits == 0
+                    and has_upright_floor_loss(body.get("ranges"), body.get("imu"))):
+                detail = "floor_out_of_range_upright_lift"
         detail = detail[:64]
         description = (
             f"My WROOM body reported a latched {fault} safety fault{location} "
