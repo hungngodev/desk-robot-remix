@@ -8,7 +8,8 @@ import time
 from types import SimpleNamespace
 
 import httpx
-from desk_robot import room_station, runtime as runtime_module
+from desk_robot import room_station
+from desk_robot import runtime as runtime_module
 from desk_robot.api import create_app
 from desk_robot.vision import SceneChange
 
