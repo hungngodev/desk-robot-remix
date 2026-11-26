@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from desk_robot import dock_runtime
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
+from desk_robot.dock_timing import dock_age_is_fresh, dock_time_remaining
 from desk_robot.dock_vision import DockPose, assess_dock
 
 
@@ -77,3 +78,51 @@ def test_camera_source_verifier_requires_time_remaining(monkeypatch):
     receipt = (b"jpeg", 0.0, (1, 1, 1), 1)
     with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
         asyncio.run(dock_runtime.verify_selected_dock_frame(Head(), receipt))
+
+
+@pytest.mark.parametrize("age", [
+    math.nextafter(0.0, -1.0), 0.2, math.nextafter(0.2, math.inf),
+    math.nan, math.inf, -math.inf,
+])
+def test_no_remaining_work_budget_at_invalid_or_expired_age(age):
+    assert dock_time_remaining(age) == 0.0
+
+
+def test_observation_boundary_is_inclusive_but_work_budget_is_not():
+    assert dock_age_is_fresh(0.2, 0.2)
+    assert dock_time_remaining(0.2) == 0.0
+    assert dock_time_remaining(0.0) == 0.2
+    almost_expired = math.nextafter(0.2, 0.0)
+    assert dock_time_remaining(almost_expired) == 0.2 - almost_expired > 0
+    assert dock_time_remaining(0.125) == 0.2 - 0.125
+
+
+def test_detector_warm_backoff_includes_exact_retry_boundary(monkeypatch):
+    from desk_robot import dock_process
+
+    now = [10.0]
+    monkeypatch.setattr(dock_process, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    pool = dock_process.DetectorPool()
+    starts = []
+
+    async def fail_start():
+        starts.append(now[0])
+        raise RuntimeError("startup failed")
+
+    async def scenario():
+        monkeypatch.setattr(pool, "_start_one", fail_start)
+        await pool.prewarm()
+        assert starts == [10.0, 10.0]
+        assert pool._retry_at == 11.0
+        now[0] = math.nextafter(11.0, 0.0)
+        await pool.prewarm()
+        assert starts == [10.0, 10.0]
+        now[0] = 11.0
+        await pool.prewarm()
+        assert starts == [10.0, 10.0, 11.0, 11.0]
+        assert pool._retry_at == 12.0
+        await pool.prewarm()
+        assert len(starts) == 4
+        await pool.close()
+
+    asyncio.run(scenario())

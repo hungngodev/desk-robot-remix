@@ -7,7 +7,7 @@ import time
 from typing import Callable
 
 from .dock_process import DetectorPool, DockDetectorBusy
-from .dock_timing import DOCK_OBSERVATION_MAX_AGE_S, dock_age_is_fresh
+from .dock_timing import DOCK_OBSERVATION_MAX_AGE_S, dock_age_is_fresh, dock_time_remaining
 from .dock_vision import DockCameraCalibration, DockPose, assess_dock
 from .operations import bounded_head_reply as _bounded_head_reply
 
@@ -159,7 +159,7 @@ async def verify_selected_dock_frame(head, observation) -> None:
         # not a new timeout that would extend stale camera evidence.
 
         _, received_at = unpack_dock_frame(observation)
-        remaining = DOCK_OBSERVATION_MAX_AGE_S - (time.monotonic() - received_at)
+        remaining = dock_time_remaining(time.monotonic() - received_at)
         if remaining <= 0:
             raise ValueError("Invalid or stale dock camera receipt")
         verdict = await _bounded_head_reply(
@@ -256,7 +256,7 @@ async def observe_actual_dock(
             robot.id, reason="Dock camera live sensor identity unavailable",
             source="camera_identity_unavailable",
         )
-    remaining = DOCK_OBSERVATION_MAX_AGE_S - (time.monotonic() - received_at)
+    remaining = dock_time_remaining(time.monotonic() - received_at)
     if remaining <= 0:
         return _hold(
             robot.id, reason="Dock camera receipt expired before identity check",

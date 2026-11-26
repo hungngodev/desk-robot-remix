@@ -9,9 +9,10 @@ import sys
 import time
 from dataclasses import asdict
 
+from .dock_timing import DOCK_OBSERVATION_MAX_AGE_S, dock_time_remaining
 from .dock_vision import DockCameraCalibration, DockPose, detect_apriltag
 
-FRAME_AGE_S = 0.20
+FRAME_AGE_S = DOCK_OBSERVATION_MAX_AGE_S
 _REAP_S = 0.15
 _START_S = 2.0
 _MAX_JPEG = 512000
@@ -150,7 +151,7 @@ class DetectorPool:
 
     async def _request(self, jpeg: bytes, camera: DockCameraCalibration,
                        captured_at: float, sequence: int) -> DockPose | None:
-        if time.monotonic() - captured_at >= FRAME_AGE_S:
+        if dock_time_remaining(time.monotonic() - captured_at) <= 0:
             raise TimeoutError("Stale AprilTag frame")
         process = self._ready.pop(0)
         try:
@@ -165,10 +166,11 @@ class DetectorPool:
             assert process.stdin is not None and process.stdout is not None
             # Include serialization, pipe backpressure and native inference
             # in the original receipt's deadline, not a fresh timeout.
-            async with asyncio.timeout_at(asyncio.get_running_loop().time() + max(
-                0.0, FRAME_AGE_S - (time.monotonic() - captured_at),
-            )):
-                if time.monotonic() - captured_at >= FRAME_AGE_S:
+            async with asyncio.timeout_at(
+                asyncio.get_running_loop().time()
+                + dock_time_remaining(time.monotonic() - captured_at)
+            ):
+                if dock_time_remaining(time.monotonic() - captured_at) <= 0:
                     raise TimeoutError("Stale AprilTag frame")
                 process.stdin.write(payload)
                 await process.stdin.drain()
@@ -190,7 +192,7 @@ class DetectorPool:
                         raise ValueError("AprilTag reply capture timestamp changed")
                     if not 30 <= pose.z_mm <= 2000 or pose.reprojection_error_px > 3:
                         raise ValueError("AprilTag reply outside detector pose envelope")
-                if time.monotonic() - captured_at >= FRAME_AGE_S:
+                if dock_time_remaining(time.monotonic() - captured_at) <= 0:
                     raise TimeoutError("Stale AprilTag result")
             self._ready.insert(0, process)
             return pose

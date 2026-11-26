@@ -23,6 +23,7 @@ from .dock_runtime import (
     unpack_dock_frame,
     verify_selected_dock_frame,
 )
+from .dock_timing import dock_time_remaining
 from .dock_vision import assess_dock
 from .grasp_feedback import await_commanded_jaw_target, guarded_grasp, verify_grasp_hold
 from .motion_authority import StopConfirmationTracker
@@ -1510,7 +1511,7 @@ class Coordinator:
                     raise OperationError(
                         "Dock camera live sensor identity unavailable"
                     )
-                remaining = 0.20 - (time.monotonic() - received_at)
+                remaining = dock_time_remaining(time.monotonic() - received_at)
                 if remaining <= 0:
                     raise OperationError("Stale dock camera receipt before PID lookup")
                 observed_pid = await _bounded_head_reply(
