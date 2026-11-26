@@ -145,3 +145,60 @@ def test_stop_recovery_preserves_caller_cancellation(cancel_caller):
             await asyncio.gather(recovery, *pending, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_shutdown_repeated_cancel_preserves_callback_ownership():
+    async def scenario():
+        entered = asyncio.Event()
+        cleaning = asyncio.Event()
+        release = asyncio.Event()
+        second_cancel = asyncio.Event()
+
+        async def callback():
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleaning.set()
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    second_cancel.set()
+                    raise
+                raise OSError("secondary callback failure")
+
+        async def health(_ready):
+            pass
+
+        child = asyncio.create_task(callback())
+        owner = SimpleNamespace(
+            monitor_ready=True,
+            _event_task=child,
+            _event_sequence=1,
+            _event_task_generation=0,
+            _global_abort_task=None,
+            _fallback_abort_tasks={},
+            _publish_generations=lambda _: None,
+            _set_monitor_ready=health,
+            last_error=None,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        shutdown = asyncio.create_task(VoiceEventListener._shutdown_callbacks(owner))
+        try:
+            await asyncio.wait_for(cleaning.wait(), timeout=1)
+            shutdown.cancel()
+            done, _ = await asyncio.wait({shutdown}, timeout=0.05)
+            assert not done
+            assert not second_cancel.is_set()
+            assert owner._event_task is child
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(shutdown, timeout=1)
+            assert owner._event_task is None
+            assert owner.last_error == "Shutdown callback failed: OSError"
+            assert not owner.monitor_ready
+        finally:
+            release.set()
+            await asyncio.gather(shutdown, child, return_exceptions=True)
+
+    asyncio.run(scenario())

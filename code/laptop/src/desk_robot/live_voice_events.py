@@ -434,13 +434,33 @@ class VoiceEventListener:
             finally:
                 await self._set_monitor_ready(False)
         finally:
+            cancellation = None
             if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                joined = asyncio.gather(*tasks, return_exceptions=True)
+                while not joined.done():
+                    try:
+                        await asyncio.shield(joined)
+                    except asyncio.CancelledError as exc:
+                        # Repeated shutdown cancellation must not recancel a
+                        # callback that is already flushing the physical head.
+                        cancellation = exc
+                failures = sorted({
+                    type(result).__name__ for result in joined.result()
+                    if isinstance(result, BaseException)
+                    and not isinstance(result, asyncio.CancelledError)
+                })
+                if failures:
+                    detail = "Shutdown callback failed: " + ", ".join(failures)
+                    self.last_error = (
+                        f"{self.last_error}; {detail}" if self.last_error else detail
+                    )
             self._event_task = None
             self._event_sequence = None
             self._event_task_generation = None
             self._global_abort_task = None
             self._fallback_abort_tasks.clear()
+            if cancellation is not None:
+                raise cancellation
 
     async def run(self) -> None:
         try:
