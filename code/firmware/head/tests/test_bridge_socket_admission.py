@@ -40,6 +40,7 @@ def test_http_framing_preserves_admission_and_rejection_order(tmp_path):
 #include "robot_protocol.h"
 using namespace desk_robot;
 constexpr int ESP_OK = 0, ESP_ERR_NOT_FOUND = 1, ESP_ERR_HTTPD_RESULT_TRUNC = 2;
+constexpr int ESP_ERR_INVALID_ARG = 3;
 constexpr int HTTP_GET = 0, HTTP_POST = 1;
 constexpr std::size_t kMaxBody = 160;
 struct httpd_req_t {
@@ -48,9 +49,13 @@ struct httpd_req_t {
     const char* uri = "/api/status";
     const char* length = nullptr;
     const char* encoding = nullptr;
+    int length_read_status = ESP_OK;
 };
 const char* header(httpd_req_t* req, const char* name) {
-    return strcmp(name, "Content-Length") == 0 ? req->length : req->encoding;
+    if (strcmp(name, "Content-Length") == 0) return req->length;
+    if (strcmp(name, "Transfer-Encoding") == 0) return req->encoding;
+    assert(false && "unexpected HTTP header lookup");
+    return nullptr;
 }
 std::size_t httpd_req_get_hdr_value_len(httpd_req_t* req, const char* name) {
     const auto* value = header(req, name);
@@ -62,7 +67,8 @@ int httpd_req_get_hdr_value_str(httpd_req_t* req, const char* name,
     if (!value) return ESP_ERR_NOT_FOUND;
     if (strlen(value) >= capacity) return ESP_ERR_HTTPD_RESULT_TRUNC;
     memcpy(out, value, strlen(value) + 1);
-    return ESP_OK;
+    // Keep the copied bytes valid even on failure: status must be authoritative.
+    return strcmp(name, "Content-Length") == 0 ? req->length_read_status : ESP_OK;
 }
 ''' + bridge[start:end] + r'''
 void check(httpd_req_t req, int status, const char* error, bool json = false) {
@@ -74,6 +80,9 @@ void check(httpd_req_t req, int status, const char* error, bool json = false) {
 int main() {
     check({}, 200, nullptr);
     check({0, HTTP_POST, "/api/command"}, 200, nullptr, true);
+    check({1, HTTP_POST, "/api/command", "1"}, 200, nullptr, true);
+    check({1, HTTP_POST, "/api/command", "1", nullptr, ESP_ERR_INVALID_ARG},
+          400, "invalid content length");
     check({160, HTTP_POST, "/api/face", "0160"}, 200, nullptr, true);
     check({161, HTTP_POST, "/api/command", "161"}, 413, "invalid body length");
     check({1, HTTP_POST, "/api/command"}, 400, "missing content length");
