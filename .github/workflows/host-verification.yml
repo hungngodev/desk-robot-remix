@@ -94,18 +94,31 @@ jobs:
         working-directory: code
         run: |
           uv python install 3.11
-          uv sync --no-dev --python 3.11 --locked
+          uv sync --no-dev --no-editable --python 3.11 --locked
           .venv/bin/python -I - <<'PY'
           import importlib
           import pkgutil
+          from pathlib import Path
 
           import desk_robot
 
-          modules = sorted(item.name for item in pkgutil.walk_packages(
+          root = Path("laptop/src/desk_robot")
+          assert (root / "__init__.py").is_file(), "Missing source package"
+          expected = set()
+          for path in root.rglob("*.py"):
+              parts = path.relative_to(root).with_suffix("").parts
+              if parts[-1] == "__init__":
+                  parts = parts[:-1]
+              expected.add(".".join(("desk_robot", *parts)))
+          modules = {desk_robot.__name__}
+          modules.update(item.name for item in pkgutil.walk_packages(
               desk_robot.__path__, desk_robot.__name__ + "."
           ))
-          assert modules, "Installed wheel contains no runtime modules"
-          for module in modules:
+          assert modules == expected, (
+              f"Runtime wheel module mismatch: missing={sorted(expected - modules)}, "
+              f"extra={sorted(modules - expected)}"
+          )
+          for module in sorted(modules):
               importlib.import_module(module)
           print(f"Imported {len(modules)} runtime modules without extras")
           PY

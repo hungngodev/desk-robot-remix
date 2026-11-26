@@ -2,11 +2,13 @@
 
 import ast
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 # Distribution names that differ from their Python import names.
 _DISTRIBUTIONS = {
@@ -100,3 +102,46 @@ def test_import_policy_detects_missing_and_eager_optional_dependencies(source, e
         required={"numpy", "pillow"},
         optional={"opencv-python", "pyserial"},
     ) == expected
+
+
+@pytest.mark.parametrize("fault", ["none", "missing", "extra", "broken"])
+def test_runtime_only_ci_imports_exact_source_inventory(tmp_path, fault):
+    code = Path(__file__).resolve().parents[1]
+    workflow = yaml.safe_load(
+        (code.parent / ".github/workflows/host-verification.yml").read_text()
+    )
+    step = next(
+        step for step in workflow["jobs"]["mac-fast"]["steps"]
+        if step.get("name") == "Verify imports with locked runtime dependencies only"
+    )
+    assert step["working-directory"] == "code"
+    assert "uv sync --no-dev --no-editable --python 3.11 --locked" in step["run"].splitlines()
+    script = step["run"].split(".venv/bin/python -I - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    files = ("__init__.py", "first.py", "nested/__init__.py", "nested/second.py")
+    source = tmp_path / "laptop/src/desk_robot"
+    installed = tmp_path / "site/desk_robot"
+    for root in (source, installed):
+        for name in files:
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+    if fault == "missing":
+        (installed / "nested/second.py").unlink()
+    elif fault == "extra":
+        (installed / "stale.py").touch()
+    elif fault == "broken":
+        (installed / "first.py").write_text("raise RuntimeError('broken import')\n")
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", f"import sys; sys.path.insert(0, {str(installed.parent)!r})\n"
+         + script],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+    )
+    assert (result.returncode == 0) == (fault == "none"), result.stdout + result.stderr
+    if fault == "none":
+        assert "Imported 4 runtime modules" in result.stdout
+    elif fault == "missing":
+        assert "missing=['desk_robot.nested.second']" in result.stderr
+    elif fault == "extra":
+        assert "extra=['desk_robot.stale']" in result.stderr
+    else:
+        assert "broken import" in result.stderr
