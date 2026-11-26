@@ -90,6 +90,25 @@ jobs:
             fi
           done < <(git -c safe.directory="$PWD" ls-files -z)
       - uses: astral-sh/setup-uv@v6
+      - name: Verify imports with locked runtime dependencies only
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --no-dev --python 3.11 --locked
+          .venv/bin/python -I - <<'PY'
+          import importlib
+          import pkgutil
+
+          import desk_robot
+
+          modules = sorted(item.name for item in pkgutil.walk_packages(
+              desk_robot.__path__, desk_robot.__name__ + "."
+          ))
+          assert modules, "Installed wheel contains no runtime modules"
+          for module in modules:
+              importlib.import_module(module)
+          print(f"Imported {len(modules)} runtime modules without extras")
+          PY
       - name: Install locked Mac test dependencies
         working-directory: code
         run: |
@@ -155,6 +174,7 @@ jobs:
             tests/test_server_bridge.py::test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates \
             tests/test_server_bridge.py::test_pinned_upstream_connection_initializes_per_device_native_tts \
             tests/test_server_bridge.py::test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice \
+            tests/test_ci_python_imports.py \
             tests/test_ci_lane_concurrency.py
 
   python-and-head-host:
