@@ -104,6 +104,9 @@ class Runtime:
         # Authenticated Xiaozhi tool receipt owner, distinct from Mac turn epoch.
         # None means disconnected or untrusted; absent robot IDs have no owner.
         self._voice_turn_generations: dict[str, int] | None = None
+        # Historical comparison only; never a current tool receipt owner.
+        self._last_voice_turn_generations: dict[str, int] = {}
+        self._voice_gap_generations: dict[str, int] | None = None
         self._voice_task: asyncio.Task | None = None
         self._room_stop = asyncio.Event()
         self._room_task: asyncio.Task | None = None
@@ -357,6 +360,21 @@ class Runtime:
         self._voice_turn_generations = (
             None if generations is None else dict(generations)
         )
+        if generations is not None:
+            self._last_voice_turn_generations = dict(generations)
+
+    def _recovered_voice_starts(self, active: frozenset[str]) -> set[str]:
+        """Distinguish a missed turn from the same VAD lease after a replay gap."""
+        prior = getattr(self, "_voice_gap_generations", None)
+        current = getattr(self, "_voice_turn_generations", None)
+        if prior is None or current is None:
+            return set()
+        self._voice_gap_generations = None
+        return {
+            robot_id for robot_id in active
+            if robot_id not in prior
+            or (robot_id in current and current[robot_id] != prior[robot_id])
+        }
 
     def _begin_voice_stop(self) -> int:
         """Keep a separate pending STOP receipt while cameras mark human VAD."""
@@ -412,12 +430,14 @@ class Runtime:
         # A start may be missing from the replay ring after reconnect.
         # Active VAD from the authenticated server is enough to stop any
         # currently playing unsolicited or group speech before reconciliation.
+        recovered_starts = self._recovered_voice_starts(active)
         missing_starts = [
             robot_id for robot_id in active
             # A finite seven-second AEC barge hold is NOT an explicit VAD
             # start. An authenticated active snapshot must upgrade it to
             # a real turn, preempt old camera work and start speech frames.
             if visual.hub.voice_until[robot_id] != float("inf")
+            or robot_id in recovered_starts
         ]
         # Reconnect must also reconcile the volatile conversation turn
         # clock, so a delayed transmitted sentence cannot revive after barge.
@@ -585,6 +605,15 @@ class Runtime:
             return  # Shutdown owns the final physical STOP and teardown.
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
+        # Ordered replay handles ordinary reconnects. A gap can hide both
+        # an end and a new start for the same still-active robot. A reset
+        # retires the server epoch even when numeric generations coincide.
+        if reason == "reset":
+            self._voice_gap_generations = {}
+        elif reason == "gap" and getattr(self, "_voice_gap_generations", None) is None:
+            self._voice_gap_generations = dict(
+                getattr(self, "_last_voice_turn_generations", {})
+            )
         self._voice_turn_generations = None
         stop_attempt = self._begin_voice_stop()
         coord = getattr(self, "coordinator", None)

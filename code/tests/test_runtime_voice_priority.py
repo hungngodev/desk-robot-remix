@@ -2124,3 +2124,66 @@ async def test_background_context_preserves_speaker_floor(settings, tmp_path, fl
         if group is not None:
             group.cancel()
             await asyncio.gather(group, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    ("reason", "generation", "new_turn"),
+    [("stream_unavailable", 7, False), ("gap", 7, False),
+     ("gap", 8, True), ("reset", 7, True)],
+)
+async def test_reconnect_preserves_same_turn_but_fences_missed_turn(
+    reason, generation, new_turn,
+):
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.multimodal import CameraFrameHub
+
+    calls = []
+    starts = []
+
+    async def interrupt(robot_id):
+        calls.append(robot_id)
+
+    async def stop():
+        calls.append("group_stop")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="p")])
+    runtime.pet = SimpleNamespace(
+        interrupt=interrupt, set_voice_monitor_ready=lambda ready: None,
+    )
+    runtime.conversation = SimpleNamespace(stop=stop)
+    runtime.attention = AttentionLedger(["p"])
+    hub = CameraFrameHub(["p"])
+
+    def voice_started(robot_id):
+        starts.append(robot_id)
+        hub.notify(robot_id, "human_voice", time.monotonic())
+
+    runtime.multimodal = SimpleNamespace(hub=hub, voice_started=voice_started)
+    configure_room_dispatch(runtime)
+    before = time.monotonic() - 3
+    runtime.attention.human_started("p", before)
+    assert runtime.attention.heard(
+        "p", "omni_123456789abc_123456789abcdef01234", "keep discussing the key",
+        before + 0.1,
+    )
+    hub.notify("p", "human_voice", before)
+    runtime._voice_speech_active = {"p"}
+    runtime._on_voice_generations({"p": 7})
+    runtime._on_voice_generations(None)
+    await runtime._on_voice_global(reason)
+    runtime._on_room_disconnect()
+    assert runtime._voice_turn_generations is None
+    assert "keep discussing the key" in runtime.attention.timeline(
+        "p", time.monotonic(),
+    )[0]["content"]
+
+    runtime._on_voice_generations({"p": generation})
+    await runtime._on_voice_snapshot(frozenset({"p"}))
+    await runtime._on_voice_snapshot(frozenset({"p"}))
+    context = runtime.attention.timeline("p", time.monotonic())
+    assert any("keep discussing the key" in item["content"] for item in context) is (
+        not new_turn
+    )
+    assert starts == (["p"] if new_turn else [])
+    assert calls.count("group_stop") == (2 if new_turn else 1)
