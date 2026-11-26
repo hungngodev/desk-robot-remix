@@ -21,9 +21,7 @@ std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
         // on the microphone-sensitive Sense path. Reject truncated JPEGs.
         const size_t len = current_fb_->len;
         const uint8_t* buf = current_fb_->buf;
-        if (len < 4 || len > 512 * 1024 ||
-            buf[0] != 0xff || buf[1] != 0xd8 ||
-            buf[len - 2] != 0xff || buf[len - 1] != 0xd9)
+        if (!desk_robot::ValidJpegFrame(buf, len))
             return std::unexpected("Invalid camera JPEG frame");
         return std::vector<uint8_t>(buf, buf + len);
     }
@@ -38,9 +36,7 @@ std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
     size_t len = 0;
     const bool ok = image_to_jpeg(encode_buf_, current_fb_->len,
         current_fb_->width, current_fb_->height, V4L2_PIX_FMT_RGB565, 80, &jpeg, &len);
-    if (!ok || !jpeg || len < 4 || len > 512 * 1024 ||
-        jpeg[0] != 0xff || jpeg[1] != 0xd8 ||
-        jpeg[len - 2] != 0xff || jpeg[len - 1] != 0xd9) {
+    if (!ok || !desk_robot::ValidJpegFrame(jpeg, len)) {
         free(jpeg);
         return std::unexpected("JPEG encoding failed");
     }

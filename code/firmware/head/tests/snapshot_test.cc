@@ -45,6 +45,7 @@ bool encoder_ok = true;
 bool encoder_framing_ok = true;
 bool encoder_partial_failure = false;
 bool encoder_null_output = false;
+bool encoder_double_soi = false;
 std::size_t encoder_reported_length = 5;
 int encoder_calls = 0;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
@@ -59,6 +60,13 @@ bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
         return true;
     }
     if (!encoder_ok && !encoder_partial_failure) return false;
+    if (encoder_double_soi) {
+        const uint8_t bytes[] = {0xff, 0xd8, 0xff, 0xd8, 0xff, 0xd9};
+        *len = sizeof(bytes);
+        *out = static_cast<uint8_t*>(malloc(*len));
+        std::copy(bytes, bytes + *len, *out);
+        return encoder_ok;
+    }
     *len = 5;
     *out = static_cast<uint8_t*>(malloc(*len));
     const uint8_t bytes[] = {0xff, 0xd8, src[0], 0xff, static_cast<uint8_t>(encoder_framing_ok ? 0xd9 : 0)};
@@ -73,6 +81,7 @@ public:
     bool frame_available = true;
     bool native_jpeg_ok = true;
     bool native_soi_ok = true;
+    bool native_double_soi = false;
     uint8_t pixels[8] = {};
     Frame frame{pixels, 8, 2, 2, PIXFORMAT_RGB565};
     Frame* current_fb_ = nullptr;
@@ -93,6 +102,11 @@ public:
             pixels[1] = native_soi_ok ? 0xd8 : 0;
             pixels[2] = 0xff;
             pixels[3] = native_jpeg_ok ? 0xd9 : 0;
+            if (native_double_soi) {
+                pixels[3] = 0xd8;
+                pixels[4] = 0xff;
+                pixels[5] = 0xd9;
+            }
         } else {
             pixels[0] = static_cast<uint8_t>(capture_calls);
         }
@@ -132,10 +146,15 @@ int main() {
     assert(!capture());
     encoder_null_output = false;
     encoder_framing_ok = false;
-    assert(!capture());
+    auto bad_encoded_eoi = capture();
+    assert(!bad_encoded_eoi && bad_encoded_eoi.error() == "JPEG encoding failed");
     encoder_framing_ok = true;
+    encoder_double_soi = true;
+    auto bad_encoded_soi = capture();
+    assert(!bad_encoded_soi && bad_encoded_soi.error() == "JPEG encoding failed");
+    encoder_double_soi = false;
     assert(capture());
-    for (std::size_t length : {std::size_t{0}, std::size_t{3},
+    for (std::size_t length : {std::size_t{0}, std::size_t{3}, std::size_t{4},
                                std::size_t{512 * 1024 + 1},
                                std::numeric_limits<std::size_t>::max()}) {
         encoder_reported_length = length;
@@ -177,7 +196,16 @@ int main() {
     assert(!capture());
     camera.native_soi_ok = true;
     camera.native_jpeg_ok = false;
-    assert(!capture());
+    auto bad_native_eoi = capture();
+    assert(!bad_native_eoi && bad_native_eoi.error() == "Invalid camera JPEG frame");
+    camera.native_jpeg_ok = true;
+    camera.native_double_soi = true;
+    camera.frame.len = 6;
+    auto bad_native_soi = capture();
+    assert(!bad_native_soi && bad_native_soi.error() == "Invalid camera JPEG frame");
+    camera.native_double_soi = false;
+    camera.frame.len = 4;
+    assert(capture()->size() == 4);
     camera.frame_available = false;
     assert(!capture());
     assert(encoder_calls == before_native);  // Native JPEG never enters RGB encoding.

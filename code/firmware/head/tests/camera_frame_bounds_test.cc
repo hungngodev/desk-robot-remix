@@ -38,4 +38,20 @@ int main() {
     assert(!ValidRgb565Frame(max, 1, max));
     assert(!ValidRgb565Frame(1, max, max));
     assert(!ValidRgb565Frame(1, 1, max));
+
+    using desk_robot::ValidJpegFrame;
+    const std::uint8_t valid[] = {0xff, 0xd8, 0x42, 0xff, 0xd9};
+    const std::uint8_t repeated[] = {0xff, 0xd8, 0xff, 0xd8, 0xff, 0xd9};
+    const std::uint8_t missing_eoi[] = {0xff, 0xd8, 0x42, 0xff, 0};
+    const std::uint8_t bad_soi[] = {0xff, 0, 0x42, 0xff, 0xd9};
+    assert(ValidJpegFrame(valid, sizeof(valid)));
+    assert(!ValidJpegFrame(repeated, sizeof(repeated)));
+    assert(!ValidJpegFrame(missing_eoi, sizeof(missing_eoi)));
+    assert(!ValidJpegFrame(bad_soi, sizeof(bad_soi)));
+    assert(!ValidJpegFrame(nullptr, sizeof(valid)));
+    for (std::size_t length = 0; length < sizeof(valid); ++length) {
+        assert(!ValidJpegFrame(valid, length));
+    }
+    assert(!ValidJpegFrame(valid, 512 * 1024 + 1));
+    assert(!ValidJpegFrame(valid, max));
 }

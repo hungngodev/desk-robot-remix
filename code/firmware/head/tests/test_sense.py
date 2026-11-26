@@ -1341,8 +1341,8 @@ class SenseSelectionTests(unittest.TestCase):
         self.assertIn("config.fb_location = CAMERA_FB_IN_PSRAM;", board)
         self.assertIn("config.grab_mode = CAMERA_GRAB_LATEST;", board)
         self.assertIn("current_fb_->format == PIXFORMAT_JPEG", snapshot)
-        self.assertIn("buf[0] != 0xff || buf[1] != 0xd8", snapshot)
-        self.assertIn("buf[len - 2] != 0xff || buf[len - 1] != 0xd9", snapshot)
+        self.assertIn("desk_robot::ValidJpegFrame(buf, len)", snapshot)
+        self.assertIn("desk_robot::ValidJpegFrame(jpeg, len)", snapshot)
         self.assertIn("return std::vector<uint8_t>(buf, buf + len);", snapshot)
         # Overlay is generated into an isolated pinned Xiaozhi copy.
         self.assertIn('(HERE / "modular_snapshot.inc").read_text()', installer)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace desk_robot {
 // Both RGB565 candidates are configured at QVGA or VGA. This is a buffer
@@ -15,5 +16,14 @@ constexpr bool ValidRgb565Frame(std::size_t width, std::size_t height,
     return width > 0 && height > 0 && width <= kMaxEdge && height <= kMaxEdge &&
            width <= kMaxPixels / height &&
            bytes == width * height * kBytesPerPixel;
+}
+
+// Envelope check only, not a JPEG decoder. Reject a repeated leading SOI,
+// but do not scan opaque APP payloads for marker-like bytes.
+constexpr bool ValidJpegFrame(const std::uint8_t* buf, std::size_t len) {
+    return buf && len >= 4 && len <= 512 * 1024 &&
+           buf[0] == 0xff && buf[1] == 0xd8 &&
+           buf[len - 2] == 0xff && buf[len - 1] == 0xd9 &&
+           !(buf[2] == 0xff && buf[3] == 0xd8);
 }
 }  // namespace desk_robot
