@@ -734,6 +734,9 @@ void service_safety_checkpoint() {
   invalidate_shared_bus_if_faulted();
   poll_touch(millis());
   apply_outputs();
+#if DESK_ROBOT_ENABLE_HAPTIC
+  if (!control.haptic_feedback_allowed()) accessories.cancel_pending_haptic();
+#endif
 }
 #endif
 
@@ -822,7 +825,7 @@ void loop() {
   if (cap_events != last_haptic_cap_events) {
     last_haptic_cap_events = cap_events;
     if (control.state().cap_valid && control.state().cap_mask != 0U &&
-        !control.state().touch_blocked())
+        control.haptic_feedback_allowed())
       accessories.request_haptic(millis());
   }
 #endif

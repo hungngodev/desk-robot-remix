@@ -116,6 +116,19 @@ class BodyControl {
   explicit BodyControl(BodyProfile profile = BodyProfile::DcPwm,
                        CliffGuard* guard = nullptr) : profile_(profile), guard_(guard) {}
   const State& state() const { return state_; }
+  // Optional haptic edges are disallowed for an armed drive or a latched
+  // safety fault. This is not motor permission or electrical qualification.
+  bool haptic_feedback_allowed() const {
+    return !state_.armed && state_.left == 0 && state_.right == 0 &&
+           !state_.touch_blocked() && !state_.bumper_raw &&
+           !state_.bumper_active && guard_ != nullptr &&
+           guard_->fault() == CliffFault::None && !dock_power_lockout_ &&
+           !dock_monitor_fault_latched_ && !dc_fault_latched_ &&
+           !bumper_fault_latched_ && !battery_fault_latched_ &&
+           !fuel_monitor_fault_latched_ && !motor_watchdog_latched_ &&
+           !command_timeout_latched_ && !imu_low_g_latched_ &&
+           !imu_attitude_latched_ && !imu_sensor_fault_latched_;
+  }
   void tick(std::uint32_t now_ms);
   // Called after output application, before publishing an accepted reply.
   void veto_unapplied_motion_ack(char* reply, std::size_t capacity) const;

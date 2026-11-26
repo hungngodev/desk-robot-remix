@@ -54,6 +54,8 @@ class HapticPulse {
       active_ = false;
     }
   }
+  // Suppression discards queued edges but preserves an owed LOW write.
+  void cancel_pending() { queued_ = false; }
   void fault() { ready_ = queued_ = active_ = false; }
   bool ready() const { return ready_; }
   bool active() const { return active_; }

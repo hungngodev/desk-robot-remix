@@ -40,6 +40,12 @@ class AccessorySensors {
     return false;
 #endif
   }
+  // No I2C here: STOP must precede optional GPIOB service.
+  void cancel_pending_haptic() {
+#if DESK_ROBOT_ENABLE_HAPTIC
+    haptic_.cancel_pending();
+#endif
+  }
   bool haptic_ready() const {
 #if DESK_ROBOT_ENABLE_HAPTIC
     return haptic_.ready();

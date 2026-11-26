@@ -105,7 +105,33 @@ static void check_active_fault(std::uint32_t start) {
   }
 }
 
+// A safety veto between lane-5 visits must discard queued HIGH edges but
+// leave an already acknowledged HIGH eligible for the next LOW write.
+static void check_safety_suppression(std::uint32_t start) {
+  using Action = HapticPulse::Action;
+  HapticPulse h;
+  h.configure(true);
+  CHECK(h.request(start));
+  h.cancel_pending();
+  CHECK(h.next(start + 1U, true) == Action::None);
+  CHECK(h.request(start + 2U));
+  CHECK(h.next(start + 3U, true) == Action::TurnOn);
+  h.completed(Action::TurnOn, true, start + 3U);
+  h.cancel_pending();
+  CHECK(h.active());
+  CHECK(h.next(start + 4U, false) == Action::TurnOff);
+  h.completed(Action::TurnOff, true, start + 4U);
+  CHECK(!h.active());
+  CHECK(h.next(start + 5U, true) == Action::None);
+  CHECK(!h.request(start + 1502U));
+  CHECK(h.request(start + 1503U));
+  h.cancel_pending();
+  CHECK(h.next(start + 1504U, true) == Action::None);
+}
+
 int main() try {
+ check_safety_suppression(100U);
+ check_safety_suppression(0xfffffffeU);
  check_active_fault(100U);
  check_active_fault(0xfffffffeU);
  check_stalled_high(100U);
