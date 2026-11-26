@@ -60,3 +60,29 @@ def test_authenticated_validation_preserves_422_and_success(credential):
         assert response.status_code == 200
         assert response.json() == {"count": 1}
         assert calls == [{"count": 1}]
+
+
+@pytest.mark.parametrize("credential", ["operator-token", "tool-token"])
+def test_exact_request_limit_preserves_valid_payload(credential):
+    from desk_robot.api_ingress import MAX_REQUEST_BYTES
+
+    app = FastAPI()
+    app.add_middleware(APIIngress, tokens=lambda: ("operator-token", "tool-token"))
+    calls = []
+
+    @app.post("/v1/fixture")
+    async def action(payload: dict[str, str]):
+        calls.append(payload)
+        return {"size": len(payload["text"])}
+
+    text = "a" * (MAX_REQUEST_BYTES - len(b'{"text":""}'))
+    body = b'{"text":"' + text.encode("ascii") + b'"}'
+    assert len(body) == MAX_REQUEST_BYTES
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/fixture", content=body,
+            headers={"Authorization": f"Bearer {credential}", "Content-Type": "application/json"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"size": len(text)}
+    assert calls == [{"text": text}]
