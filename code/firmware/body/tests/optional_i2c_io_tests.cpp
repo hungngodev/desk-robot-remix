@@ -1944,6 +1944,41 @@ int main() {
     reset_mcp_wire.mcp_gppub = 0x01;
     for (std::uint32_t ms = 144; ms <= 216; ms += 12) reset_mcp.poll(ms);
     CHECK(!reset_mcp.readings().dock.valid);
+    // Reject a corrupt INA226 bus word before refreshing either monitor
+    // provenance or current. MAX17048 is an independent acquisition.
+    {
+      TwoWire bus_wire;
+      desk_robot::AccessorySensors bus_accessories;
+      CHECK(bus_accessories.begin(bus_wire));
+      for (std::uint32_t ms = 0; ms < 1000; ms += 12)
+        bus_accessories.poll(ms);
+      const auto before = bus_accessories.readings().gauge;
+      const auto& live = bus_accessories.readings().gauge;
+      CHECK(before.monitor_valid && before.fuel_valid && before.bus_mv == 5120U);
+      bus_wire.ina226_shunt_raw = 0xffc4U;
+      std::uint32_t now = 1008;
+      for (const auto bad : {0x8000U, 0xffffU}) {
+        bus_wire.ina226_bus_raw = static_cast<std::uint16_t>(bad);
+        const auto end = now + 300U;
+        for (; now < end; now += 12) bus_accessories.poll(now);
+        CHECK(!live.monitor_valid && !live.pack_current_valid);
+        CHECK(live.monitor_sample_seq == before.monitor_sample_seq);
+        CHECK(live.monitor_at_ms == before.monitor_at_ms);
+        CHECK(live.bus_mv == before.bus_mv && live.shunt_uv == before.shunt_uv);
+        CHECK(live.fuel_valid && live.fuel_sample_seq > before.fuel_sample_seq);
+      }
+      bus_wire.ina226_bus_raw = 0x0c80U;
+      const auto end = now + 300U;
+      for (; now < end; now += 12) bus_accessories.poll(now);
+      CHECK(live.monitor_valid && live.bus_mv == 4000U && live.shunt_uv == -150);
+      CHECK(live.monitor_sample_seq > before.monitor_sample_seq);
+      CHECK(live.monitor_at_ms > before.monitor_at_ms);
+#if defined(DESK_ROBOT_PACK_SHUNT_MOHM) && DESK_ROBOT_PACK_SHUNT_MOHM == 5
+      CHECK(live.pack_current_valid && live.pack_current_ma == -30);
+#else
+      CHECK(!live.pack_current_valid);
+#endif
+    }
     // INA226 saturated signed endpoints (0x7FFF and 0x8000) must invalidate
     // monitor and pack current while preserving previous sequence and timestamp.
     TwoWire shunt_sat_wire;

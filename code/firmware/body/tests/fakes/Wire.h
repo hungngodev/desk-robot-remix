@@ -30,6 +30,7 @@ class TwoWire {
   std::uint16_t fuel_version = 0x0011U;
   int fail_ina_read_register = -1;
   bool fail_sht_command = false;
+  std::uint16_t ina226_bus_raw = 0x1000U;
   std::uint16_t ina226_shunt_raw = 0x0010U;
   // Normal fake cadence has a new conversion each poll; fault injection
   // holds CVRF low while the previous data registers remain readable.
@@ -616,7 +617,8 @@ class TwoWire {
     else if (addr == 0x40 && register_address == 0x06)
       inbound = {0x00, static_cast<std::uint8_t>(ina226_conversion_ready ? 0x08U : 0U)};
     else if (addr == 0x40 && register_address == 0x02)
-      inbound = {0x10, 0x00};
+      inbound = {static_cast<std::uint8_t>(ina226_bus_raw >> 8),
+                 static_cast<std::uint8_t>(ina226_bus_raw)};
     else if (addr == 0x40 && register_address == 0x01)
       inbound = {static_cast<std::uint8_t>(ina226_shunt_raw >> 8),
                  static_cast<std::uint8_t>(ina226_shunt_raw)};
