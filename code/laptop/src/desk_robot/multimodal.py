@@ -1039,6 +1039,15 @@ class CameraFrameHub:
             maxlen=tools.maxlen,
         )
 
+    def discard_video_if_current(
+        self, robot_id: str, *, generation: int, last_capture: float,
+    ) -> None:
+        """Retire failed evidence without erasing a newer camera publication."""
+        self._check(robot_id)
+        if (generation == self._generation[robot_id]
+                and last_capture == self.last_capture[robot_id]):
+            self.discard_video(robot_id)
+
     def discard_video(self, robot_id: str) -> None:
         """Drop failed camera evidence without releasing a live human VAD turn."""
         self._check(robot_id)
@@ -2005,9 +2014,9 @@ class MultimodalOrchestrator:
             # A failed device read cannot leave a last-good JPEG eligible
             # for native speech coalescing. Preserve a genuinely newer
             # receipt or consent generation published while the read waited.
-            if (generation == self.hub._generation[robot_id]
-                    and last_capture == self.hub.last_capture[robot_id]):
-                self.hub.discard_video(robot_id)
+            self.hub.discard_video_if_current(
+                robot_id, generation=generation, last_capture=last_capture,
+            )
             raise
         finally:
             if self._proactive_snapshots.get(robot_id) is task:
@@ -2072,6 +2081,7 @@ class MultimodalOrchestrator:
             metrics["camera_requests"] += 1
             started = time.monotonic()
             generation = self.hub._generation[robot_id]
+            last_capture = self.hub.last_capture[robot_id]
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
             try:
@@ -2155,6 +2165,14 @@ class MultimodalOrchestrator:
                     (time.monotonic() - started) * 1000
                 )
                 return evidence
+            except (ValueError, OSError):
+                # A complete HTTP envelope may still contain undecodable JPEG
+                # data. Retire the old observation, not concurrent new media.
+                self.hub.discard_video_if_current(
+                    robot_id, generation=generation, last_capture=last_capture,
+                )
+                metrics["camera_errors"] += 1
+                raise
             except Exception:
                 metrics["camera_errors"] += 1
                 raise

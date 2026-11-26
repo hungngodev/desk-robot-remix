@@ -594,10 +594,12 @@ async def test_stream_activation_drains_still_and_blocks_fallback(monkeypatch):
             await head.snapshot()
     assert paths == ["/api/camera.jpg", "/api/camera.mjpg"]
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("newer_receipt", [False, True])
+@pytest.mark.parametrize("failure", ["http", "decode"])
 async def test_failed_http_snapshot_invalidates_only_old_hub_receipts(
-    monkeypatch, newer_receipt,
+    monkeypatch, newer_receipt, failure,
 ):
     """A failed still must not make a previous JPEG look like a new observation."""
     import time
@@ -624,7 +626,9 @@ async def test_failed_http_snapshot_invalidates_only_old_hub_receipts(
         assert request.url.path == "/api/camera.jpg"
         started.set()
         await release.wait()
-        return httpx.Response(503)
+        if failure == "http":
+            return httpx.Response(503)
+        return httpx.Response(200, content=b"\xff\xd8not a JPEG\xff\xd9")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         head = HttpHead(robot, client)
@@ -642,7 +646,8 @@ async def test_failed_http_snapshot_invalidates_only_old_hub_receipts(
             if newer_receipt:
                 fresh = hub.offer(robot.id, jpeg, time.monotonic(), source="speech")
             release.set()
-            with pytest.raises(HeadError, match="head request failed"):
+            expected = HeadError if failure == "http" else OSError
+            with pytest.raises(expected):
                 await asyncio.wait_for(pending, timeout=1)
             if fresh is None:
                 assert not hub.frames[robot.id]
@@ -653,4 +658,3 @@ async def test_failed_http_snapshot_invalidates_only_old_hub_receipts(
             release.set()
             await asyncio.gather(pending, return_exceptions=True)
             await orchestrator.close()
-
