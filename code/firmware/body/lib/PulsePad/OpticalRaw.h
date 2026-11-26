@@ -37,7 +37,16 @@ inline OpticalChannels decode_optical_channels(const std::uint8_t* bytes,
   return ir_first ? OpticalChannels{second, first}
                   : OpticalChannels{first, second};
 }
-// Reject the 18-bit ADC rail; zero remains a legitimate dark reading.
+// Uniform transport fill is ambiguous even if the I2C read ACKed.
+// Check raw bytes before decoding away the upper six bits of each channel.
+inline bool optical_fifo_uniform_fault(const std::uint8_t* bytes) {
+  const auto fill = bytes[0];
+  if (fill != 0U && fill != 0xffU) return false;
+  for (unsigned i = 1; i < 6; ++i)
+    if (bytes[i] != fill) return false;
+  return true;
+}
+// Reject the 18-bit ADC rail; a single zero channel remains legitimate.
 // Preserve the portable decoder's raw units and channel ordering.
 inline bool optical_channels_saturated(const OpticalChannels& channels) {
   return channels.red == 0x3ffffU || channels.ir == 0x3ffffU;

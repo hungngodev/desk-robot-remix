@@ -547,10 +547,61 @@ static void check_cap_transport_faults() {
   }
 }
 
+// ACKed uniform register bytes must not become new touch or pulse evidence.
+static void check_uniform_sensor_faults() {
+  for (bool preferred : {false, true}) {
+    for (std::uint8_t fill : {std::uint8_t(0), std::uint8_t(0xff)}) {
+      TwoWire wire;
+      wire.cap_uses_0x29 = preferred;
+      desk_robot::ExpansionTouch touch;
+      CHECK(touch.begin(wire));
+      std::uint8_t zones = 0;
+      CHECK(touch.poll(100, zones) && zones == 0xA5);
+      wire.cap_touch_bits = fill;
+      CHECK(touch.poll(180, zones) && zones == fill); // real extreme mask
+      wire.cap_touch_bits = 0xA5;
+      CHECK(touch.poll(260, zones) && zones == 0xA5);
+      const auto clears = wire.cap_interrupt_clears;
+      wire.cap_touch_bits = wire.cap_main_control = fill;
+      wire.cap_product_id = wire.cap_manufacturer_id = fill;
+      CHECK(!touch.poll(340, zones) && !touch.verified());
+      CHECK(zones == 0xA5 && wire.cap_interrupt_clears == clears);
+      CHECK(!touch.poll(590, zones) && !touch.verified());
+      wire.cap_product_id = 0x50;
+      wire.cap_manufacturer_id = 0x5D;
+      for (unsigned step = 0; step < 7; ++step)
+        CHECK(!touch.poll(840 + step * 250, zones) && zones == 0xA5);
+      CHECK(touch.verified() && touch.poll(2420, zones) && zones == fill);
+      CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    }
+  }
+  for (int fill : {0, 0xff}) {
+    TwoWire wire;
+    fake_arduino_millis() = 0;
+    desk_robot::PulsePad pulse;
+    CHECK(pulse.begin(wire) && pulse.poll(0));
+    const auto before = pulse.sample();
+    wire.pulse_fifo_write_pointer = 6;
+    wire.pulse_fifo_fill = fill;
+    CHECK(!pulse.poll(60) && !pulse.sample().valid);
+    CHECK(pulse.sample().sample_seq == before.sample_seq);
+    CHECK(pulse.sample().at_ms == before.at_ms);
+    CHECK(pulse.sample().red == before.red && pulse.sample().ir == before.ir);
+    wire.pulse_fifo_fill = -1;
+    wire.pulse_fifo_write_pointer = 7;
+    CHECK(!pulse.poll(120) && !pulse.sample().valid); // quarantine flush
+    wire.pulse_fifo_write_pointer = 8;
+    CHECK(pulse.poll(180) && pulse.sample().valid);
+    CHECK(pulse.sample().sample_seq == before.sample_seq + 1U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
+
 int main() {
   try {
     check_address_scoped_wire_faults();
     check_cap_transport_faults();
+    check_uniform_sensor_faults();
     check_cap_interrupted_recovery();
     check_sht_crc_provenance();
     check_mux_write_boundary();

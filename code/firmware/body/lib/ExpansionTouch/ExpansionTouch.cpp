@@ -129,7 +129,13 @@ bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
     return false;  // Only a subsequent successful status read publishes touch.
   }
   std::uint8_t bits = 0;
-  const bool sample_ok = read(0x03, bits);
+  // Both extreme masks are legitimate, but a floating bus can return
+  // the same byte for every register while still reporting a successful read.
+  // Recheck the fixed product ID before accepting either ambiguous mask.
+  std::uint8_t product = 0;
+  const bool sample_ok = read(0x03, bits) &&
+      ((bits != 0U && bits != 0xffU) ||
+       (read(0xFD, product) && product == 0x50U));
   // CAP1188 can assert MAIN.INT on RELEASE when the contact mask is zero.
   // Follow the upstream touched() path and acknowledge every completed
   // status read, while preserving unrelated MAIN bits. A failed clear

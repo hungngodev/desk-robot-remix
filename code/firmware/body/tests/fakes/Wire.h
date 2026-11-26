@@ -53,6 +53,7 @@ class TwoWire {
   int fail_pulse_config_read_reg = -1;
   bool fail_pulse_status_read = false;
   bool pulse_clip_ir = false;
+  int pulse_fifo_fill = -1; // ACKed uniform FIFO bytes, or normal data if negative
   unsigned failed_imu_writes = 0;
   unsigned imu_terminated_transmissions = 0;
   unsigned failed_mcp_writes = 0;
@@ -597,6 +598,8 @@ class TwoWire {
              static_cast<std::uint8_t>(ir >> 8),
              static_cast<std::uint8_t>(ir)});
       }
+      if (pulse_fifo_fill >= 0)
+        inbound.assign(count, static_cast<std::uint8_t>(pulse_fifo_fill));
       pulse_fifo_read_pointer =
           static_cast<std::uint8_t>((pulse_fifo_read_pointer + count / 6) & 31U);
     } else if (addr == 0x39 && register_address == 0x92) inbound = {0xAB};

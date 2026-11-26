@@ -222,6 +222,15 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     sample_.valid = false;
     return false;
   }
+  // A uniform bus-fill record is not evidence of a physical conversion.
+  // Quarantine the entire burst, even when its last record looks plausible.
+  for (std::uint8_t i = 0; i < n; ++i) {
+    if (optical_fifo_uniform_fault(&data[i * 6])) {
+      fifo_unsynced_ = true;
+      sample_.valid = false;
+      return false;
+    }
+  }
   const std::uint8_t* latest = &data[(n - 1) * 6];
   // Default is RED/IR. Recheck each LED after a generic GY-MAX30102 PCB
   // swap; use the reversed lab profile only on measured channel identity.

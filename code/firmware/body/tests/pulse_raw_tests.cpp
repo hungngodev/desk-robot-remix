@@ -14,6 +14,17 @@ int main() {
     CHECK(desk_robot::optical18(max) == 262143U);
     CHECK(desk_robot::optical18(example) == 0x12345U);
     const std::uint8_t two_led_fifo[6] = {0x00, 0x12, 0x34, 0x01, 0x23, 0x45};
+    // All six bytes must agree; a single zero channel is not a bus fill.
+    for (std::uint8_t fill : {std::uint8_t(0), std::uint8_t(0xff)}) {
+      std::uint8_t frame[6] = {fill, fill, fill, fill, fill, fill};
+      CHECK(desk_robot::optical_fifo_uniform_fault(frame));
+      for (unsigned i = 0; i < 6; ++i) {
+        frame[i] ^= 1U;
+        CHECK(!desk_robot::optical_fifo_uniform_fault(frame));
+        frame[i] ^= 1U;
+      }
+    }
+    CHECK(!desk_robot::optical_fifo_uniform_fault(two_led_fifo));
     const auto datasheet = desk_robot::decode_optical_channels(two_led_fifo, false);
     const auto reversed = desk_robot::decode_optical_channels(two_led_fifo, true);
     CHECK(datasheet.red == 0x1234U && datasheet.ir == 0x12345U);
