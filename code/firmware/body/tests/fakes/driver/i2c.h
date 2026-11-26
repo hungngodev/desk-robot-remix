@@ -13,5 +13,11 @@ inline int i2c_set_pin(i2c_port_t port, int sda, int scl, bool sda_pullup,
       !sda_pullup || !scl_pullup || mode != I2C_MODE_MASTER ||
       lines.fail_restore)
     return -1;
+  // IDF v4.4.7 restores open-drain direction and releases output latches.
+  // Do not invent bus-clear clocks or erase externally held line faults.
+  lines.sda_mode = OUTPUT_OPEN_DRAIN | PULLUP;
+  lines.scl_mode = OUTPUT_OPEN_DRAIN | PULLUP;
+  lines.sda_driven_low = false;
+  lines.scl_driven_low = false;
   return ESP_OK;
 }

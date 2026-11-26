@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include "Wire.h"
+#include "driver/i2c.h"
 #include "TofBus.h"
 #include "RangeTelemetry.h"
 #include "CliffGuard.h"
@@ -426,6 +427,34 @@ int main() {
         select_mask(second, 1);
         CHECK(!transport.unsafe_parallel_mux);
       }
+    }
+    {
+      // The pin-matrix fake must do more than return ESP_OK.
+      auto& lines = fake_i2c_lines();
+      lines = FakeI2cLines{};
+      CHECK(digitalRead(21) == HIGH && digitalRead(22) == HIGH);
+      pinMode(21, OUTPUT);
+      pinMode(22, OUTPUT);
+      digitalWrite(21, LOW);
+      digitalWrite(22, LOW);
+      lines.sda_stuck = true;
+      lines.fail_restore = true;
+      CHECK(i2c_set_pin(I2C_NUM_0, 21, 22, true, true, I2C_MODE_MASTER) != ESP_OK);
+      CHECK(lines.sda_driven_low && lines.scl_driven_low);
+      CHECK(lines.sda_mode == OUTPUT && lines.scl_mode == OUTPUT);
+      lines.fail_restore = false;
+      CHECK(i2c_set_pin(I2C_NUM_0, 22, 21, true, true, I2C_MODE_MASTER) != ESP_OK);
+      CHECK(lines.sda_driven_low && lines.scl_driven_low);
+      CHECK(i2c_set_pin(I2C_NUM_0, 21, 22, true, true, I2C_MODE_MASTER) == ESP_OK);
+      CHECK(lines.sda_mode == (OUTPUT_OPEN_DRAIN | PULLUP));
+      CHECK(lines.scl_mode == (OUTPUT_OPEN_DRAIN | PULLUP));
+      CHECK(!lines.sda_driven_low && !lines.scl_driven_low);
+      CHECK(digitalRead(21) == LOW && digitalRead(22) == HIGH);
+      CHECK(lines.restore_calls == 3 && lines.clear_attempts == 0 &&
+            lines.clear_pulses == 0 && lines.stops == 0 && !lines.unsafe_high);
+      lines.sda_stuck = false;
+      CHECK(digitalRead(21) == HIGH);
+      lines = FakeI2cLines{};
     }
     {
       // Verify the transport fake itself before trusting driver regressions.
