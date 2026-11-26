@@ -9017,6 +9017,16 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     dock_calls: list[tuple[str, bool]] = []
     inhibit_calls: list[tuple[str, bool]] = []
+    dock_started = asyncio.Event()
+    release_dock = asyncio.Event()
+    memory_started = asyncio.Event()
+    release_memory = asyncio.Event()
+    speech_considered = asyncio.Event()
+
+    async def request_dock(rid, initial_low):
+        dock_calls.append((rid, initial_low))
+        dock_started.set()
+        await release_dock.wait()
 
     class _LowBatteryChat:
         async def reply(self, _history):
@@ -9029,7 +9039,7 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
         memory,
         KeyScene(),
         speech_cooldown=0,
-        on_low_battery_dock=lambda rid, init: dock_calls.append((rid, init)),
+        on_low_battery_dock=request_dock,
         on_dock_inhibit_changed=lambda rid, flag: inhibit_calls.append((rid, flag)),
     )
     state = pet.states["robot-01"]
@@ -9070,9 +9080,20 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
             # Optional memory can block; physical handling must already
             # have been requested, even when the pet is quiet.
             assert dock_calls == [("robot-01", True)]
+        if change.kind == "battery_low":
+            memory_started.set()
+            await release_memory.wait()
         return await store_observation(robot_id, change)
 
+    consider_speech = pet._consider_speech
+
+    def observe_speech_candidate(robot_id, change, generation, **kwargs):
+        consider_speech(robot_id, change, generation, **kwargs)
+        if change.kind == "battery_low":
+            speech_considered.set()
+
     monkeypatch.setattr(pet, "_store_observation", observe_after_dock_request)
+    monkeypatch.setattr(pet, "_consider_speech", observe_speech_candidate)
     try:
         # Read-only legacy captures, missing ages and delayed HTTP responses
         # cannot create proactive battery events, even without auto docking.
@@ -9095,8 +9116,21 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
             assert dock_calls == []
             assert not any(m.kind == "battery_low" for m in memory.recent("robot-01"))
 
-        for seq in (1, 2, 3, 4):
+        for seq in (1, 2, 3):
             await pet._observe_aux("robot-01", 92, sample(seq, soc=1800))
+        sample_task = asyncio.create_task(
+            pet._observe_aux("robot-01", 92, sample(4, soc=1800))
+        )
+        try:
+            await wait_for(dock_started.is_set)
+            await wait_for(memory_started.is_set)
+            release_memory.set()
+            await wait_for(speech_considered.is_set)
+            assert not sample_task.done()
+        finally:
+            release_memory.set()
+            release_dock.set()
+            await sample_task
         assert dock_calls == [("robot-01", True)]
         assert sum(m.kind == "battery_low" for m in memory.recent("robot-01")) == 1
         assert pet.status("robot-01")["charging_verified"] is False
@@ -9127,6 +9161,76 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
     finally:
         state.enabled = False
         await pet.close()
+
+
+@pytest.mark.parametrize("first", ("speech", "motion"))
+async def test_aux_dispatch_allows_speech_and_motion_preflight_to_progress(
+    fleet, tmp_path, monkeypatch, first,
+):
+    """Simulated speech and an independently owned dock request can each finish first."""
+    motion_started = asyncio.Event()
+    motion_finished = asyncio.Event()
+    memory_started = asyncio.Event()
+    release_motion = asyncio.Event()
+    release_memory = asyncio.Event()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+
+    class BatteryChat:
+        async def proactive_decision(self, _history):
+            return {"action": "speak", "text": "My battery is getting low."}
+
+    async def request_dock(robot_id, initial_low):
+        assert (robot_id, initial_low) == ("robot-01", True)
+        motion_started.set()
+        await release_motion.wait()
+        motion_finished.set()
+
+    pet = PetController(
+        fleet, {}, Conversation(fleet, BatteryChat(), speaker, memory=memory),
+        memory, KeyScene(), on_low_battery_dock=request_dock,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 94
+    original_store = pet._store_observation
+
+    async def blocked_store(robot_id, change):
+        memory_started.set()
+        await release_memory.wait()
+        return await original_store(robot_id, change)
+
+    monkeypatch.setattr(pet, "_store_observation", blocked_store)
+    task = asyncio.create_task(pet._dispatch_aux_changes(
+        "robot-01", 94, [SceneChange("battery_low", "My fuel gauge reports low charge", 1.0)],
+        time.monotonic(), True,
+    ))
+    try:
+        await wait_for(motion_started.is_set)
+        await wait_for(memory_started.is_set)
+        if first == "speech":
+            release_memory.set()
+            await wait_for(lambda: len(speaker.spoken) == 1)
+            assert not motion_finished.is_set()
+        else:
+            release_motion.set()
+            await wait_for(motion_finished.is_set)
+            assert not speaker.spoken
+        assert not task.done()
+        release_memory.set()
+        release_motion.set()
+        await task
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == [("robot-01", "My battery is getting low.")]
+        assert state.events == 1
+    finally:
+        release_memory.set()
+        release_motion.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()
+
 
 
 async def test_pet_proactive_context_includes_habituation_and_active_navigation_continuity(

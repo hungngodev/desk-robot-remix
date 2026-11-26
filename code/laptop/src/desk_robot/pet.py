@@ -1651,8 +1651,9 @@ class PetController:
             except (OSError, ValueError, sqlite3.Error) as exc:
                 state.last_error = f"Dock retry recovery: {type(exc).__name__}"
 
-        # Reserve and dispatch physical low-charge handling before optional
-        # observation memory and speech can exhaust the fuel freshness budget.
+        # Reserve physical low-charge handling before optional observation
+        # memory and speech can exhaust the fuel freshness budget.
+        dispatch = False
         if (
             dock_request_initial_low is not None
             and state.enabled
@@ -1680,9 +1681,29 @@ class PetController:
                         and fuel_age + request_elapsed_ms
                         + (time.monotonic() - received_at) * 1000 < 500
                     )
-            if dispatch:
-                await self._trigger_low_battery_dock(robot_id, dock_request_initial_low)
+        await self._dispatch_aux_changes(
+            robot_id, generation, changes, received_at,
+            dock_request_initial_low if dispatch else None,
+        )
 
+    async def _dispatch_aux_changes(
+        self, robot_id: str, generation: int, changes: list[SceneChange],
+        received_at: float, dock_request_initial_low: bool | None,
+    ) -> None:
+        if dock_request_initial_low is None:
+            await self._publish_aux_changes(robot_id, generation, changes, received_at)
+            return
+        # Physical preflight starts first but must not wait for optional speech,
+        # nor should speech wait for the preflight receipt. The observer owns
+        # both children, so pause/close still cancels the in-flight dispatch.
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(self._trigger_low_battery_dock(robot_id, dock_request_initial_low))
+            tasks.create_task(self._publish_aux_changes(robot_id, generation, changes, received_at))
+
+    async def _publish_aux_changes(
+        self, robot_id: str, generation: int, changes: list[SceneChange], received_at: float,
+    ) -> None:
+        state = self.states[robot_id]
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
