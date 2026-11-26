@@ -2899,3 +2899,42 @@ def test_expired_permit_removes_only_its_owner(monkeypatch):
     with pytest.raises(OperationError, match="missing"):
         Coordinator._require_live_permit(owner, "robot-01")
     assert owner.permits == {"robot-02": 101.0}
+
+
+@pytest.mark.parametrize("source", ["callback", "preflight", "active_health"])
+async def test_local_fault_halt_survives_healthy_telemetry_until_explicit_recovery(
+    settings, source,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        await coordinator.operator_arm("robot-01")
+        head.body_status["safety"] = {
+            "required": True, "ready": False, "fault": "floor_out_of_range",
+        }
+        if source == "callback":
+            assert (await coordinator.stop_for_local_fault("robot-01"))["ok"]
+        elif source == "preflight":
+            with pytest.raises(OperationError, match="local safety not clear"):
+                await coordinator.operator_arm("robot-01")
+        else:
+            head.body_status["armed"] = True
+            with pytest.raises(OperationError, match="floor_out_of_range"):
+                await coordinator._assert_armed_health("robot-01")
+        assert "robot-01" not in coordinator.permits
+        # A recovered transport or a fresh body boot may report a healthy
+        # disarmed body. That observation must not serve as a recovery request.
+        head.body_status["armed"] = False
+        head.body_status["safety"] = {"required": True, "ready": True, "fault": "none"}
+        assert (await head.status())["safety"]["ready"]
+        with pytest.raises(OperationError, match="local fault latched"):
+            await coordinator.operator_arm("robot-01")
+        assert (await coordinator.stop_for_local_fault("robot-01"))["ok"]
+        with pytest.raises(OperationError, match="local fault latched"):
+            await coordinator.operator_arm("robot-01")
+        assert (await coordinator.stop("robot-01"))["ok"]
+        assert (await coordinator.operator_arm("robot-01"))["operator_permit"]
+        assert all(command == "halt" for command in head.commands)
+    finally:
+        await coordinator.close()

@@ -49,3 +49,58 @@ def test_pending_idle_stop_blocks_fleet_until_receipt() -> None:
     assert tracker.fleet_block_reason(None) is not None
     tracker.finish("b", generation, acknowledged=True)
     assert tracker.fleet_block_reason(None) is None
+
+
+def test_local_fault_halt_needs_explicit_recovery_even_after_ack() -> None:
+    tracker = StopConfirmationTracker(["a", "b"])
+    tracker.finish("a", tracker.begin("a", local_fault=True),
+                   acknowledged=True, explicit_recovery=False)
+    assert tracker.blocked("a")
+    assert not tracker.blocked("b")
+    assert tracker.fleet_block_reason(None) is None
+    tracker.finish("a", tracker.begin("a"), acknowledged=True, explicit_recovery=False)
+    assert tracker.blocked("a")
+    tracker.finish("b", tracker.begin("b"), acknowledged=True)
+    assert tracker.blocked("a")
+    tracker.finish("a", tracker.begin("a"), acknowledged=True)
+    assert not tracker.blocked("a")
+
+
+@pytest.mark.parametrize("automatic_finishes_first", [False, True])
+def test_automatic_ack_cannot_hide_overlapping_failed_stop(automatic_finishes_first):
+    tracker = StopConfirmationTracker(["a"])
+    older = tracker.begin("a")
+    automatic = tracker.begin("a")
+    attempts = [(older, False, True), (automatic, True, False)]
+    if automatic_finishes_first:
+        attempts.reverse()
+    for generation, acknowledged, explicit in attempts:
+        tracker.finish("a", generation, acknowledged=acknowledged,
+                       explicit_recovery=explicit)
+    assert tracker.blocked()
+    tracker.finish("a", tracker.begin("a"), acknowledged=True)
+    assert not tracker.blocked()
+
+
+def test_old_explicit_recovery_cannot_clear_new_local_fault() -> None:
+    tracker = StopConfirmationTracker(["a"])
+    recovery = tracker.begin("a")
+    fault = tracker.begin("a", local_fault=True)
+    tracker.finish("a", fault, acknowledged=True, explicit_recovery=False)
+    tracker.finish("a", recovery, acknowledged=True)
+    assert tracker.blocked("a")
+    tracker.finish("a", tracker.begin("a"), acknowledged=False)
+    assert tracker.blocked("a")
+    tracker.finish("a", tracker.begin("a"), acknowledged=True)
+    assert not tracker.blocked("a")
+
+
+def test_fault_observation_fences_recovery_without_pending_stop() -> None:
+    tracker = StopConfirmationTracker(["a"])
+    recovery = tracker.begin("a")
+    tracker.latch_fault("a")
+    tracker.finish("a", recovery, acknowledged=True)
+    assert not tracker.pending
+    assert tracker.blocked("a")
+    tracker.finish("a", tracker.begin("a"), acknowledged=True)
+    assert not tracker.blocked("a")

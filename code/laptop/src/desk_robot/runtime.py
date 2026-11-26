@@ -81,7 +81,7 @@ class Runtime:
         self.conversation.attention = self.attention
         self.pet = PetController(
             settings, heads, self.conversation, self.memory, scene,
-            on_local_fault=self.coordinator.stop,
+            on_local_fault=self.coordinator.stop_for_local_fault,
             on_low_battery_dock=self._on_low_battery_dock,
             on_dock_inhibit_changed=self._on_dock_inhibit_changed,
         )

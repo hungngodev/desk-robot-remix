@@ -227,6 +227,7 @@ class Coordinator:
         )
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
+        self._record_local_fault(robot_id, status)
         if (status.get("backend") != selected_backend
                 or robot.motor_backend != selected_backend):
             # A firmware swap or operator profile change cannot authorize an
@@ -309,6 +310,19 @@ class Coordinator:
         self.permits.pop(robot_id, None)
         return self._permit_epoch[robot_id]
 
+    def _record_local_fault(self, robot_id: str, body: object) -> None:
+        if not isinstance(body, dict) or body.get("robot_id") != robot_id:
+            return
+        safety = body.get("safety")
+        if (isinstance(safety, dict) and safety.get("required") is True
+                and safety.get("fault") != "not_required"
+                and _body_fault_suffix(body, robot_id)):
+            self._stop_confirmations.latch_fault(robot_id)
+            self._retire_permit(robot_id)
+            self.discard_deferred_motion(
+                robot_id=robot_id, reason="WROOM local fault; explicit recovery required",
+            )
+
     async def operator_arm(self, robot_id: str, *, require_low_battery: bool = False):
         robot = self.robot(robot_id)
         if self.closed:
@@ -318,7 +332,10 @@ class Coordinator:
         if self.dock_inhibited(robot_id):
             raise OperationError("Robot seated or powered on dock; no permit granted")
         if self._stop_confirmations.blocked(robot_id):
-            raise OperationError("WROOM STOP pending or unconfirmed; require acknowledged halt")
+            raise OperationError(
+                "WROOM STOP pending or unconfirmed, or local fault latched; "
+                "require explicit acknowledged halt"
+            )
         voice_reason = self.voice_blocks_motion()
         if voice_reason is not None:
             raise OperationError(voice_reason)
@@ -352,16 +369,31 @@ class Coordinator:
         }
 
     async def stop(self, robot_id: str):
+        """An explicit requested HALT may recover host motion admission."""
+        return await self._tracked_stop(robot_id, explicit_recovery=True)
+
+    async def stop_for_local_fault(self, robot_id: str):
+        """Automatic physical fault handling must never grant recovery."""
+        return await self._tracked_stop(
+            robot_id, explicit_recovery=False, local_fault=True,
+        )
+
+    async def _tracked_stop(
+        self, robot_id: str, *, explicit_recovery: bool, local_fault: bool = False,
+    ):
         self.robot(robot_id)
         # Fence new permits and fleet admission even for an idle body.
-        generation = self._stop_confirmations.begin(robot_id)
+        generation = self._stop_confirmations.begin(robot_id, local_fault=local_fault)
         acknowledged = False
         try:
             acknowledgement = await self._stop(robot_id)
             acknowledged = True
             return acknowledgement
         finally:
-            self._stop_confirmations.finish(robot_id, generation, acknowledged=acknowledged)
+            self._stop_confirmations.finish(
+                robot_id, generation, acknowledged=acknowledged,
+                explicit_recovery=explicit_recovery,
+            )
 
     async def _stop(self, robot_id: str):
         self.discard_deferred_motion(
@@ -464,7 +496,7 @@ class Coordinator:
             if job.robot_id in active and job.kind == "exploration":
                 job.events.append("Autonomous roaming preempted by live human or monitor loss")
         results = await asyncio.gather(
-            *(self.stop(robot_id) for robot_id in active),
+            *(self._tracked_stop(robot_id, explicit_recovery=False) for robot_id in active),
             return_exceptions=True,
         )
         errors = [
@@ -788,6 +820,8 @@ class Coordinator:
         fleet_reason = self._stop_confirmations.fleet_block_reason(self._fleet_motion_owner)
         if fleet_reason is not None:
             raise OperationError(fleet_reason)
+        if self._stop_confirmations.blocked(robot_id):
+            raise OperationError("WROOM local fault latched; require explicit acknowledged halt")
         voice_reason = self.voice_blocks_motion()
         if voice_reason is not None:
             raise OperationError(voice_reason)
@@ -1032,6 +1066,8 @@ class Coordinator:
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM active health status timeout",
         )
+        if self.settings.mode == "hardware":
+            self._record_local_fault(robot_id, body)
         active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
         if active is not None and active.robot_id == robot_id:
             self._require_navigation_body_boot(active, body)
