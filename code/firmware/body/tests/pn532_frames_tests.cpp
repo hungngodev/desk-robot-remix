@@ -153,6 +153,36 @@ static void check_tag_boundaries() {
   }
 }
 
+static void check_scan_payload_boundaries() {
+  using desk_robot::Pn532TagResult;
+  for (const std::uint8_t length : {4, 7, 10}) {
+    std::vector<std::uint8_t> tag = {1, 1, 4, 0, 8, length};
+    tag.resize(6U + length, 0xa5);
+    for (std::size_t n = 0; n <= tag.size(); ++n) {
+      const std::vector<std::uint8_t> prefix(tag.begin(), tag.begin() + n);
+      auto wire = response(0x4a, prefix);
+      // A complete outer frame can contain an incomplete inner UID. Exercise
+      // both exact frame length and the production fixed-size Wire read.
+      for (const auto count : {n + 10, wire.size()}) {
+        const std::vector<std::uint8_t> received(wire.begin(), wire.begin() + count);
+        const std::uint8_t* payload = nullptr;
+        std::size_t size = 0;
+        CHECK(desk_robot::pn532_response(
+            received.data(), received.size(), 0x4a, payload, size));
+        CHECK(payload == received.data() + 8 && size == n);
+        std::uint32_t token = 123;
+        std::uint8_t uid_size = 10;
+        const auto result = desk_robot::pn532_tag(payload, size, token, uid_size);
+        if (n == tag.size()) {
+          CHECK(result == Pn532TagResult::Present && uid_size == length && token != 0);
+        } else {
+          CHECK(result == Pn532TagResult::Invalid && uid_size == 0 && token == 0);
+        }
+      }
+    }
+  }
+}
+
 static void check_ats_and_wire_limit() {
   using desk_robot::Pn532TagResult;
   std::uint32_t token = 0;
@@ -213,6 +243,7 @@ int main() {
     check_frame_boundaries();
     check_unsupported_frames();
     check_tag_boundaries();
+    check_scan_payload_boundaries();
     check_encoder_boundaries();
     check_ats_and_wire_limit();
     const std::uint8_t sam[] = {1, 0x14, 1};
