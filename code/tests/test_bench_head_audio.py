@@ -460,3 +460,24 @@ async def test_cli_ignores_ambient_proxy_for_authenticated_audio_bench(
     assert client_options == [{"trust_env": False}]
     report = json.loads((tmp_path / "audio.json").read_text())
     assert report["actual_speaker_playback_verified"] is False
+
+
+@pytest.mark.parametrize("missing", ["microphone_frames_read", "speaker_frames_accepted"])
+async def test_audio_bench_rejects_missing_counter_between_healthy_receipts(missing):
+    class Head:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            sample = _sample(self.calls)
+            if self.calls == 2:
+                del sample[missing]
+            return sample
+
+    report = await bench.measure(Head(), "robot-01", seconds=0.22, poll_period_s=0.05)
+    assert report["samples"] >= 2
+    assert report["probe_errors"] == 1
+    assert report["counter_rate_within_tolerance"] is True
+    assert report["reference_software_integrity_observed"] is False
+    assert report["actual_speaker_playback_verified"] is False

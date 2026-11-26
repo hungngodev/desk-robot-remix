@@ -668,3 +668,34 @@ def test_periodic_delay_rejected_under_strict_numpy_arithmetic():
     microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
     with np.errstate(all="raise"), pytest.raises(ValueError, match="Ambiguous acoustic delay"):
         estimate_delay(reference, microphone)
+
+
+@pytest.mark.parametrize("speaker_rate,mic_rate,offset,message", [
+    (32000, 16000, -1, "Raw 32 kHz speaker"),
+    (32000, 16000, 1, "Raw 32 kHz speaker"),
+    (48000, 16000, 0, "mono PCM16"),
+    (32000, 32000, 0, "Microphone recording must be 16 kHz"),
+])
+def test_invalid_raw_wav_pair(tmp_path, speaker_rate, mic_rate, offset, message):
+    import argparse
+    import wave
+
+    speaker = np.random.default_rng(1267).integers(
+        -6000, 6000, speaker_rate + offset, dtype=np.int16,
+    )
+    mic = np.zeros(mic_rate, dtype=np.int16)
+    for name, rate, pcm in (
+        ("speaker.wav", speaker_rate, speaker),
+        ("mic.wav", mic_rate, mic),
+    ):
+        with wave.open(str(tmp_path / name), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            wav.writeframes(pcm.astype("<i2").tobytes())
+    args = argparse.Namespace(
+        speaker=tmp_path / "speaker.wav", microphone=tmp_path / "mic.wav",
+        capture_report=None, max_delay_ms=250,
+    )
+    with pytest.raises(ValueError, match=message):
+        source["_estimate_capture"](args)

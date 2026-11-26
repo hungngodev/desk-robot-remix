@@ -339,6 +339,9 @@ def _estimate_capture(args: argparse.Namespace) -> dict:
     microphone, mic_rate = read_wav(args.microphone)
     if mic_rate != 16000:
         raise ValueError("Microphone recording must be 16 kHz")
+    if speaker_rate == 32000 and len(speaker) != 2 * len(microphone):
+        raise ValueError("Raw 32 kHz speaker and 16 kHz microphone need equal sample counts "
+                         "after exact 2:1 conversion")
     if args.capture_report is not None:
         validate_capture_report(args.capture_report, speaker, speaker_rate, microphone, mic_rate)
     # Resampling can hide a saturated raw speaker sample.
