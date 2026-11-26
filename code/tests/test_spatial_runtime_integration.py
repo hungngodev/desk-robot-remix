@@ -1435,6 +1435,79 @@ async def test_navigation_discards_pose_after_map_epoch_replacement(
         await rt.close()
 
 
+@pytest.mark.parametrize("replace_map", [False, True])
+async def test_navigation_cancellation_respects_map_epoch(
+    settings, tmp_path, monkeypatch, replace_map,
+):
+    """Cancellation invalidates its own map, never a replacement anchor."""
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot_id = "robot-01"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.spatial_navigation_qualified = True
+    robot.object_detector_qualified = True
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = 1
+    rt = Runtime(settings)
+    head = SpatialHead(robot_id)
+    rt.coordinator.heads[robot_id] = head
+    rt.coordinator.set_voice_state(monitor_enforced=False, monitor_ready=True)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original_confirm = rt.spatial.confirm_target_frame
+
+    async def delayed_confirm(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        return await original_confirm(*args, **kwargs)
+
+    monkeypatch.setattr(rt.spatial, "confirm_target_frame", delayed_confirm)
+    try:
+        _seed_safe_grid(rt.spatial, robot_id, head)
+        rt.spatial.record_object_sighting(
+            robot_id,
+            ObjectEvidence(
+                robot_id=robot_id,
+                label="key",
+                source="user_reported",
+                seen_at_wall_s=time.time(),
+            ),
+        )
+        await rt.coordinator.operator_arm(robot_id)
+        job = rt.coordinator.navigate(
+            robot_id, label="key", goal=(3, 2), start=(2, 2), heading=0,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        old_epoch = rt.spatial.state(robot_id).epoch
+        drives = [cmd for cmd in head.commands if cmd.startswith("drive ")]
+        if replace_map:
+            _seed_safe_grid(rt.spatial, robot_id, head)
+        current = rt.spatial.state(robot_id)
+        epoch = current.epoch
+        grid = current.grid
+        assert (epoch > old_epoch) == replace_map
+        await rt.coordinator.stop(robot_id)
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "cancelled"
+        assert "halt" in head.commands
+        assert [cmd for cmd in head.commands if cmd.startswith("drive ")] == drives
+        current = rt.spatial.state(robot_id)
+        if replace_map:
+            assert current.epoch == epoch
+            assert current.grid is grid
+            assert current.grid.anchored
+        else:
+            assert current.epoch == epoch + 1
+            assert current.invalidated_reason == "navigation_cancelled"
+            assert not current.grid.anchored
+    finally:
+        release.set()
+        await rt.close()
+
+
 @pytest.mark.parametrize("flag", ["motion_enabled", "spatial_navigation_qualified"])
 async def test_navigation_rechecks_qualification_after_pose_io(settings, tmp_path, flag):
     """Revoking either motion qualification during pose IO must prevent dispatch."""

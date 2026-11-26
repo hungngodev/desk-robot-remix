@@ -2550,5 +2550,7 @@ class Coordinator:
                 spatial.record_object_sighting(job.robot_id, receipt.evidence)
             return target_result(receipt.status, receipt.reason)
         except asyncio.CancelledError:
-            spatial.invalidate_robot(job.robot_id, reason="navigation_cancelled")
+            # A retired route must not invalidate a newer spatial anchor.
+            if spatial.state(job.robot_id).epoch == expected_epoch:
+                spatial.invalidate_robot(job.robot_id, reason="navigation_cancelled")
             raise

@@ -35,13 +35,17 @@ def test_serial_name_does_not_authorize_non_character_node(monkeypatch, mode):
         serial_device.require_local_serial_device("/dev/cu.test")
 
 
-def test_absent_port_fails_closed(monkeypatch):
+@pytest.mark.parametrize("error_type", [FileNotFoundError, PermissionError, OSError])
+def test_stat_failure_fails_closed(monkeypatch, error_type):
+    error = error_type("sensitive device detail")
+
     def missing(_):
-        raise FileNotFoundError
+        raise error
 
     monkeypatch.setattr(serial_device, "os", SimpleNamespace(lstat=missing))
-    with pytest.raises(ValueError, match="unavailable"):
+    with pytest.raises(ValueError, match="^Local USB serial device unavailable$") as caught:
         serial_device.require_local_serial_device("/dev/cu.test")
+    assert caught.value.__cause__ is error
 
 
 def test_character_node_passes_preflight(monkeypatch):
