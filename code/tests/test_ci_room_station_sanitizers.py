@@ -37,6 +37,7 @@ def test_room_station_runner_discovers_new_sources(tmp_path, monkeypatch):
         assert str(sources / f"{name}.cpp") in compile_cmd
         assert "-fsanitize=address,undefined" in compile_cmd
         assert "-fno-sanitize-recover=undefined" in compile_cmd
+        assert "-Wconversion" in compile_cmd
         assert "-Werror" in compile_cmd
         assert compile_options["check"] and run_options["check"]
         assert run_cmd == [str(tmp_path / name)]

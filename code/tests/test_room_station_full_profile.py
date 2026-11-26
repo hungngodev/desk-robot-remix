@@ -123,13 +123,14 @@ def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     # reject the zero sentinel; the upper bound rejects absurd stale data.
     assert "bme.gas_resistance >= 1" in start
     assert "bme.gas_resistance <= 1000000000U" in start
-    assert "bme_completed.publish(bme.temperature, bme.humidity, bme.pressure," in start
+    assert "bme_completed.publish(bme.temperature, bme.humidity," in start
+    assert "static_cast<float>(bme.pressure)," in start
     assert "bme.gas_resistance, bme_last_start_ms);" in start
 
 
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
     code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
-    assert "isfinite(bme.gas_resistance) && bme.gas_resistance >= 1" in code
+    assert "bme.gas_resistance >= 1U" in code
     assert "bme.gas_resistance <= 1000000000U" in code
     assert "bme.gas_resistance >= 0" not in code
 
@@ -234,7 +235,9 @@ def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
     assert "scd_valid = false;" in poll
     assert "if (readiness_status != 0) return false;" in helper
     ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
-    assert "room_station/tests/scd_sample_freshness_tests.cpp" in ci
+    assert "python3 code/scripts/verify_room_station_host.py" in ci
+    runner = (ROOT / "code/scripts/verify_room_station_host.py").read_text()
+    assert 'glob("*.cpp")' in runner
 
 
 def test_thermal_scan_publishes_only_complete_staged_frames():
@@ -270,8 +273,8 @@ def test_bme688_producer_ranges_match_room_decoder():
     decoder = mac.split('elif sensor == "bme688":', 1)[1].split(
         'elif sensor == "ld2410c":', 1
     )[0]
-    assert "bme.pressure >= 30000.0f" in sample
-    assert "bme.pressure <= 125000.0f" in sample
+    assert "bme.pressure >= 30000U" in sample
+    assert "bme.pressure <= 125000U" in sample
     assert "bme.gas_resistance >= 1" in sample
     assert "bme.gas_resistance <= 1000000000U" in sample
     assert '_value(data, "pressure_pa", 30000, 125000)' in decoder

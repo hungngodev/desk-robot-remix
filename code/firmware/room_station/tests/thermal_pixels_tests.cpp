@@ -37,7 +37,7 @@ struct FakeWire {
   int read() {
     if (invalid_byte && cursor == 7) return -1;
     if (oversized_byte && cursor == 15) return 256;
-    return data[cursor++];
+    return data[static_cast<std::size_t>(cursor++)];
   }
 };
 
@@ -72,7 +72,7 @@ int main() {
   assert(!decode_thermal_pixel(0xff, 0x07, c) && c == 80.0f);
 
   FakeWire bus;
-  for (int i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < 8; ++i) {
     bus.data[2 * i] = 0x64;  // each pixel 25 C
     bus.data[2 * i + 1] = 0;
   }
@@ -110,7 +110,7 @@ int main() {
   // Last pixel invalid: the chunk must not partially overwrite old data.
   // Make every preceding pixel distinct from the cached 25 C frame.
   // Otherwise direct writes before a late failure are unobservable.
-  for (int i = 0; i < 7; ++i) bus.data[2 * i] = 0x50;  // 20 C
+  for (std::size_t i = 0; i < 7; ++i) bus.data[2 * i] = 0x50;  // 20 C
   bus.data[14] = 0x41;
   bus.data[15] = 0x01;  // 80.25 C is outside AMG8833 high-gain spec.
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
@@ -118,8 +118,8 @@ int main() {
   bus.data[14] = 0x40;
   bus.data[15] = 0x01;
   assert(read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
-  for (int i = 0; i < 7; ++i) assert(frame[i] == 20.0f);
+  for (std::size_t i = 0; i < 7; ++i) assert(frame[i] == 20.0f);
   assert(frame[7] == 80.0f);
-  for (int i = 8; i < 64; ++i) assert(frame[i] == 25.0f);
+  for (std::size_t i = 8; i < 64; ++i) assert(frame[i] == 25.0f);
   std::cout << "PASS room thermal 8x16 I2C chunks, bounded AMG8833 pixels, atomic chunk and faults\n";
 }

@@ -421,14 +421,14 @@ void bme_step(uint32_t now) {
       && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
       // Match the Mac room decoder. An out-of-range BME must not
       // poison the entire USB frame and hide independent room sensors.
-      && isfinite(bme.pressure) && bme.pressure >= 30000.0f
-      && bme.pressure <= 125000.0f
-      && isfinite(bme.gas_resistance) && bme.gas_resistance >= 1
+      && bme.pressure >= 30000U && bme.pressure <= 125000U
+      && bme.gas_resistance >= 1U
       && bme.gas_resistance <= 1000000000U;
   if (complete) {
     // Publish the complete tuple with its conservative acquisition start time.
     // Upstream scratch may be reset while the next conversion is pending.
-    bme_completed.publish(bme.temperature, bme.humidity, bme.pressure,
+    bme_completed.publish(bme.temperature, bme.humidity,
+                          static_cast<float>(bme.pressure),
                           bme.gas_resistance, bme_last_start_ms);
     sensor_recovery.record_success(desk_robot_room::SensorRecoverySchedule::kBme);
   } else {

@@ -124,7 +124,7 @@ int main() {
   assert(bme.temperature == 21 && bme.gas_resistance == 67890);
   assert(!bme_pending && !bme_started && !bme_completed.fresh(2200, kBmeStaleMs));
   assert(bme_completed.sample_ms == 1000);
-  for (int fault = 0; fault < 14; ++fault) {
+  for (int fault = 0; fault < 15; ++fault) {
     reset(); step(1000); step(1200); assert(bme_completed.valid);
     if (fault == 0) bme.start_ok = false;
     step(2000);
@@ -141,6 +141,7 @@ int main() {
     if (fault == 11) bme.next_humidity = std::numeric_limits<float>::quiet_NaN();
     if (fault == 12) bme.next_temp = std::numeric_limits<float>::infinity();
     if (fault == 13) bme.next_temp = 125.01f;
+    if (fault == 14) bme.next_pressure = UINT32_MAX;
     step(2200); assert(!bme_completed.valid && !bme_started && !bme_pending);
   }
   // A conversion started 200 ticks before wrap would return zero and

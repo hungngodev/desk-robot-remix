@@ -24,7 +24,7 @@ def run_tests(station: Path, build: Path) -> None:
     )[1].split("void bme_observation(", 1)[0]
     (build / "bme_step_under_test.h").write_text(temperature + step)
     cmd = [
-        compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+        compiler, "-std=c++17", "-Wall", "-Wextra", "-Wconversion", "-Werror",
         "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
         "-fno-omit-frame-pointer", f"-I{includes}", f"-I{build}",
     ]
