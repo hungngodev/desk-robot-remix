@@ -62,20 +62,32 @@ static_assert(noexcept(std::declval<const TouchDebounce&>().stable()),
 void touch_timing_boundary() {
   for (const std::uint32_t start : {100U, 0xfffffff0U}) {
     TouchDebounce touch;
-    CHECK(!touch.stable());
+    CHECK(!touch.stable() && !touch.baseline_ready());
+    // A held sensor at boot must never manufacture a gesture, even after
+    // enough samples to debounce, and even when millis wraps.
     touch.observe(true, start);
-    CHECK(!touch.poll(true, start + 24U));
     CHECK(!touch.poll(true, start + 25U));
-    CHECK(!touch.poll(true, start + 49U));
-    CHECK(touch.poll(true, start + 50U));
-    CHECK(touch.stable());
+    CHECK(!touch.poll(true, start + 50U));
+    CHECK(!touch.stable() && !touch.baseline_ready());
     touch.observe(false, start + 51U);
-    touch.observe(true, start + 52U);  // raw bounce resets release candidate
-    CHECK(!touch.poll(true, start + 102U));
+    CHECK(!touch.poll(false, start + 76U));
+    CHECK(!touch.baseline_ready());
+    CHECK(!touch.poll(false, start + 101U));
+    CHECK(touch.baseline_ready() && !touch.stable());
+    const auto press = start + 102U;
+    touch.observe(true, press);
+    CHECK(!touch.poll(true, press + 24U));
+    CHECK(!touch.poll(true, press + 25U));
+    CHECK(!touch.poll(true, press + 49U));
+    CHECK(touch.poll(true, press + 50U));
     CHECK(touch.stable());
-    touch.observe(false, start + 103U);
-    CHECK(!touch.poll(false, start + 128U));
-    CHECK(touch.poll(false, start + 153U));
+    touch.observe(false, press + 51U);
+    touch.observe(true, press + 52U);  // raw bounce resets release candidate
+    CHECK(!touch.poll(true, press + 102U));
+    CHECK(touch.stable());
+    touch.observe(false, press + 103U);
+    CHECK(!touch.poll(false, press + 128U));
+    CHECK(touch.poll(false, press + 153U));
     CHECK(!touch.stable());
   }
 }
