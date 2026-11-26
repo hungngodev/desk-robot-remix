@@ -295,11 +295,8 @@ class Runtime:
                 raise RuntimeError("Closed runtime cannot restart voice listeners")
             if self._voice_task is not None:
                 return
-        # Visual consent enables a persistent feed independently of voice
-        # activity or pet autostart. One Mac stream consumer per real head.
-        # The pet still needs its separate opt-in to speak proactively.
-        if self.multimodal is not None:
-            self.multimodal.start_streams()
+        # Validate opt-in room prerequisites before opening any camera transport.
+        room_feed = None
         if self.settings.room_station_enabled and self._room_task is None:
             try:
                 import serial  # noqa: F401, room extra only
@@ -313,7 +310,7 @@ class Runtime:
                 SoilCalibration(dry, self.settings.room_station_soil_wet_adc)
                 if dry is not None else None
             )
-            self.room_feed = RoomSerialFeed(
+            room_feed = RoomSerialFeed(
                 self.settings.room_station_port,
                 lambda observation: self._queue_room_observation(
                     loop, observation
@@ -321,8 +318,15 @@ class Runtime:
                 soil_calibration=soil_calibration,
                 on_disconnect=self._on_room_disconnect,
             )
+        # Visual consent enables a persistent feed independently of voice
+        # activity or pet autostart. One Mac stream consumer per real head.
+        # The pet still needs its separate opt-in to speak proactively.
+        if self.multimodal is not None:
+            self.multimodal.start_streams()
+        if room_feed is not None:
+            self.room_feed = room_feed
             self._room_task = asyncio.create_task(
-                self.room_feed.run(self._room_stop),
+                room_feed.run(self._room_stop),
             )
             self._room_task.add_done_callback(
                 lambda task: self._on_service_done("Shared room USB", task)
