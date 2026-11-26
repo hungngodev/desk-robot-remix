@@ -317,7 +317,8 @@ def test_device_id_case_aliases_are_rejected():
 @pytest.mark.parametrize("field", ["voice_vision_tools_enabled", "unknown_setting"])
 def test_configuration_error_does_not_echo_rejected_values(tmp_path, field):
     marker = "synthetic-private-value-1234"
-    with pytest.raises(ValueError, match=field) as error:
+    diagnostic = "unknown field" if field == "unknown_setting" else field
+    with pytest.raises(ValueError, match=diagnostic) as error:
         load_settings(_file(tmp_path), overrides={field: marker})
     assert marker not in str(error.value)
 

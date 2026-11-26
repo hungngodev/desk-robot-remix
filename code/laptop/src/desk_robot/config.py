@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationError, model_validator
 
 from .private_files import read_private_env as read_private_env
 
@@ -388,6 +388,29 @@ def api_credentials(settings: Settings) -> tuple[str, str]:
     return operator, tool
 
 
+class ConfigurationError(ValueError):
+    """Rejected local configuration, safe to render in startup diagnostics."""
+
+
+def _validation_diagnostic(error: ValidationError) -> str:
+    issues = []
+    for item in error.errors(include_input=False, include_context=False, include_url=False):
+        loc = item["loc"]
+        fields = Settings.model_fields
+        parts = []
+        for part in loc:
+            if isinstance(part, int):
+                parts.append(str(part))
+            elif part in fields:
+                parts.append(part)
+                fields = RobotConfig.model_fields if part == "robots" else {}
+            else:
+                parts.append("unknown field")
+                break
+        issues.append(f"{'.'.join(parts) or 'configuration'} ({item['type']})")
+    return "Invalid configuration: " + "; ".join(issues)
+
+
 def load_settings(
     path: str | Path, *, overrides: Mapping[str, object] | None = None,
 ) -> Settings:
@@ -397,11 +420,23 @@ def load_settings(
     They come from the trusted local caller, never environment or remote data.
     """
     path = Path(path).resolve()
-    with path.open("rb") as stream:
-        data = tomllib.load(stream)
+    try:
+        with path.open("rb") as stream:
+            data = tomllib.load(stream)
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError):
+        data = None
+    if data is None:
+        raise ConfigurationError("Cannot read configuration: invalid TOML or UTF-8")
     if overrides is not None:
         data.update(overrides)
-    settings = Settings.model_validate(data)
+    try:
+        settings = Settings.model_validate(data)
+    except ValidationError as error:
+        diagnostic = _validation_diagnostic(error)
+    else:
+        diagnostic = None
+    if diagnostic is not None:
+        raise ConfigurationError(diagnostic)
     for robot in settings.robots:
         if robot.calibration and not robot.calibration.is_absolute():
             robot.calibration = (path.parent / robot.calibration).resolve()
