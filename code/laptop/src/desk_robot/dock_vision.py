@@ -313,6 +313,11 @@ def detect_apriltag(
         if (not all(_finite_number(v) for v in (x_mm, y_mm, z_mm))
                 or not 30 <= z_mm <= 2000):
             return None
+        # Optical-axis tilt alone misses grazing views of off-center tags.
+        # Compare the printed-face normal with the actual ray to the lens.
+        incidence = -float(normal @ (translation / math.hypot(x_mm, y_mm, z_mm)))
+        if not math.isfinite(incidence) or incidence < math.cos(math.radians(45)):
+            return None
         return DockPose(x_mm, y_mm, z_mm, error, captured_at)
     return None
 

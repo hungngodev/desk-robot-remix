@@ -955,3 +955,47 @@ def test_detect_apriltag_rejects_wrong_valid_integer_marker_id(monkeypatch, dete
     assert decision.phase == "hold"
     assert not decision.motor_authorized
     assert not decision.charging_authorized
+
+
+@pytest.mark.parametrize(("x_mm", "expected_phase"), [
+    (-200.0, "hold"), (200.0, "align"),
+])
+def test_distorted_off_axis_tag_requires_face_to_viewing_ray(monkeypatch, x_mm, expected_phase):
+    """The same axial tilt can yield a grazing or nearly head-on view."""
+    import numpy as np
+
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
+    distortion = (0.18, -0.07, 0.003, -0.002, 0.01)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 12, distortion,
+        image_width_px=640, image_height_px=480,
+    )
+    angle = math.radians(35)
+    rotation = np.array([
+        [math.cos(angle), 0, math.sin(angle)],
+        [0, 1, 0],
+        [-math.sin(angle), 0, math.cos(angle)],
+    ]) @ np.diag([1., -1., -1.])
+    square = np.array([
+        [-30., 30., 0.], [30., 30., 0.], [30., -30., 0.], [-30., -30., 0.],
+    ])
+    intrinsics = np.array([[410., 0, 320], [0, 410., 240], [0, 0, 1]])
+    corners, _ = cv2.projectPoints(
+        square, cv2.Rodrigues(rotation)[0], np.array([x_mm, 0., 400.]),
+        intrinsics, np.asarray(distortion),
+    )
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [corners.astype(np.float32).reshape(1, 4, 2)], np.array([[12]]), []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    pose = detect_apriltag(_encoded_frame(), camera, captured_at=5.0)
+    assert (pose is None) == (expected_phase == "hold")
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == expected_phase
+    assert not assessment.motor_authorized
+    assert not assessment.charging_authorized
