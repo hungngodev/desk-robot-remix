@@ -6,6 +6,7 @@ Never infer cell, charger, boost, dock terminal or actuator supply wiring.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 from pathlib import Path
@@ -81,25 +82,174 @@ def _pin(pattern: str, source: str, label: str) -> int:
     return int(hits[0])
 
 
+def _strip_source_comments(source: str) -> str:
+    """Splice C continuation lines and ignore comments, not quoted strings."""
+    source = re.sub(r"\\\r?\n", "", source)
+    return re.sub(
+        r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/',
+        lambda match: " " if match[0].startswith("/") else match[0],
+        source,
+    )
+
+
+def _guard_value(expression: str, flags: dict[str, int | None]) -> bool:
+    """Evaluate only the boolean preprocessor grammar used by BodyPins.h."""
+    def flag(name: str) -> int | None:
+        if name not in flags:
+            raise ValueError(f"Unknown BodyPins build flag: {name}")
+        return flags[name]
+
+    expression = re.sub(
+        r"\bdefined\s*(?:\(\s*(\w+)\s*\)|\s+(\w+))",
+        lambda match: str(int(flag(match[1] or match[2]) is not None)),
+        expression,
+    )
+    expression = re.sub(
+        r"\b[A-Za-z_]\w*\b", lambda match: str(flag(match[0]) or 0), expression
+    )
+    if not re.fullmatch(r"(?:[01]\b|[!&|()]|\s)+", expression):
+        raise ValueError("Unsupported BodyPins preprocessor condition")
+    expression = expression.replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace("!", " not ")
+
+    def evaluate(node: ast.AST) -> bool:
+        if isinstance(node, ast.Constant) and type(node.value) is int:
+            return bool(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not evaluate(node.operand)
+        if isinstance(node, ast.BoolOp):
+            values = [evaluate(value) for value in node.values]
+            if isinstance(node.op, ast.And):
+                return all(values)
+            if isinstance(node.op, ast.Or):
+                return any(values)
+        raise ValueError("Unsupported BodyPins preprocessor condition")
+
+    try:
+        return evaluate(ast.parse(expression.strip(), mode="eval").body)
+    except SyntaxError as exc:
+        raise ValueError("Unsupported BodyPins preprocessor condition") from exc
+
+
+def _active_body_source(source: str, flags: dict[str, int | None]) -> str:
+    """Project a full build profile; reject unsupported active directives."""
+    flags = flags.copy()
+    stack: list[tuple[bool, bool, bool]] = []
+    active = True
+    lines = []
+    for line in _strip_source_comments(source).splitlines():
+        directive = re.match(r"\s*#\s*(\w+)\s*(.*)$", line)
+        if directive is None:
+            if active:
+                lines.append(line)
+            continue
+        name, argument = directive.groups()
+        argument = argument.strip()
+        if name in {"if", "ifdef", "ifndef"}:
+            if name != "if":
+                if not re.fullmatch(r"[A-Za-z_]\w*", argument):
+                    raise ValueError("Invalid BodyPins conditional macro")
+                argument = f"{'!' if name == 'ifndef' else ''}defined({argument})"
+            taken = active and _guard_value(argument, flags)
+            stack.append((active, taken, False))
+            active = taken
+        elif name in {"elif", "else", "endif"}:
+            if not stack:
+                raise ValueError("Unbalanced BodyPins preprocessor guard")
+            parent, taken, seen_else = stack.pop()
+            if name == "endif":
+                active = parent
+            else:
+                if seen_else:
+                    raise ValueError("Duplicate BodyPins preprocessor else")
+                active = parent and not taken and (
+                    name == "else" or _guard_value(argument, flags)
+                )
+                stack.append((parent, taken or active, name == "else"))
+        elif active and name == "define":
+            match = re.fullmatch(r"([A-Za-z_]\w*)(?:\s+(\d+))?", argument)
+            if match is None:
+                raise ValueError("Unsupported BodyPins macro definition")
+            flags[match[1]] = int(match[2] or "1")
+        elif active and name == "undef":
+            flags[argument] = None
+        elif active and (name, argument) != ("pragma", "once"):
+            raise ValueError(f"Unsupported BodyPins directive: {name}")
+    if stack:
+        raise ValueError("Unbalanced BodyPins preprocessor guard")
+    return "\n".join(lines)
+
+
+def _body_pin(source: str, symbol: str) -> int:
+    return _pin(rf"(?m)^[ \t]*constexpr\s+int\s+{symbol}\s*=\s*(-?\d+)\s*;", source, symbol)
+
+
+def _pin_array(source: str, symbol: str) -> list[str]:
+    matches = re.findall(
+        rf"(?m)^[ \t]*constexpr\s+int\s+{symbol}\s*\[\s*\]\s*=\s*\{{([^{{}}]*)\}}\s*;",
+        source,
+    )
+    if len(matches) != 1:
+        raise ValueError(f"Missing or duplicate firmware pin array: {symbol}")
+    items = matches[0].strip().removesuffix(",").split(",")
+    return [re.sub(r"\s*([\[\]])\s*", r"\1", item.strip()) for item in items]
+
+
+def _verify_body_profiles(body_pins: dict, body: str) -> None:
+    stepper = _active_body_source(body, {
+        "DESK_ROBOT_STEPPER": 1,
+        "DESK_ROBOT_FULL_SENSORS": None,
+        "DESK_ROBOT_ENABLE_DC_WATCHDOG": None,
+    })
+    dc = _active_body_source(body, {
+        "DESK_ROBOT_STEPPER": 0,
+        "DESK_ROBOT_FULL_SENSORS": 1,
+        "DESK_ROBOT_ENABLE_DC_WATCHDOG": 1,
+    })
+    for source in (stepper, dc):
+        for label, symbol in BODY_SINGLE.items():
+            if _body_pin(source, symbol) != body_pins[label]:
+                raise ValueError(f"Firmware body pin drift: {label}")
+        if _body_pin(source, "kMuxReset") != -1:
+            raise ValueError("Mux RESET must remain passive; no WROOM GPIO is allocated")
+        if _pin_array(source, "kServoPins") != ["kLiftServo", "kGripServo"]:
+            raise ValueError("Servo initialization pin array drift")
+    for label, symbol in (("left_stepper", "kLeftStepperPins"),
+                          ("right_stepper", "kRightStepperPins")):
+        if _pin_array(stepper, symbol) != [str(pin) for pin in body_pins[label]]:
+            raise ValueError(f"Stepper phase pin drift: {label}")
+    expected_stepper = [f"{symbol}[{index}]"
+                        for symbol in ("kLeftStepperPins", "kRightStepperPins")
+                        for index in range(4)]
+    expected_dc = ["kLeftIn1", "kLeftIn2", "kRightIn1", "kRightIn2"]
+    if (_pin_array(stepper, "kMotorPins") != expected_stepper
+            or _pin_array(dc, "kMotorPins") != expected_dc):
+        raise ValueError("Motor initialization pin array drift")
+    for symbol, expected in zip(expected_dc, (25, 26, 27, 32), strict=True):
+        if _body_pin(dc, symbol) != expected:
+            raise ValueError(f"Guarded DC motor pin drift: {symbol}")
+    watchdog = _body_pin(dc, "kDcHeartbeatPin")
+    if watchdog != 23 or watchdog not in body_pins["right_stepper"]:
+        raise ValueError("DC motor watchdog must share only mutually exclusive STEP GPIO23")
+    dc_pins = {25, 26, 27, 32, watchdog}
+    if any(body_pins[role] in dc_pins for role in BODY_SINGLE):
+        raise ValueError("DC profile GPIO collides with a nonmotor body signal")
+
+
+def _verify_gpio_map(owner: str, gpio: dict) -> None:
+    pins = [p for value in gpio.values()
+            for p in (value if isinstance(value, list) else [value])]
+    if any(type(p) is not int or not 0 <= p <= 48 for p in pins):
+        raise ValueError(f"Invalid {owner} GPIO")
+    if len(pins) != len(set(pins)):
+        raise ValueError(f"Double-booked {owner} GPIO")
+
+
 def verify(plan: dict, body: str, head: str) -> None:
     """Source agreement only. Passing is NEVER electrical acceptance."""
     bus = plan["bus"]
     for owner in ("body_gpio", "sense_gpio"):
-        pins = [p for value in bus[owner].values()
-                for p in (value if isinstance(value, list) else [value])]
-        if any(type(p) is not int or not 0 <= p <= 48 for p in pins):
-            raise ValueError(f"Invalid {owner} GPIO")
-        if len(pins) != len(set(pins)):
-            raise ValueError(f"Double-booked {owner} GPIO")
-    for label, symbol in BODY_SINGLE.items():
-        actual = _pin(rf"constexpr int {symbol} = (\d+);", body, symbol)
-        if actual != bus["body_gpio"][label]:
-            raise ValueError(f"Firmware body pin drift: {label}")
-    for label, symbol in (("left_stepper", "kLeftStepperPins"),
-                          ("right_stepper", "kRightStepperPins")):
-        match = re.findall(rf"constexpr int {symbol}\[\] = \{{([\d, ]+)\}};", body)
-        if len(match) != 1 or [int(x) for x in match[0].split(",")] != bus["body_gpio"][label]:
-            raise ValueError(f"Stepper phase pin drift: {label}")
+        _verify_gpio_map(owner, bus[owner])
     body_pins = bus["body_gpio"]
     if any(len(body_pins[role]) != 4 for role in ("left_stepper", "right_stepper")):
         raise ValueError("Each stepper requires exactly four phase GPIOs")
@@ -113,42 +263,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             raise ValueError(
                 f"WROOM32 output GPIO input-only or boot reserved: {role}"
             )
-    # Both motor backends are build-time alternatives and share GPIO pins.
-    # Verify the guarded DC firmware pins as well as the older stepper map.
-    for symbol, expected in (("kLeftIn1", 25), ("kLeftIn2", 26),
-                             ("kRightIn1", 27), ("kRightIn2", 32)):
-        if _pin(rf"constexpr int {symbol} = (\d+);", body, symbol) != expected:
-            raise ValueError(f"Guarded DC motor pin drift: {symbol}")
-    # The DC alternative frees GPIO23 but the STEPPER variant uses that
-    # same pin as its last right ULN2003 coil. Never infer that both wires
-    # can exist in the same purchased chassis harness.
-    watchdog = _pin(r"constexpr int kDcHeartbeatPin = (\d+);",
-                    body, "kDcHeartbeatPin")
-    if (watchdog != 23 or watchdog not in bus["body_gpio"]["right_stepper"]):
-        raise ValueError("DC motor watchdog must share only mutually exclusive STEP GPIO23")
-    if watchdog in (25, 26, 27, 32):
-        raise ValueError("DC watchdog collides with active H bridge PWM input")
-    # The DC profile reuses only the stepper pins, not the sensor/servo/UART
-    # roles. A synchronized STEP remap can otherwise conceal a DC collision.
-    dc_pins = {25, 26, 27, 32, watchdog}
-    if any(body_pins[role] in dc_pins for role in BODY_SINGLE):
-        raise ValueError("DC profile GPIO collides with a nonmotor body signal")
     if set(body_pins) != set(BODY_SINGLE) | {"left_stepper", "right_stepper"}:
         raise ValueError("Unknown or incomplete body GPIO roles")
-    # These arrays drive actual GPIO initialization, clearing and PWM attachment.
-    # Checking only the individual declarations misses a divergent aggregate.
-    motor_arrays = re.findall(r"(?m)^[ \t]*constexpr int kMotorPins\[\] = \{([^{}]+)\};", body)
-    motor_pins = [[pin.strip() for pin in array.split(",")] for array in motor_arrays]
-    expected_stepper = [f"{symbol}[{index}]"
-                        for symbol in ("kLeftStepperPins", "kRightStepperPins")
-                        for index in range(4)]
-    expected_dc = ["kLeftIn1", "kLeftIn2", "kRightIn1", "kRightIn2"]
-    if motor_pins != [expected_stepper, expected_dc]:
-        raise ValueError("Motor initialization pin array drift")
-    servo_arrays = re.findall(r"(?m)^[ \t]*constexpr int kServoPins\[\] = \{([^{}\n]+)\};", body)
-    servo_pins = [[pin.strip() for pin in array.split(",")] for array in servo_arrays]
-    if servo_pins != [["kLiftServo", "kGripServo"]]:
-        raise ValueError("Servo initialization pin array drift")
+    _verify_body_profiles(body_pins, body)
     for label, symbol in HEAD_SINGLE.items():
         actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
         if actual != bus["sense_gpio"][label]:
@@ -157,8 +274,6 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Unexpected XIAO to WROOM UART link")
     if bus["body_gpio"]["head_uart_tx"] != 17 or bus["sense_gpio"]["head_uart_rx"] != 1:
         raise ValueError("Unexpected WROOM to XIAO UART link")
-    if "constexpr int kMuxReset = -1;" not in body:
-        raise ValueError("Mux RESET must remain passive; no WROOM GPIO is allocated")
     if ("#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" not in head
             or "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" not in head):
         raise ValueError("Stock XIAO PDM pins changed")
