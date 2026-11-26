@@ -10688,3 +10688,80 @@ async def test_motion_toggle_fences_queued_command_without_pausing_pet(
         pending.cancel()
         await asyncio.gather(pending, return_exceptions=True)
         await pet.close()
+
+
+@pytest.mark.parametrize(("scheduled_quiet", "cooling_down"), [
+    (False, False), (False, True), (True, False),
+])
+async def test_repeated_room_radar_echo_is_context_only(
+    fleet, tmp_path, monkeypatch, scheduled_quiet, cooling_down,
+):
+    """Two anonymous radar arrivals in 30s cannot acquire the speech floor."""
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.room_station import SENSORS, RoomStationDecoder
+    from desk_robot.runtime import Runtime
+
+    monkeypatch.setattr(
+        "desk_robot.pet.quiet_hours_active", lambda _: scheduled_quiet,
+    )
+    fleet.room_station_context_enabled = True
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    chat = GroundedChat()
+    speaker = SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, ids)
+    pet = PetController(
+        fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=120,
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.attention = AttentionLedger(ids)
+    pet.set_voice_monitor_ready(True)
+    runtime = Runtime.__new__(Runtime)
+    runtime._closed = False
+    runtime.settings = fleet
+    runtime.multimodal = pet.multimodal
+    runtime.pet = pet
+    runtime.attention = pet.attention
+    robot_id = ids[0]
+    pet.states[robot_id].enabled = True
+    base = time.monotonic() - 30
+    if cooling_down:
+        pet._group_last_spoken = base - 1
+    last_spoken = pet._group_last_spoken
+    decoder = RoomStationDecoder()
+
+    try:
+        for seq, (offset, present) in enumerate(
+            [(0, True), (10, False), (30, True)], start=1,
+        ):
+            clock = 1000 + offset * 1000
+            readings = {sensor: {"valid": False} for sensor in SENSORS}
+            readings["ld2410c"] = {
+                "valid": True, "sample_ms": clock, "presence": present,
+                "stationary": False, "moving": present,
+                "stationary_cm": 0, "moving_cm": 100 if present else 0,
+            }
+            observation = decoder.accept(json.dumps({
+                "v": 1, "station": "room-pod-01", "seq": seq,
+                "at_ms": clock, "readings": readings,
+            }), now=base + offset)
+            runtime._on_room_observation(observation)
+            await asyncio.sleep(0)
+
+            for ident in ids:
+                timeline = hub.interaction_timeline(ident, base + offset)
+                assert len(timeline) == 1
+                assert timeline[0]["kind"] == "shared_room_raw_measurement"
+                assert timeline[0]["identity_verified"] is False
+                assert not hub.event_history[ident]
+            assert pet.is_quiet(robot_id) is scheduled_quiet
+            assert pet._speech_task is None
+            assert not pet._admitted_event_kinds
+            assert pet._group_last_spoken == last_spoken
+            assert not chat.prompts
+            assert not speaker.spoken
+    finally:
+        pet.states[robot_id].enabled = False
+        await pet.close()
+        hub.close()
