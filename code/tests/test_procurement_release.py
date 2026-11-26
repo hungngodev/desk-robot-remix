@@ -3119,3 +3119,75 @@ def test_strict_cli_cannot_use_custom_plan_to_invent_trials(
     assert captured.out == ""
     assert "HOLD: canonical physical trial prerequisite" in captured.err
     assert "positive canonical ledger count" in captured.err
+
+
+@pytest.mark.parametrize("scope", ["first_robot", "fleet"])
+@pytest.mark.parametrize("valid", [True, False])
+def test_paid_in_flight_power_kit_requires_all_component_identities(scope, valid):
+    """Pending paid kits affect cost coverage, not physical qualification."""
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    # Match the hypothetical costing variant used by the scope regression.
+    report["physical_motor_variant_in_cart"] = "stepper"
+    required, _ = mod.cost_requirements(report, scope)
+    power = mod.POWER_PARENT_ROLE
+    sense = "robot:xiao_sense"
+    components = [
+        {"id": ident, "quantity_per_kit": 1, "vendor": "Fixture",
+         "sku": ident, "pcb_revision": "A"}
+        for ident in mod.POWER_CHILDREN
+    ]
+    inventory = []
+    for role, qty in required.items():
+        remaining = qty - int(role in (power, sense))
+        if remaining > 0:
+            row = {
+                "role_key": role, "usable_allocated": remaining,
+                "acquisition_kind": "already_owned",
+                "inspection_receipt_url": "https://example.org/fixture/" + role,
+            }
+            if role == power:
+                row["kit_components"] = components
+            inventory.append(row)
+    inventory.append({
+        "role_key": sense, "usable_allocated": 1,
+        "acquisition_kind": "paid_order", "order_reference": "sense-fixture",
+        "inspection_receipt_url": "https://example.org/fixture/paid-sense",
+    })
+    evidence = {"costs": {
+        "scope": scope, "currency": "USD", "power_package_mode": "complete_kit",
+        "paid_orders_complete": True,
+        "paid_orders": [
+            {"order_reference": "sense-fixture", "total_paid_usd": "13.67",
+             "allocations": [{"role_key": sense, "quantity": 1}]},
+            {"order_reference": "power-fixture", "total_paid_usd": "5.00",
+             "allocations": [{"role_key": power, "quantity": 1}]},
+        ],
+        "inventory": inventory, "lines": [], "seller_charges": [],
+        "paid_in_flight": [{
+            "role_key": power, "quantity": 1, "order_reference": "power-fixture",
+            "kit_components": components if valid else components[:-1],
+        }],
+    }}
+    cost = mod.cost_quote(report, evidence, scope)
+    assert cost["unaccounted_roles"] == []
+    assert cost["awaiting_arrival_roles"] == [power]
+    assert cost["prior_paid_orders_cents"] == 1867
+    assert not report["order_released"]
+    assert cost["calculation_complete_not_physical_approval"] is valid
+    if valid:
+        assert cost["payable_now_cents"] == 0
+        assert cost["prototype_cumulative_cents"] == 1867
+        assert cost["within_prototype_cap"] is (
+            True if scope == "first_robot" else None
+        )
+    else:
+        assert cost["payable_now_cents"] is None
+        assert cost["prototype_cumulative_cents"] is None
+        assert cost["remaining_under_cap_cents"] is None
+        assert cost["allocated_landed_subtotals_cents"] is None
+        assert cost["within_prototype_cap"] is (
+            False if scope == "first_robot" else None
+        )
+        assert any("complete power kit lacks exact" in error for error in cost["errors"])

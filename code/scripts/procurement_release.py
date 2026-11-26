@@ -2543,11 +2543,14 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     if mode == "complete_kit":
         lines = values.get("lines", [])
         inventory = values.get("inventory", [])
-        if type(lines) is not list or type(inventory) is not list:
+        incoming = values.get("paid_in_flight", [])
+        if any(type(group) is not list for group in (lines, inventory, incoming)):
             return invalidate_incomplete_quote(
                 cost, "invalid complete power kit evidence",
             )
-        included = [item for item in [*lines, *inventory]
+        # Paid allocations count toward quote coverage, so validate incoming
+        # kits too. The strict release still requires arrival and inspection.
+        included = [item for item in [*lines, *inventory, *incoming]
                     if type(item) is dict
                     and item.get("role_key") == POWER_PARENT_ROLE]
         if not included or any(
