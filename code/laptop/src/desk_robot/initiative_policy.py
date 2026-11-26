@@ -19,11 +19,32 @@ def receipt_veto(
     return None
 
 
+def first_initiative_veto(*rules: tuple[str, Callable[[], bool]]) -> str | None:
+    """Evaluate ordered predicates lazily; the first blocker owns the reason."""
+    for reason, blocked in rules:
+        if blocked():
+            return reason
+    return None
+
+
+def quiet_voice_reason(
+    *, local_quiet: bool, scheduled_quiet: bool, human_active: Callable[[], bool],
+) -> str | None:
+    """Silence is a hard veto, independent of the available speech budget."""
+    return first_initiative_veto(
+        ("manual_quiet", lambda: local_quiet),
+        ("scheduled_quiet_hours", lambda: scheduled_quiet),
+        ("human_floor_busy", human_active),
+    )
+
+
 def quiet_voice_veto(
     *, local_quiet: bool, scheduled_quiet: bool, human_active: Callable[[], bool],
 ) -> bool:
-    """Silence is a hard veto, independent of the available speech budget."""
-    return local_quiet or scheduled_quiet or human_active()
+    """Compatibility predicate for callers that only require a boolean."""
+    return quiet_voice_reason(
+        local_quiet=local_quiet, scheduled_quiet=scheduled_quiet, human_active=human_active,
+    ) is not None
 
 
 def cooldown_pending(*, now: float, last: float, interval: float) -> bool:

@@ -40,7 +40,8 @@ from .initiative_policy import (
     event_cooldown,
     event_identity,
     event_window_has_capacity,
-    quiet_voice_veto,
+    first_initiative_veto,
+    quiet_voice_reason,
     receipt_veto,
 )
 from .memory import CameraProvenance, MemoryStore
@@ -147,6 +148,7 @@ class PetStatus(TypedDict):
     suppressed_speech_candidates: int
     low_value_speech_candidates: int
     last_initiative_suppression: str | None
+    last_initiative_gate_reason: str | None
     activity_reevaluations: int
     activity_silences: int
     last_activity_decision: str | None
@@ -195,6 +197,8 @@ class PetState:
     suppressed: int = 0
     low_value_speech_candidates: int = 0
     last_initiative_suppression: str | None = None
+    # Detailed reason for the latest optional speech/activity policy gate.
+    last_initiative_gate_reason: str | None = None
     activity_reevaluations: int = 0
     activity_silences: int = 0
     last_activity_decision: str | None = None
@@ -491,6 +495,7 @@ class PetController:
             "suppressed_speech_candidates": state.suppressed,
             "low_value_speech_candidates": state.low_value_speech_candidates,
             "last_initiative_suppression": state.last_initiative_suppression,
+            "last_initiative_gate_reason": state.last_initiative_gate_reason,
             "activity_reevaluations": state.activity_reevaluations,
             "activity_silences": state.activity_silences,
             "last_activity_decision": state.last_activity_decision,
@@ -2846,6 +2851,16 @@ class PetController:
                 return
             self._reconsider_activity()
 
+    def _activity_local_veto(self, robot_id: str, now: float) -> str | None:
+        return first_initiative_veto(
+            ("quiet_mode", lambda: self.is_quiet(robot_id)),
+            ("dock_charging_inhibited", lambda: self.is_dock_charging_inhibited(robot_id)),
+            ("personality_cooldown", lambda: profile_waits_beyond_fleet_floor(
+                self.settings.robot(robot_id).personality_profile,
+                elapsed=now - self._group_last_spoken, base=self.speech_cooldown,
+            )),
+        )
+
     def _reconsider_activity(self) -> None:
         """Offer one enabled pet a bounded context decision without fake evidence."""
         if self._closed:
@@ -2861,26 +2876,25 @@ class PetController:
             if not state.enabled:
                 continue
             state.activity_reevaluations += 1
-            if (self.is_quiet(robot_id) or self.is_dock_charging_inhibited(robot_id)
-                    or profile_waits_beyond_fleet_floor(
-                        robots[index].personality_profile,
-                        elapsed=now - self._group_last_spoken, base=self.speech_cooldown,
-                    )):
+            state.last_initiative_gate_reason = self._activity_local_veto(robot_id, now)
+            if state.last_initiative_gate_reason is not None:
                 state.last_activity_decision = "defer"
                 continue
             break
         else:
             return
-        if (
-            not self.voice_monitor_ready
-            or self._human_active_in_fleet(now)
-            or cooldown_pending(
-                now=now, last=self._group_last_spoken,
-                interval=self.speech_cooldown,
-            )
-            or self.conversation.active is not None
-            or (self._speech_task is not None and not self._speech_task.done())
-        ):
+        state.last_initiative_gate_reason = first_initiative_veto(
+            ("voice_monitor_unavailable", lambda: not self.voice_monitor_ready),
+            ("human_floor_busy", lambda: self._human_active_in_fleet(now)),
+            ("fleet_speech_cooldown", lambda: cooldown_pending(
+                now=now, last=self._group_last_spoken, interval=self.speech_cooldown,
+            )),
+            ("conversation_active", lambda: self.conversation.active is not None),
+            ("proactive_speech_active", lambda: (
+                self._speech_task is not None and not self._speech_task.done()
+            )),
+        )
+        if state.last_initiative_gate_reason is not None:
             state.last_activity_decision = "defer"
             return
         # Advance on an admitted consideration, including deliberate silence.
@@ -2891,6 +2905,7 @@ class PetController:
             state.activity_silences += 1
             state.last_activity_decision = "silence"
             state.last_initiative_suppression = "repetitive_background"
+            state.last_initiative_gate_reason = "repetitive_background"
             return
         state.last_activity_decision = "consider"
         change = SceneChange(
@@ -2929,6 +2944,7 @@ class PetController:
             if camera_consent_generation is None else camera_consent_generation
         )
         state = self.states[robot_id]
+        state.last_initiative_gate_reason = None
         scheduled_quiet = self._quiet_hours_active()
         now = time.monotonic()
         if (self._closed or not state.enabled or state.generation != generation
@@ -3005,16 +3021,20 @@ class PetController:
             speech_interval=passive_floor,
             interaction_interval=self.interaction_cooldown,
         )
-        quiet_veto = quiet_voice_veto(
+        quiet_reason = quiet_voice_reason(
             local_quiet=state.quiet, scheduled_quiet=scheduled_quiet,
             human_active=lambda: self._human_active_in_fleet(now),
         )
-        if (
-            quiet_veto
-            or cooldown_pending(now=now, last=previous, interval=self.group_window)
-            or cooldown_pending(now=now, last=self._group_last_spoken, interval=relevant_cooldown)
-        ):
-            if quiet_veto:
+        state.last_initiative_gate_reason = quiet_reason or first_initiative_veto(
+            ("duplicate_event_cooldown", lambda: cooldown_pending(
+                now=now, last=previous, interval=self.group_window,
+            )),
+            ("fleet_speech_cooldown", lambda: cooldown_pending(
+                now=now, last=self._group_last_spoken, interval=relevant_cooldown,
+            )),
+        )
+        if state.last_initiative_gate_reason is not None:
+            if quiet_reason is not None:
                 self._clear_deferred_speech(state)
             state.suppressed += 1
             state.last_initiative_suppression = "quiet_voice_or_group_budget"

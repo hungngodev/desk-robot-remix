@@ -4463,6 +4463,9 @@ async def test_suppressed_touch_does_not_consume_later_touch_admission(
         pet._consider_speech("robot-01", touch, 9)
         assert pet._speech_task is None
         assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        assert pet.status("robot-01")["last_initiative_gate_reason"] == (
+            "human_floor_busy" if suppression == "human_vad" else "manual_quiet"
+        )
         assert not pet._admitted_event_kinds
         assert speaker.spoken == []
 
@@ -4478,6 +4481,7 @@ async def test_suppressed_touch_does_not_consume_later_touch_admission(
         # group window, so repeated taps cannot trigger a speech storm.
         pet._consider_speech("robot-01", touch, 9)
         assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        assert state.last_initiative_gate_reason == "duplicate_event_cooldown"
         assert len(speaker.spoken) == 1
     finally:
         state.enabled = False
