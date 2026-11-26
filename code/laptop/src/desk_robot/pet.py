@@ -47,6 +47,7 @@ from .initiative_policy import (
     receipt_veto,
 )
 from .memory import CameraProvenance, MemoryStore
+from .observation_policy import camera_receipt_is_current, prepare_camera_receipt
 from .operations import bounded_head_reply as _bounded_head_reply
 from .personality_policy import (
     expression_guidance,
@@ -817,37 +818,23 @@ class PetController:
         if camera_received_at is not None or camera_source_identity is not None:
             if not camera_derived or camera_received_at is None:
                 raise ValueError("Camera receipt provenance requires a camera observation")
-            now_mono = time.monotonic()
-            if (type(camera_received_at) not in (int, float)
-                    or not math.isfinite(camera_received_at)
-                    or not 0 <= now_mono - camera_received_at
-                    <= self.max_observation_age):
-                return False  # Stale or impossible Mac receipt cannot enter memory
-            observed_at -= now_mono - camera_received_at
-            if camera_source_identity is not None:
-                identity = camera_source_identity
-                if (type(identity) is not tuple or len(identity) != 3
-                        or any(type(value) is not int for value in identity)
-                        or not 0 <= identity[0] <= 0xffffffff
-                        or not 1 <= identity[1] <= 0xffffffff
-                        or not 1 <= identity[2] <= 0xffffffffffffffff):
-                    raise ValueError("Invalid device camera completion identity")
-                # This source key survives SQLite restart and distinguishes
-                # same-frame retry from a new device observation. It also
-                # carries original unaligned device receipt ticks without
-                # implying they represent exposure or Mac wall clock time.
-                event_id = (
-                    f"camera_{robot_id}_{identity[0]:08x}_"
-                    f"{identity[1]:08x}_{identity[2]:x}"
-                )
+            receipt = prepare_camera_receipt(
+                robot_id=robot_id, event_id=event_id, wall_now=observed_at,
+                monotonic_now=time.monotonic(), received_at=camera_received_at,
+                max_age=self.max_observation_age, source_identity=camera_source_identity,
+            )
+            if receipt is None:
+                return False
+            event_id, observed_at = receipt
             camera_provenance = CameraProvenance(
                 received_at=observed_at, interpreted_at=interpreted_at,
                 source_identity=camera_source_identity,
             )
         def camera_receipt_current() -> bool:
-            return (camera_received_at is None
-                    or 0 <= time.monotonic() - camera_received_at
-                    <= self.max_observation_age)
+            return camera_received_at is None or camera_receipt_is_current(
+                received_at=camera_received_at, now=time.monotonic(),
+                max_age=self.max_observation_age,
+            )
 
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
