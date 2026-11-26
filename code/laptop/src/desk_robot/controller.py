@@ -124,10 +124,12 @@ class Job:
     error: str | None = None
     events: list[str] = field(default_factory=list)
     _motion_epoch: int | None = field(default=None, repr=False)
+    _body_boot: int | None = field(default=None, repr=False)
 
     def data(self):
         data = asdict(self)
         data.pop("_motion_epoch")
+        data.pop("_body_boot")
         return data
 
 
@@ -771,12 +773,30 @@ class Coordinator:
                     break
         epoch = self._retire_permit(robot_id)  # consume once, even if ACK/job later fails
         job = Job(uuid.uuid4().hex, robot_id, kind, _motion_epoch=epoch)
+        if self.settings.mode == "hardware" and kind == "navigate":
+            job._body_boot = self.spatial.state(robot_id).body_boot
         # Claim synchronously, before the task is even scheduled. No queued
         # second body can slip in between per-robot task starts.
         self._fleet_motion_owner = job.id
         self.jobs[job.id] = job
         self.tasks[job.id] = asyncio.create_task(self._run(job, work))
         return job
+
+    def _require_navigation_body_boot(self, job: Job, status: object) -> None:
+        """A reboot retires the route's original WROOM motion authority."""
+        if self.settings.mode != "hardware" or job.kind != "navigate":
+            return
+        imu = status.get("imu") if isinstance(status, dict) else None
+        boot = imu.get("boot_id") if isinstance(imu, dict) else None
+        if (
+            not isinstance(status, dict)
+            or status.get("robot_id") != job.robot_id
+            or type(boot) is not int
+            or not 1 <= boot <= 0xffffffff
+            or boot != job._body_boot
+        ):
+            self.spatial.invalidate_robot(job.robot_id, reason="body_boot_changed")
+            raise OperationError("Navigation halted: WROOM boot changed or unavailable")
 
     def _require_job_motion(self, job: Job) -> None:
         parent = self.tasks.get(job.id)
@@ -828,7 +848,8 @@ class Coordinator:
                 # A head can disconnect, touch can be pressed and a floor
                 # sample can expire after the operator granted the permit.
                 # Recheck the real body immediately before requesting arm.
-                await self._hardware_preflight(job.robot_id)
+                status = await self._hardware_preflight(job.robot_id)
+                self._require_navigation_body_boot(job, status)
                 self._require_job_motion(job)
                 if not self.robot(job.robot_id).motion_enabled:
                     raise OperationError("motion_enabled=false; no arm sent")
@@ -977,6 +998,9 @@ class Coordinator:
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM active health status timeout",
         )
+        active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
+        if active is not None and active.robot_id == robot_id:
+            self._require_navigation_body_boot(active, body)
         if not isinstance(body, dict) or body.get("armed") is not True:
             raise OperationError("Operation stopped: body disarmed or unavailable")
         if self.settings.mode != "hardware":

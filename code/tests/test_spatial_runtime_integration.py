@@ -66,6 +66,7 @@ class SpatialHead:
             },
             "imu": {
                 "family": 1,
+                "boot_id": self.body_boot,
                 "valid": True,
                 "age_ms": 10,
                 "acc": [0, 0, 16384],
@@ -1169,6 +1170,42 @@ def test_f036_first_unit_anchoring_split_and_reanchor_replay(tmp_path):
     assert spatial.state("robot-01").grid.anchored is True
     assert spatial.state("robot-01").origin_id == "12"
     assert spatial.state("robot-01").map_to_odom == new_map_to_odom
+
+
+@pytest.mark.parametrize("stage", ["before_arm", "after_pose"])
+async def test_hardware_navigation_retires_goal_on_body_reboot(settings, tmp_path, stage):
+    """Neither an old permit nor a fresh-looking health reply can cross a WROOM reboot."""
+    from desk_robot.spatial_frames import PlanarTransform
+
+    class RebootHead(_HardwarePoseHead):
+        async def status(self):
+            body = await super().status()
+            if stage == "after_pose" and self.pose_seq >= 3:
+                self.body_boot = 8
+                body["imu"]["boot_id"] = self.body_boot
+            return body
+
+    head = RebootHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    transform = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, transform)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        if stage == "before_arm":
+            head.body_boot = 8
+        job = rt.coordinator.navigate("robot-01", goal=(3, 2))
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "WROOM boot changed" in (job.error or "")
+        assert not any(command.startswith("drive ") for command in head.commands)
+        if stage == "before_arm":
+            assert "arm" not in head.commands
+        assert "halt" in head.commands
+        assert not head.armed
+        assert "robot-01" not in rt.coordinator.permits
+        assert not rt.spatial.state("robot-01").grid.anchored
+        assert rt.spatial.state("robot-01").map_to_odom is None
+    finally:
+        await rt.close()
 
 
 async def test_hardware_navigation_rejects_pose_expired_during_health_io(
