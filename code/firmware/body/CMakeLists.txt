@@ -211,7 +211,7 @@ target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werr
 add_executable(body_reply_format_tests tests/body_reply_format_tests.cpp)
 target_include_directories(body_reply_format_tests PRIVATE lib/BodyControl)
 target_compile_features(body_reply_format_tests PRIVATE cxx_std_11)
-target_compile_options(body_reply_format_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_compile_options(body_reply_format_tests PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Werror)
 add_executable(battery_safety_tests tests/battery_safety_tests.cpp)
 target_include_directories(battery_safety_tests PRIVATE lib/BodyControl)
 target_compile_features(battery_safety_tests PRIVATE cxx_std_11)
