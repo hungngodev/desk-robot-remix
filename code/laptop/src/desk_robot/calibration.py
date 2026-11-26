@@ -4,11 +4,12 @@ import json
 import math
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Self
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from .private_files import is_private_robot_id, replace_private_text
 
@@ -31,6 +32,7 @@ class Calibration(BaseModel):
     robot_id: str | None = Field(default=None, strict=True)
     # Explicit operator expiry; legacy files have no known expiry.
     expires_at: AwareDatetime | None = None
+    _expiry_deadline: float | None = PrivateAttr(default=None)
     image_width: int = Field(gt=0)
     image_height: int = Field(gt=0)
     pixel_points: list[tuple[float, float]] = Field(min_length=4)
@@ -141,8 +143,7 @@ class Calibration(BaseModel):
                 "Calibration is an unmeasured example; measure this robot before pickup"
             )
 
-        if self.expires_at is not None and datetime.now(UTC) >= self.expires_at:
-            raise ValueError("Calibration expired; re-calibrate this robot before pickup")
+        self._verify_expiry()
 
         if robot_id is not None:
             if not is_private_robot_id(robot_id):
@@ -151,6 +152,19 @@ class Calibration(BaseModel):
                 raise ValueError("Calibration has no robot_id; re-calibrate this robot")
             if self.robot_id is not None and self.robot_id != robot_id:
                 raise ValueError("Calibration robot_id does not match requested robot")
+
+    def _verify_expiry(self) -> None:
+        if self.expires_at is None:
+            return
+        # A wall-clock correction may shorten, but never extend, readiness
+        # for this loaded calibration. Keep the deadline process-local.
+        now = monotonic()
+        remaining = (self.expires_at - datetime.now(UTC)).total_seconds()
+        deadline = now + remaining
+        if self._expiry_deadline is None or deadline < self._expiry_deadline:
+            self._expiry_deadline = deadline
+        if now >= self._expiry_deadline:
+            raise ValueError("Calibration expired; re-calibrate this robot before pickup")
 
     def has_pickup_floor_clearance(self) -> bool:
         """Require positive measured sweep clearance, not object thickness."""

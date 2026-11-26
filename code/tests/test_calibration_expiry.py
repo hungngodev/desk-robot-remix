@@ -63,3 +63,35 @@ def test_exact_expiry_in_different_timezone_blocks_pickup(monkeypatch):
     )
     with pytest.raises(ValueError, match="expired"):
         calibration.verify_ready()
+
+
+@pytest.mark.parametrize("wall_expired", [False, True])
+def test_rollback_cannot_extend_or_revive_robot_calibration(monkeypatch, wall_expired):
+    wall = datetime(2099, 1, 1, 0, 0, 0, tzinfo=UTC)
+    ticks = 100.0
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is UTC
+            return wall
+
+    monkeypatch.setattr(calibration_module, "datetime", FixedClock)
+    monkeypatch.setattr(calibration_module, "monotonic", lambda: ticks)
+    calibration = Calibration.model_validate({
+        **_payload(), "robot_id": "robot-01", "expires_at": "2099-01-01T00:00:10Z",
+    })
+    calibration.verify_ready(robot_id="robot-01")
+    with pytest.raises(ValueError, match="does not match"):
+        calibration.verify_ready(robot_id="robot-02")
+    ticks = 105.0
+    if wall_expired:
+        wall = datetime(2099, 1, 1, 0, 0, 10, tzinfo=UTC)
+        with pytest.raises(ValueError, match="expired"):
+            calibration.verify_ready(robot_id="robot-01")
+    wall = datetime(2098, 12, 31, tzinfo=UTC)
+    if not wall_expired:
+        calibration.verify_ready(robot_id="robot-01")
+        ticks = 110.0
+    with pytest.raises(ValueError, match="expired"):
+        calibration.verify_ready(robot_id="robot-01")
