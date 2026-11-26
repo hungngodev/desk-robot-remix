@@ -236,6 +236,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
     assert all(item["bbox_mm"]["dimensions_mm"] == [1.0, 1.0, 1.0]
                for item in report["parts"])
+    assert report["fdm_print_guidance"] == {
+        "starting_layer_height_mm": 0.2,
+        "nozzle_diameter_mm": None,
+        "xy_clearance_mm": None,
+        "instruction": "Select nozzle in slicer; measure a printed fit coupon with calipers.",
+    }
     assert report["power_fit_scope"] == source.POWER_FIT_SCOPE
     assert report["power_fit_scope"] == {
         "part": "battery_boost_tray",
@@ -258,6 +264,18 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     # to a physically qualified assembly, energized dock, or licensed product.
     manifest = rendered / "fit_kit_manifest.json"
     original = manifest.read_text()
+    for field, value in (
+        ("starting_layer_height_mm", 0.3),
+        ("nozzle_diameter_mm", 0.2),
+        ("xy_clearance_mm", 0.2),
+        ("instruction", "Approved fit"),
+    ):
+        altered = json.loads(original)
+        altered["fdm_print_guidance"][field] = value
+        manifest.write_text(json.dumps(altered))
+        with pytest.raises(ValueError, match="Altered FDM print guidance"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     for index, forged in (
         (0, {"declared_spdx": None, "source_notice": None}),
         (0, {"declared_spdx": "MIT", "source_notice": "MIT"}),

@@ -68,6 +68,12 @@ power harness are NOT qualified for purchase, powered assembly or charging:
 this schematic contract requires physical measurements and fault trials.
 Do not substitute a power bank or infer battery fit from a source STL. Preserve the existing chassis and linkage.
 
+The STL fit kit manifest records a provisional FDM starting layer height of
+0.2 mm, not a nozzle diameter or guaranteed XY fit tolerance. Select the actual
+nozzle in the slicer, print a small coupon in the intended material, and measure
+with calipers before adjusting the source-specific clearance. Do not add a
+global 0.2 mm offset to every model. Regenerate older manifests with the exporter.
+
 Each export must record source/license, dimensions, changes and hash. Derived
 SMARS geometry retains its noncommercial/share-alike terms. Software MIT terms
 do not relicense printed designs. Fusion tools are exposed; verify the live connection and active design before editing.

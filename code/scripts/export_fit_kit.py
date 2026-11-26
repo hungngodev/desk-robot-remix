@@ -42,6 +42,14 @@ MG90S_FITS = ("mg90s_fit_015", "mg90s_fit_030",
 DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",
          "dock_ir_pair_position_coupon")
 
+FDM_PRINT_GUIDANCE = {
+    "starting_layer_height_mm": 0.2,
+    "nozzle_diameter_mm": None,
+    "xy_clearance_mm": None,
+    "instruction": "Select nozzle in slicer; measure a printed fit coupon with calipers.",
+}
+
+
 POWER_FIT_SCOPE = {
     # Historical generated filename retained for compatibility.
     # The geometry currently represents the protected pack body only.
@@ -434,6 +442,7 @@ def export_kit(
         "full_printable_assembly_verified": False,
         "dock_charge_contacts_approved": False,
         "commercial_manufacture_authorized": False,
+        "fdm_print_guidance": dict(FDM_PRINT_GUIDANCE),
         "power_fit_scope": dict(POWER_FIT_SCOPE),
         "source_chassis_battery_footprint": reference_body_footprint_screen(
             root, out,
@@ -569,7 +578,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         "provisional_fit_parts_only", "source_geometry_rendered",
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",
-        "power_fit_scope", "source_chassis_battery_footprint", "parts",
+        "fdm_print_guidance", "power_fit_scope", "source_chassis_battery_footprint", "parts",
     }:
         raise ValueError("Unexpected fit kit manifest fields")
     # Generated STLs are only reversible coupons. A hand-edited manifest
@@ -584,6 +593,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
                 "commercial_manufacture_authorized",
             ))):
         raise ValueError("Unsafe fit kit provenance flags")
+    if not same_json_evidence(report.get("fdm_print_guidance"), FDM_PRINT_GUIDANCE):
+        raise ValueError("Altered FDM print guidance")
     if not same_json_evidence(report.get("power_fit_scope"), POWER_FIT_SCOPE):
         raise ValueError("Unsafe power fit scope")
     # A changed source chassis must invalidate an old packing screen.
