@@ -15,7 +15,11 @@ class PulsePad {
   // No access to motor pins, arm, safety guard, or lift servo.
   bool poll(std::uint32_t now_ms);
   const OpticalRaw& sample() const { return sample_; }
-  void invalidate_bus() { sample_.valid = false; fifo_unsynced_ = true; }
+  void invalidate_bus() {
+    sample_.valid = false;
+    fifo_unsynced_ = true;
+    if (recovering_) recovery_step_ = 0;
+  }
   // Acknowledged 0x71 even if selection/readback or optical init failed.
   bool mux_present() const { return mux_present_; }
  private:
@@ -26,6 +30,10 @@ class PulsePad {
   bool mux_present_ = false;
   // After ambiguous I2C FIFO consumption, discard old records before reuse.
   bool fifo_unsynced_ = false;
+  bool recovering_ = false;
+  std::uint8_t recovery_step_ = 0;
+  bool configure_setting(std::uint8_t step);
+  void recover_configuration();
   bool select();
   bool close();
   bool select_mux(std::uint8_t address, std::uint8_t mask);

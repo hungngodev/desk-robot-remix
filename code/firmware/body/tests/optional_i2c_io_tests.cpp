@@ -1411,6 +1411,64 @@ int main() {
     CHECK(external_pulse.sample().sample_seq == pulse_seq);
     CHECK(!external_pulse.poll(100)); // quarantine old FIFO on resumption
     CHECK(external_pulse.sample().sample_seq == pulse_seq);
+    // MAX30102 power-ready is a downstream reset, not merely mux isolation.
+    // Preserve provenance, verify settings in bounded slices, and discard
+    // pre-recovery FIFO records before accepting a new optical observation.
+    {
+      TwoWire reset_wire;
+      desk_robot::PulsePad reset_pulse;
+      reset_wire.pulse_interrupt_status = 1;
+      CHECK(reset_pulse.begin(reset_wire));
+      CHECK(reset_wire.pulse_interrupt_status == 0);
+      CHECK(reset_pulse.poll(0));
+      const auto seq = reset_pulse.sample().sample_seq;
+      const auto at = reset_pulse.sample().at_ms;
+      reset_wire.pulse_fifo_write_pointer =
+          (reset_wire.pulse_fifo_read_pointer + 1U) & 31U;
+      const auto old_read = reset_wire.pulse_fifo_read_pointer;
+      reset_wire.pulse_interrupt_status = 1;
+      for (auto& reg : reset_wire.pulse_config) reg = 0;
+      reset_wire.pulse_interrupt_enable = 0;
+      CHECK(!reset_pulse.poll(60));
+      CHECK(!reset_pulse.sample().valid);
+      CHECK(reset_wire.pulse_fifo_read_pointer == old_read);
+      reset_wire.ignore_pulse_config_write_reg = 0x0c;
+      for (std::uint32_t ms = 120; ms <= 780; ms += 60) {
+        CHECK(!reset_pulse.poll(ms));
+        CHECK(!reset_pulse.sample().valid);
+        CHECK(reset_pulse.sample().sample_seq == seq && reset_pulse.sample().at_ms == at);
+        CHECK(reset_wire.ranges == 0 && reset_wire.extras == 0);
+      }
+      reset_wire.ignore_pulse_config_write_reg = -1;
+      for (std::uint32_t ms = 840; ms <= 1320; ms += 60) {
+        CHECK(!reset_pulse.poll(ms));
+        CHECK(reset_pulse.sample().sample_seq == seq);
+        CHECK(reset_wire.ranges == 0 && reset_wire.extras == 0);
+      }
+      CHECK(reset_wire.pulse_config[0x09] == 3 && reset_wire.pulse_config[0x0a] == 0x23);
+      CHECK(reset_wire.pulse_config[0x0c] == 7 && reset_wire.pulse_config[0x0d] == 7);
+      CHECK(reset_wire.pulse_interrupt_enable == 0x20);
+      reset_wire.pulse_fifo_write_pointer =
+          (reset_wire.pulse_fifo_read_pointer + 1U) & 31U;
+      CHECK(reset_pulse.poll(1380));
+      CHECK(reset_pulse.sample().sample_seq == seq + 1U);
+      // If the reset flag was lost during a failed transfer, a mode
+      // mismatch after shared bus quarantine also requires configuration.
+      reset_pulse.invalidate_bus();
+      reset_wire.pulse_config[0x09] = 0;
+      reset_wire.pulse_fifo_write_pointer =
+          (reset_wire.pulse_fifo_read_pointer + 1U) & 31U;
+      CHECK(!reset_pulse.poll(1440));
+      for (std::uint32_t ms = 1500; ms <= 1920; ms += 60) {
+        CHECK(!reset_pulse.poll(ms));
+        CHECK(!reset_pulse.sample().valid);
+      }
+      reset_wire.pulse_fifo_write_pointer =
+          (reset_wire.pulse_fifo_read_pointer + 1U) & 31U;
+      CHECK(reset_pulse.poll(1980));
+      CHECK(reset_pulse.sample().sample_seq == seq + 2U);
+      CHECK(!reset_wire.unsafe_parallel_mux);
+    }
     // A missing PN532 or jammed optional lane must never preserve a cached
     // MCP dock status as current valid physical evidence.
     TwoWire stuck_wire;

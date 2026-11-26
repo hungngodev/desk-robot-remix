@@ -15,6 +15,23 @@ constexpr std::uint8_t kExtraMux = 0x71;
 constexpr std::uint8_t kMax30102 = 0x57;
 // MAX30102 datasheet, pp. 12-13: ALC_OVF signals contaminated ADC data.
 constexpr std::uint8_t kAmbientOverflow = 0x20;
+// MAX30102 datasheet, p. 12: power-up or brownout reset notification.
+constexpr std::uint8_t kPowerReady = 0x01;
+// MAX30102 dual LED (RED/IR) mode. No claim of medical SpO2/heart rate.
+// 0x23 = 4096nA ADC, 50sps, 411us pulse from MAX3010x register map.
+// LED pilot settings intentionally low; actual paw enclosure needs trial.
+// Datasheet p. 10: verify only defined configuration bits. FIFO
+// pointers are live counters, not stable configuration registers.
+struct Setting { std::uint8_t reg, value, mask; };
+constexpr Setting settings[] = {
+    {0x09, 0x03, 0xc7},  // mode, shutdown and reset
+    {0x08, 0x00, 0xff},  // FIFO averaging, rollover, almost-full
+    {0x0a, 0x23, 0x7f},  // ADC range, sample rate, pulse width
+    {0x0c, 0x07, 0xff},  // red LED amplitude
+    {0x0d, 0x07, 0xff},  // IR LED amplitude
+    {0x02, kAmbientOverflow, 0xe0},  // interrupt enables
+};
+constexpr std::uint8_t kSettingCount = sizeof(settings) / sizeof(settings[0]);
 }
 bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
   const auto result = write_mux_mask(*wire_, address, mask);
@@ -55,6 +72,29 @@ bool PulsePad::read_bytes(std::uint8_t reg, std::uint8_t* dest,
 bool PulsePad::read_reg(std::uint8_t reg, std::uint8_t& value) {
   return read_bytes(reg, &value, 1);
 }
+bool PulsePad::configure_setting(std::uint8_t step) {
+  if (step >= kSettingCount) return false;
+  const auto& setting = settings[step];
+  std::uint8_t actual = 0;
+  return write_reg(setting.reg, setting.value) && read_reg(setting.reg, actual) &&
+         (actual & setting.mask) == setting.value;
+}
+
+void PulsePad::recover_configuration() {
+  // One identity or configuration step per poll, not full bringup in the
+  // safety loop. Always verify mux closure before advancing recovery.
+  std::uint8_t part = 0, status = 0;
+  const bool ok = recovery_step_ == 0
+      ? read_reg(0xff, part) && part == 0x15U && read_reg(0x00, status)
+      : configure_setting(recovery_step_ - 1);
+  const bool closed = close();
+  if (!ok || !closed) recovery_step_ = 0;
+  else if (++recovery_step_ > kSettingCount) recovering_ = false;
+  // The next normal poll must flush the FIFO before publishing new data.
+  fifo_unsynced_ = true;
+  sample_.valid = false;
+}
+
 bool PulsePad::begin(TwoWire& wire) {
   wire_ = &wire; // already set to 400kHz, 15ms Wire bound by TofBus
   sample_ = OpticalRaw{};
@@ -63,35 +103,18 @@ bool PulsePad::begin(TwoWire& wire) {
   // initializing other I2C devices before the main loop starts.
   last_ms_ = millis();
   fifo_unsynced_ = false;
+  recovering_ = false;
+  recovery_step_ = 0;
   if (!select()) { close(); return false; }
   std::uint8_t part_id = 0;
   const bool recognized = read_reg(0xff, part_id) && part_id == 0x15U;
   bool configured = false;
   if (recognized) {
-    // MAX30102 dual LED (RED/IR) mode. No claim of medical SpO2/heart rate.
-    // 0x23 = 4096nA ADC, 50sps, 411us pulse from MAX3010x register map.
-    // LED pilot settings intentionally low; actual paw enclosure needs trial.
-    // Datasheet p. 10: verify only defined configuration bits. FIFO
-    // pointers are live counters, not stable configuration registers.
-    struct Setting { std::uint8_t reg, value, mask; };
-    constexpr Setting settings[] = {
-        {0x09, 0x03, 0xc7},  // mode, shutdown and reset
-        {0x08, 0x00, 0xff},  // FIFO averaging, rollover, almost-full
-        {0x0a, 0x23, 0x7f},  // ADC range, sample rate, pulse width
-        {0x0c, 0x07, 0xff},  // red LED amplitude
-        {0x0d, 0x07, 0xff},  // IR LED amplitude
-        {0x02, kAmbientOverflow, 0xe0},  // interrupt enables
-    };
-    configured = true;
-    for (const auto& setting : settings) {
-      std::uint8_t actual = 0;
-      if (!write_reg(setting.reg, setting.value) ||
-          !read_reg(setting.reg, actual) ||
-          (actual & setting.mask) != setting.value) {
-        configured = false;
-        break;
-      }
-    }
+    // Clear the startup power-ready flag before configuring the device.
+    std::uint8_t status = 0;
+    configured = read_reg(0x00, status);
+    for (std::uint8_t step = 0; configured && step < kSettingCount; ++step)
+      configured = configure_setting(step);
     configured = configured && write_reg(0x04, 0x00) &&
                  write_reg(0x05, 0x00) && write_reg(0x06, 0x00);
   }
@@ -111,7 +134,12 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   if (!select()) {
     (void)close();
     fifo_unsynced_ = true;
+    if (recovering_) recovery_step_ = 0;
     sample_.valid = false;
+    return false;
+  }
+  if (recovering_) {
+    recover_configuration();
     return false;
   }
   std::uint8_t write_pointer = 0, read_pointer = 0, overflow = 0;
@@ -135,6 +163,24 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     fifo_unsynced_ = true;
     (void)close();
     sample_.valid = false;
+    return false;
+  }
+  // A mux disconnect alone does not reset downstream registers. A sensor
+  // brownout does. Never interpret its post-reset FIFO with old settings.
+  std::uint8_t mode = 0;
+  if ((interrupt_status & kPowerReady) == 0U && fifo_unsynced_ &&
+      !read_reg(0x09, mode)) {
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
+  if ((interrupt_status & kPowerReady) != 0U ||
+      (fifo_unsynced_ && (mode & settings[0].mask) != settings[0].value)) {
+    recovering_ = true;
+    recovery_step_ = 0;
+    fifo_unsynced_ = true;
+    sample_.valid = false;
+    (void)close();
     return false;
   }
   const std::uint8_t available =
