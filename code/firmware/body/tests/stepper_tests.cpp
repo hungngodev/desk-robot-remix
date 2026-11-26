@@ -79,6 +79,45 @@ void zero_and_disable_coast_preserve_phase() {
   CHECK(drive.update(900001, -40, true) == retained);
 }
 
+// STOP (zero demand) and HALT/fault (disabled) must coast every phase,
+// even at the same timestamp as an energized output. No idle holding current.
+void every_phase_releases_immediately() {
+  for (const std::uint32_t origin : {0U, 0xffff0000U}) {
+    for (const int direction : {-1, 1}) {
+      for (const bool enabled : {false, true}) {
+        for (const auto phase : kPhases) {
+          StepperDrive drive;
+          const int requested = direction * 40;
+          drive.update(origin, requested, true);
+          run_until(drive, origin, 600000U, requested);
+          auto now = origin + 600000U;
+          for (int step = 0; step < 8 && drive.mask() != phase; ++step) {
+            now += 6250U;
+            drive.update(now, requested, true);
+          }
+          CHECK(drive.mask() == phase);
+          CHECK(drive.rate_milli_steps_per_second() == direction * 160000);
+          const int stopped_request = enabled ? 0 : -requested;
+          CHECK(drive.update(now, stopped_request, enabled) == 0);
+          CHECK(drive.mask() == 0);
+          CHECK(drive.rate_milli_steps_per_second() == 0);
+          for (const std::uint32_t delay : {0U, 1U, 250000U, 500000U, 60000000U}) {
+            CHECK(drive.update(now + delay, stopped_request, enabled) == 0);
+            CHECK(drive.mask() == 0);
+            CHECK(drive.rate_milli_steps_per_second() == 0);
+          }
+          // A fresh authorized command must start from rest, not repay old steps.
+          now += 60000000U;
+          CHECK(drive.update(now, -requested, true) == phase);
+          CHECK(drive.rate_milli_steps_per_second() == 0);
+          CHECK(drive.update(now, -requested, true) == phase);
+          CHECK(drive.rate_milli_steps_per_second() == 0);
+        }
+      }
+    }
+  }
+}
+
 void speed_limit_and_integer_extremes() {
   StepperDrive positive;
   StepperDrive negative;
@@ -342,6 +381,7 @@ int main(int argc, char** argv) {
       {"positive_sequence", positive_sequence},
       {"negative_sequence", negative_sequence},
       {"zero_and_disable_coast_preserve_phase", zero_and_disable_coast_preserve_phase},
+      {"every_phase_releases_immediately", every_phase_releases_immediately},
       {"speed_limit_and_integer_extremes", speed_limit_and_integer_extremes},
       {"acceleration_and_reversal_through_zero", acceleration_and_reversal_through_zero},
       {"small_commands_and_no_zero_time_ramp", small_commands_and_no_zero_time_ramp},
