@@ -67,6 +67,9 @@ def read_partition_table(path: Path) -> bytes:
             raise ValueError("Partition table contains an invalid entry")
         if name.split(b"\0", 1)[0] == b"assets":
             matches.append((kind, subtype, offset, size, flags))
+        elif (size and offset < ASSETS_OFFSET + ASSETS_LIMIT
+              and offset + size > ASSETS_OFFSET):
+            raise ValueError("Partition table entry overlaps assets SPIFFS")
     else:
         raise ValueError("Partition table is missing an end marker")
     if not padding or padding != b"\xff" * len(padding):
