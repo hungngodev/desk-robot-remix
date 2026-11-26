@@ -79,11 +79,12 @@ public:
 #include "volume.inc"
 static AudioCodec* change_volume = nullptr;
 static bool change_before = false;
+static int next_volume = 10;
 static void change_volume_before_conversion() {
-    if (change_volume && change_before) change_volume->SetOutputVolume(10);
+    if (change_volume && change_before) change_volume->SetOutputVolume(next_volume);
 }
 static void change_volume_during_write() {
-    if (change_volume && !change_before) change_volume->SetOutputVolume(10);
+    if (change_volume && !change_before) change_volume->SetOutputVolume(next_volume);
 }
 class NoAudioCodec : public AudioCodec {
 public:
@@ -114,6 +115,44 @@ public:
 #include "sense_writer.inc"
 #include "publish.inc"
 #define CHECK(x) do { if (!(x)) { std::cerr << "FAIL " << #x << '\n'; return 1; } } while(false)
+// Compare the whole reference stream against independently known gain steps.
+// The odd accepted prefix must retain FIR phase and exclude the unwritten tail.
+static int CheckVolumeBoundaries() {
+    SenseReferenceCodec sense;
+    desk_robot::ReferenceDecimator expected;
+    std::array<int16_t, 64> pcm{};
+    for (std::size_t i = 0; i < pcm.size(); ++i)
+        pcm[i] = (i % 3 == 0) ? -16384 : 8192;
+    struct Step { int requested; int accepted; int divisor; int next; };
+    const Step steps[] = {{64, 33, 1, 50}, {31, 31, 4, 0},
+                          {64, 64, 0, 100}, {64, 64, 1, 10}};
+    change_before = false;
+    change_volume = &sense;
+    sense.SetOutputVolume(100);
+    std::size_t position = 0;
+    for (const auto& step : steps) {
+        written = static_cast<std::size_t>(step.accepted) * sizeof(int32_t);
+        next_volume = step.next;
+        CHECK(sense.Write(pcm.data(), step.requested) == step.accepted);
+        CHECK(sense.output_volume() == step.next);
+        for (int i = 0; i < step.accepted; ++i) {
+            const int16_t scaled = step.divisor ? pcm[i] / step.divisor : 0;
+            int16_t filtered = 0;
+            if (expected.Push(scaled, filtered)) {
+                CHECK(position < sense.n);
+                CHECK(sense.ring[position++] == filtered);
+            }
+        }
+        CHECK(sense.n == position);
+    }
+    CHECK(position == 96);
+    CHECK(sense.speaker_frames_accepted_ == 192);
+    CHECK(sense.short_output_writes_ == 1);
+    CHECK(sense.reference_integrity_failed_);
+    change_volume = nullptr;
+    written = 0;
+    return 0;
+}
 int main() {
     desk_robot::ReferenceDecimator decimator;
     const auto before_filter = allocations;
@@ -188,5 +227,6 @@ int main() {
     CHECK(!sense.reference_integrity_failed_);
     CHECK(allocations == sense_allocations);
     CHECK(startup_allocations == sense_startup_allocations);
+    CHECK(CheckVolumeBoundaries() == 0);
     std::cout << "PASS actual accepted PCM gain across mid-write volume change\n";
 }
