@@ -182,6 +182,35 @@ void optional_inputs_preserve_raw_stop_and_event_history() {
   CHECK(body.state().left == 0 && body.state().right == 0);
   CHECK(!body.state().bumper_active && body.state().bumper_events == 0);
   CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+
+  BodyControl transitions;
+  transitions.sample_optional_inputs(7, false, false, false, true);
+  transitions.sample_optional_inputs(7, true, false, false, true);
+  transitions.sample_optional_inputs(7, true, false, false, true);
+  // Disable reed on the exact sample that qualifies bumper and PIR edges.
+  transitions.sample_optional_inputs(5, true, true, true, true);
+  CHECK(transitions.state().bumper_events == 1);
+  CHECK(transitions.state().pir_events == 1);
+  CHECK(transitions.state().reed_events == 0);
+  // An already-held reed on recovery is a baseline, not an arrival.
+  transitions.sample_optional_inputs(7, false, true, false, true);
+  CHECK(transitions.state().reed_active);
+  CHECK(transitions.state().reed_events == 0);
+  // An independently enabled reed still counts while PIR is unavailable.
+  transitions.sample_optional_inputs(3, false, false, true, true);
+  transitions.sample_optional_inputs(3, false, true, true, true);
+  CHECK(transitions.state().reed_events == 1);
+  CHECK(transitions.state().pir_events == 1);
+  transitions.sample_optional_inputs(7, false, true, true, true);
+  CHECK(transitions.state().pir_active);
+  CHECK(transitions.state().pir_events == 1);
+  // A full outage preserves nonzero historical counters for the host.
+  transitions.sample_optional_inputs(0, true, true, true, true);
+  CHECK(transitions.state().extra_mask == 0);
+  transitions.sample_optional_inputs(7, true, true, true, true);
+  CHECK(transitions.state().bumper_events == 1);
+  CHECK(transitions.state().reed_events == 1);
+  CHECK(transitions.state().pir_events == 1);
 }
 
 void disarmed_boot() {
