@@ -505,52 +505,153 @@ def patch_decoder_integrity(service: str) -> str:
     return service
 
 
+def _copy_alternate_board_sources(files: dict[str, bytes], board: str) -> None:
+    for folder in (HERE / board, HERE / "overlay"):
+        for path in folder.iterdir():
+            if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
+                files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+
+
+def _waveshare_files(target: Path) -> dict[str, bytes]:
+    board = "waveshare"
+    # Keep all existing variants unchanged. This physical-reference candidate
+    # reuses their common camera/HTTP locking, but no Sense PDM adapter.
+    files = {
+        name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_WAVESHARE_S3_CAM")
+        .replace(
+            b"Desk robot modular S3 (Freenove N16R8)",
+            b"Desk robot Waveshare S3 CAM (hardware reference)",
+        )
+        .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-waveshare-s3-cam")
+        for name, data in planned_files(target, "modular").items()
+        if not name.startswith(BOARDS["modular"] + "/")
+    }
+    _copy_alternate_board_sources(files, board)
+    path = "main/Kconfig.projbuild"
+    files[path] = replace_once(
+        files[path].decode(),
+        "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
+        "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_WAVESHARE_S3_CAM || BOARD_TYPE_ESP32_S3_BOX_3",
+    ).encode()
+    path = f"{BOARDS[board]}/robot_bridge.cc"
+    files[path] = replace_once(
+        files[path].decode(), "uart_set_pin(kUart, 2, 1,", "uart_set_pin(kUart, 43, 44,"
+    ).encode()
+    return files
+
+
+def _sense_base_files(target: Path) -> dict[str, bytes]:
+    board = "sense"
+    # Reuse the tested common camera/bridge changes without changing either
+    # existing board adapter or its separate build copy.
+    files = {
+        name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_SENSE_S3")
+        .replace(b"Desk robot modular S3 (Freenove N16R8)", b"Desk robot XIAO ESP32S3 Sense")
+        .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-sense-s3")
+        for name, data in planned_files(target, "modular").items()
+        if not name.startswith(BOARDS["modular"] + "/")
+    }
+    _copy_alternate_board_sources(files, board)
+    return files
+
+
+def _modular_board_files(files: dict[str, bytes], board: str) -> dict[str, bytes]:
+    # Keep the original CoreS3 source and build copy independent. The selected
+    # integration guard is used by camera.h, EspVideo and the MCP capture lock.
+    files = {
+        name: data.replace(b"CONFIG_BOARD_TYPE_DESK_ROBOT_CORE_S3", b"CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
+        .replace(b"BOARD_TYPE_DESK_ROBOT_CORE_S3", b"BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
+        .replace(b'Desk robot CoreS3 Lite', b'Desk robot modular S3 (Freenove N16R8)')
+        .replace(b"desk-robot/desk-robot-core-s3", b"desk-robot/desk-robot-modular-s3")
+        for name, data in files.items()
+        if not name.startswith(BOARD + "/")
+    }
+    cmake = files["main/CMakeLists.txt"].decode()
+    cmake = replace_once(
+        cmake,
+        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
+        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)\n'
+        '    set(BUILTIN_ICON_FONT font_material_symbols_20_4)\n'
+        '    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)\n',
+        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
+        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)\n'
+        '    set(BUILTIN_ICON_FONT font_material_symbols_14_1)\n',
+    )
+    files["main/CMakeLists.txt"] = cmake.encode()
+    for path in (HERE / "modular").iterdir():
+        if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
+            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+    for path in (HERE / "overlay").iterdir():
+        if path.suffix in (".h", ".cc", ".hpp"):
+            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+    return files
+
+
+def _lock_modular_camera(source: str, guard: str) -> str:
+    for anchor in (
+        "bool Esp32Camera::Capture() {",
+        "std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question) {",
+        "bool Esp32Camera::SetHMirror(bool enabled) {",
+        "bool Esp32Camera::SetVFlip(bool enabled) {",
+        "bool Esp32Camera::SetSwapBytes(bool enabled) {",
+    ):
+        source = replace_once(source, anchor, anchor + "\n" + guard +
+                              "\n    std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex());\n#endif")
+    return source
+
+
+def _patch_modular_camera(target: Path, files: dict[str, bytes]) -> None:
+    guard = "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3"
+    path = "main/boards/common/esp32_camera.h"
+    header = (target / path).read_text()
+    header = replace_once(
+        header, "    virtual bool Capture() override;",
+        "    virtual bool Capture() override;\n" + guard +
+        "\n    std::expected<std::vector<uint8_t>, std::string> SnapshotJpeg() override;\n#endif",
+    )
+    files[path] = header.encode()
+    path = "main/boards/common/esp32_camera.cc"
+    source = (target / path).read_text()
+    header, source = patch_camera_explain_config(header, source)
+    files["main/boards/common/esp32_camera.h"] = header.encode()
+    bounds_header = "main/boards/common/desk_robot_camera_frame_bounds.hpp"
+    files[bounds_header] = (HERE / "overlay/camera_frame_bounds.hpp").read_bytes()
+    source = replace_once(
+        source,
+        '#include "esp32_camera.h"',
+        '#include "esp32_camera.h"\n#include "desk_robot_camera_frame_bounds.hpp"',
+    )
+    source = replace_once(
+        source,
+        "    if (current_fb_->format == PIXFORMAT_RGB565) {\n"
+        "        size_t pixel_count = current_fb_->width * current_fb_->height;",
+        """    if (current_fb_->format == PIXFORMAT_RGB565) {
+        if (!current_fb_->buf || !desk_robot::ValidRgb565Frame(
+                current_fb_->width, current_fb_->height, current_fb_->len)) {
+            ESP_LOGE(TAG, "Invalid RGB565 frame dimensions or length");
+            esp_camera_fb_return(current_fb_);
+            current_fb_ = nullptr;
+            return false;
+        }
+        size_t pixel_count = current_fb_->width * current_fb_->height;""",
+    )
+    # Capacity may exceed the current frame after a smaller capture.
+    source = replace_once(
+        source, "jpeg_src_len = encode_buf_size_;", "jpeg_src_len = current_fb_->len;"
+    )
+    source = _lock_modular_camera(source, guard)
+    source += "\n" + guard + "\n" + (HERE / "modular_snapshot.inc").read_text() + "\n#endif\n"
+    files[path] = source.encode()
+
+
 def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     """Reuse the bridge/locking overlay, replacing only the selected board adapter."""
     if board not in BOARDS:
         raise ValueError(f"Unknown board: {board}")
     if board == "waveshare":
-        # Keep all existing variants unchanged. This physical-reference candidate
-        # reuses their common camera/HTTP locking, but no Sense PDM adapter.
-        files = {
-            name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_WAVESHARE_S3_CAM")
-            .replace(
-                b"Desk robot modular S3 (Freenove N16R8)",
-                b"Desk robot Waveshare S3 CAM (hardware reference)",
-            )
-            .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-waveshare-s3-cam")
-            for name, data in planned_files(target, "modular").items()
-            if not name.startswith(BOARDS["modular"] + "/")
-        }
-        for folder in (HERE / "waveshare", HERE / "overlay"):
-            for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
-                    files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
-        path = "main/Kconfig.projbuild"
-        files[path] = replace_once(
-            files[path].decode(),
-            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
-            "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_WAVESHARE_S3_CAM || BOARD_TYPE_ESP32_S3_BOX_3",
-        ).encode()
-        path = f"{BOARDS[board]}/robot_bridge.cc"
-        files[path] = replace_once(
-            files[path].decode(), "uart_set_pin(kUart, 2, 1,", "uart_set_pin(kUart, 43, 44,"
-        ).encode()
-        return files
+        return _waveshare_files(target)
     if board == "sense":
-        # Reuse the tested common camera/bridge changes without changing either
-        # existing board adapter or its separate build copy.
-        files = {
-            name: data.replace(b"DESK_ROBOT_MODULAR_S3", b"DESK_ROBOT_SENSE_S3")
-            .replace(b"Desk robot modular S3 (Freenove N16R8)", b"Desk robot XIAO ESP32S3 Sense")
-            .replace(b"desk-robot/desk-robot-modular-s3", b"desk-robot/desk-robot-sense-s3")
-            for name, data in planned_files(target, "modular").items()
-            if not name.startswith(BOARDS["modular"] + "/")
-        }
-        for folder in (HERE / "sense", HERE / "overlay"):
-            for path in folder.iterdir():
-                if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
-                    files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        files = _sense_base_files(target)
         # Query the stock OLED's actual visible subtitle under its existing lock.
         # Do not duplicate arbitrarily long transcripts in the local eye renderer.
         path = "main/display/oled_display.h"
@@ -1554,84 +1655,8 @@ void Application::HandleStartListeningEvent() {""",
     if board == "cores3":
         return files
 
-    # Keep the original CoreS3 source and build copy independent. The selected
-    # integration guard is used by camera.h, EspVideo and the MCP capture lock.
-    files = {
-        name: data.replace(b"CONFIG_BOARD_TYPE_DESK_ROBOT_CORE_S3", b"CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
-        .replace(b"BOARD_TYPE_DESK_ROBOT_CORE_S3", b"BOARD_TYPE_DESK_ROBOT_MODULAR_S3")
-        .replace(b'Desk robot CoreS3 Lite', b'Desk robot modular S3 (Freenove N16R8)')
-        .replace(b"desk-robot/desk-robot-core-s3", b"desk-robot/desk-robot-modular-s3")
-        for name, data in files.items()
-        if not name.startswith(BOARD + "/")
-    }
-    cmake = files["main/CMakeLists.txt"].decode()
-    cmake = replace_once(
-        cmake,
-        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
-        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)\n'
-        '    set(BUILTIN_ICON_FONT font_material_symbols_20_4)\n'
-        '    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)\n',
-        '    set(BOARD_DIR "desk-robot/desk-robot-modular-s3")\n'
-        '    set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)\n'
-        '    set(BUILTIN_ICON_FONT font_material_symbols_14_1)\n',
-    )
-    files["main/CMakeLists.txt"] = cmake.encode()
-    for path in (HERE / "modular").iterdir():
-        if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
-            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
-    for path in (HERE / "overlay").iterdir():
-        if path.suffix in (".h", ".cc", ".hpp"):
-            files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
-
-    guard = "#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3"
-    path = "main/boards/common/esp32_camera.h"
-    header = (target / path).read_text()
-    header = replace_once(
-        header, "    virtual bool Capture() override;",
-        "    virtual bool Capture() override;\n" + guard +
-        "\n    std::expected<std::vector<uint8_t>, std::string> SnapshotJpeg() override;\n#endif",
-    )
-    files[path] = header.encode()
-    path = "main/boards/common/esp32_camera.cc"
-    source = (target / path).read_text()
-    header, source = patch_camera_explain_config(header, source)
-    files["main/boards/common/esp32_camera.h"] = header.encode()
-    bounds_header = "main/boards/common/desk_robot_camera_frame_bounds.hpp"
-    files[bounds_header] = (HERE / "overlay/camera_frame_bounds.hpp").read_bytes()
-    source = replace_once(
-        source,
-        '#include "esp32_camera.h"',
-        '#include "esp32_camera.h"\n#include "desk_robot_camera_frame_bounds.hpp"',
-    )
-    source = replace_once(
-        source,
-        "    if (current_fb_->format == PIXFORMAT_RGB565) {\n"
-        "        size_t pixel_count = current_fb_->width * current_fb_->height;",
-        """    if (current_fb_->format == PIXFORMAT_RGB565) {
-        if (!current_fb_->buf || !desk_robot::ValidRgb565Frame(
-                current_fb_->width, current_fb_->height, current_fb_->len)) {
-            ESP_LOGE(TAG, "Invalid RGB565 frame dimensions or length");
-            esp_camera_fb_return(current_fb_);
-            current_fb_ = nullptr;
-            return false;
-        }
-        size_t pixel_count = current_fb_->width * current_fb_->height;""",
-    )
-    # Capacity may exceed the current frame after a smaller capture.
-    source = replace_once(
-        source, "jpeg_src_len = encode_buf_size_;", "jpeg_src_len = current_fb_->len;"
-    )
-    for anchor in (
-        "bool Esp32Camera::Capture() {",
-        "std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question) {",
-        "bool Esp32Camera::SetHMirror(bool enabled) {",
-        "bool Esp32Camera::SetVFlip(bool enabled) {",
-        "bool Esp32Camera::SetSwapBytes(bool enabled) {",
-    ):
-        source = replace_once(source, anchor, anchor + "\n" + guard +
-                              "\n    std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex());\n#endif")
-    source += "\n" + guard + "\n" + (HERE / "modular_snapshot.inc").read_text() + "\n#endif\n"
-    files[path] = source.encode()
+    files = _modular_board_files(files, board)
+    _patch_modular_camera(target, files)
     # Both alternate S3 heads share the same codec-independent decoder fence.
     path = "main/audio/audio_service.cc"
     files[path] = patch_decoder_integrity((target / path).read_text()).encode()
