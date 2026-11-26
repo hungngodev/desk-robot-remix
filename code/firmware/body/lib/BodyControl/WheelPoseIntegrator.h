@@ -110,7 +110,8 @@ class WheelPoseIntegrator {
                 limits_.imu_alignment_error_urad >
             limits_.max_yaw_error_urad ||
         (have_source_ &&
-         (w.segment != wheel_segment_ || e.imu_segment != imu_segment_ ||
+         (!sources_fresh(now_ms) ||
+          w.segment != wheel_segment_ || e.imu_segment != imu_segment_ ||
           (e.imu_at_ms - last_imu_ms_ == 0U ||
            e.imu_at_ms - last_imu_ms_ >= 0x80000000U) ||
           earlier - last_sample_ms_ == 0U ||

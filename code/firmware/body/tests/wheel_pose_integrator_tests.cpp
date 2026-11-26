@@ -454,7 +454,54 @@ static void pivot_at_track_width_boundaries() {
   }
 }
 
+static void expired_origin_cannot_be_refreshed_by_late_pair() {
+  for (std::uint32_t base : {0U, 0xfffffee0U}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, base + i * 100), base + i * 100 + 10));
+    check(pose.start_origin(base + 310));
+    auto boundary = pose;
+    check(boundary.observe(observed(4, base + 490, 10, -10), base + 500));
+    check(boundary.state().origin == 1);
+    // A fresh receipt after the previous source expires cannot bridge an
+    // unobserved interval, even if the caller missed the periodic expire().
+    auto late = observed(4, base + 491, 10, -10);
+    check(!pose.observe(late, base + 501));
+    check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+    check(!pose.observe(late, base + 501));
+    check(!pose.start_origin(base + 501));
+    for (std::uint32_t i = 5; i <= 7; ++i)
+      check(pose.observe(observed(i, base + i * 100 + 100), base + i * 100 + 110));
+    check(pose.start_origin(base + 810));
+    check(pose.state().origin == 2);
+  }
+}
+
+static void asymmetric_motion_requires_gyro_agreement() {
+  using Quality = WheelPoseIntegrator::Quality;
+  for (bool left_moves : {false, true}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(310));
+    auto turn = pose;
+    auto sample = observed(4, 400, left_moves ? 60 : 0, left_moves ? 0 : -60);
+    // One shaft moves six mm while the other remains stationary. A measured
+    // 60 mrad turn is consistent; zero gyro rotation is not.
+    check(!pose.observe(sample, 410));
+    check(pose.state().quality == Quality::Unavailable);
+    sample.imu_yaw_urad = left_moves ? -60000 : 60000;
+    check(turn.observe(sample, 410));
+    check(turn.state().quality == Quality::Valid && turn.state().origin == 1);
+    check(turn.state().yaw_mrad == sample.imu_yaw_urad / 1000);
+  }
+}
+
 int main() {
+  asymmetric_motion_requires_gyro_agreement();
+  expired_origin_cannot_be_refreshed_by_late_pair();
   invalid_geometry_cannot_enable_pose();
   pivot_at_track_width_boundaries();
   signed_heading_wrap_and_projection();
