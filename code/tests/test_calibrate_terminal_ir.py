@@ -33,6 +33,7 @@ def position_records():
             if r:
                 right_seq += 1
             rows.append({
+                "schema_version": 1,
                 "label": label, "received_monotonic": now,
                 "ir": {
                     "robot_id": "robot-01", "left_valid": left_seen,
@@ -122,6 +123,7 @@ async def test_capture_uses_authenticated_mac_read_only_ir_endpoint(monkeypatch)
     )
     assert len(calls) == 20
     assert len(rows) == 20
+    assert all(row["schema_version"] == 1 for row in rows)
     assert all(row["ir"]["charging_authorized"] is False for row in rows)
 
 
@@ -536,6 +538,7 @@ def reflection_control(rows, *, left=False, right=False, count=20):
         left_seq += int(left)
         right_seq += int(right)
         rows.append({
+            "schema_version": 1,
             "label": "reflection_only",
             "received_monotonic": last["received_monotonic"] + .25 * (index + 1),
             "ir": {
@@ -646,8 +649,8 @@ def test_terminal_ir_crash_before_replace_preserves_previous_batch(tmp_path):
     import subprocess
 
     path = tmp_path / "trial.jsonl"
-    original = [{"label": "left"}]
-    additional = [{"label": "center"}]
+    original = [{"schema_version": 1, "label": "left"}]
+    additional = [{"schema_version": 1, "label": "center"}]
     cal.append_trial_rows(path, original)
     before = path.read_bytes()
     child = """
@@ -680,5 +683,19 @@ def test_terminal_ir_append_refuses_corrupt_prior_evidence(tmp_path, corrupt):
     with pytest.raises(ValueError):
         cal.load_trial_rows(path)
     with pytest.raises(ValueError):
-        cal.append_trial_rows(path, [{"label": "center"}])
+        cal.append_trial_rows(path, [{"schema_version": 1, "label": "center"}])
     assert path.read_bytes() == corrupt
+
+
+@pytest.mark.parametrize("version", [None, True, 1.0, "1", 0, 2])
+def test_terminal_ir_rejects_unsupported_schema_before_publication(tmp_path, version):
+    path = tmp_path / "trial.jsonl"
+    row = {"label": "left"}
+    if version is not None:
+        row["schema_version"] = version
+    with pytest.raises(ValueError, match="schema_version"):
+        cal.append_trial_rows(path, [row])
+    assert not path.exists()
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="schema_version"):
+        cal.load_trial_rows(path)

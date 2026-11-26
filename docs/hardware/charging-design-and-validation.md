@@ -246,6 +246,8 @@ uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --la
 uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --input /tmp/robot-01-ir.jsonl
 ```
 
+Each saved IR record requires integer `schema_version: 1`. The writer stages and syncs a complete capture batch before replacing the private JSONL log. Older unversioned logs and truncated or corrupt records are rejected; retain them for historical review and capture a new trial rather than relabeling measurements as current evidence.
+
 The tool requires an actual advancing left/right RMT acquisition sequence, increasing local receive timestamps, at least 20 real observations per position and authentic per-robot token. It estimates optical left/right fresh-hit fractions and center same-beacon fraction. Three identical reception patterns cannot pass the differential signal candidate. **It cannot assign bearing angles, calibrate wheel turn sign, prove final clearance, allow powered contact, or claim electrical acceptance.** Never interpret its `candidate_differential_signal` as a motion permit. `code/tests/test_calibrate_terminal_ir.py` verifies good synthetic sample structure, stale/replayed/forged signals and no authority, without pretending the robot is assembled.
 
 ## November 11: final marker age check after health polling

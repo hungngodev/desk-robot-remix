@@ -97,6 +97,9 @@ def _private_trial_parent_fd(parent: Path) -> int:
         raise
 
 
+TRIAL_SCHEMA_VERSION = 1
+
+
 _TRIAL_LOCK = ".terminal-ir-capture.lock"
 
 
@@ -148,7 +151,8 @@ def append_trial_rows(path: Path, rows: list[dict]) -> None:
     if path.name == _TRIAL_LOCK or path.name.startswith(".terminal-ir-"):
         raise ValueError("Reserved terminal IR trial filename")
     additions = "".join(
-        json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n" for row in rows
+        json.dumps(_validated_trial_row(row), separators=(",", ":"), allow_nan=False) + "\n"
+        for row in rows
     ).encode("utf-8")
     descriptor = _private_trial_parent_fd(path.parent)
     try:
@@ -180,14 +184,21 @@ def _reject_nonfinite_trial_json(token: str) -> None:
     raise ValueError("Nonfinite terminal IR trial JSON constant: " + token)
 
 
+def _validated_trial_row(row: object) -> dict:
+    if (not isinstance(row, dict) or type(row.get("schema_version")) is not int
+            or row["schema_version"] != TRIAL_SCHEMA_VERSION):
+        raise ValueError("Unsupported or missing terminal IR trial schema_version")
+    return row
+
+
 def _parse_trial_rows(contents: str) -> list[dict]:
     if contents and not contents.endswith("\n"):
         raise ValueError("Incomplete terminal IR trial record")
     return [
-        json.loads(
+        _validated_trial_row(json.loads(
             line, object_pairs_hook=_unique_trial_fields,
             parse_constant=_reject_nonfinite_trial_json,
-        )
+        ))
         for line in contents.splitlines()
         if line.strip()
     ]
@@ -220,7 +231,8 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
     if expected_dock_id is not None:
         observed_dock_code = dock_beacon_code(expected_dock_id)
     for row in rows:
-        if not isinstance(row, dict) or row.get("label") not in LABELS:
+        _validated_trial_row(row)
+        if row.get("label") not in LABELS:
             raise ValueError("Explicitly labeled left/center/right records required")
         reading = _validate_trial_ir(row.get("ir"), robot_id, expected_dock_id)
         codes = (reading.get("left_code", 0), reading.get("right_code", 0), reading["code"])
@@ -323,6 +335,7 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         )
     )
     return {
+        "schema_version": TRIAL_SCHEMA_VERSION,
         "robot_id": robot_id,
         "assigned_dock_id": assigned_dock,
         "dock_id_assigned": expected_dock_id is not None,
@@ -391,6 +404,7 @@ async def capture(base_url: str, token: str, robot_id: str,
                     "Delayed terminal IR HTTP response exceeds optical freshness budget"
                 )
             rows.append({
+                "schema_version": TRIAL_SCHEMA_VERSION,
                 "label": label, "received_monotonic": received_at,
                 "ir": reading,
             })
