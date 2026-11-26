@@ -9,7 +9,6 @@ import pytest
 from desk_robot.spatial_pose import PoseError, decode_pose
 from desk_robot.transport import HeadError, _MjpegFrames, _response_object
 
-
 POSE = (
     b'{"v":1,"body_boot":16909060,"origin":270544960,"seq":4294967294,'
     b'"sample_us":9007199254740991,"x_mm":-1000000,"y_mm":65537,'
