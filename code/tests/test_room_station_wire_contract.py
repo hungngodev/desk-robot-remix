@@ -64,3 +64,36 @@ def test_existing_gas_range_rejection_keeps_its_error_contract(gas):
     payload["readings"]["bme688"]["gas_ohms"] = gas
     with pytest.raises(ValueError, match="Room sensor reading out of range"):
         RoomStationDecoder().accept(json.dumps(payload), now=1.0)
+
+
+@pytest.mark.parametrize(("sensor", "field", "value", "message"), [
+    ("scd40", "co2_ppm", True, "Invalid room sensor number"),
+    ("scd40", "co2_ppm", 50001.0, "Room sensor reading out of range"),
+    ("scd40", "co2_ppm", 630.0, "CO2 ppm must be an integer"),
+    ("ld2410c", "moving_cm", -1, "Room sensor reading out of range"),
+    ("ld2410c", "moving_cm", -0.5, "Room sensor reading out of range"),
+    ("ld2410c", "moving_cm", 65536, "Room sensor reading out of range"),
+    ("soil", "raw_adc", 99999, "Invalid or saturated raw soil ADC sample"),
+    ("soil", "raw_adc", True, "Invalid or saturated raw soil ADC sample"),
+    ("scd40", "temp_c", float("nan"), "Nonfinite room JSON token NaN"),
+])
+def test_numeric_wire_error_precedes_coercion_and_preserves_decoder_epoch(
+    sensor, field, value, message,
+):
+    decoder = RoomStationDecoder()
+    decoder.accept(json.dumps(_frame(1, 1000)), now=1.0)
+    bad = _frame(2, 2000)
+    if sensor == "soil":
+        bad["readings"]["soil"] = {"valid": True, "sample_ms": 2000, "raw_adc": 2000}
+    bad["readings"][sensor][field] = value
+    with pytest.raises(ValueError, match=message):
+        decoder.accept(json.dumps(bad), now=2.0)
+
+    corrected = _frame(2, 2000)
+    corrected["readings"]["soil"] = {"valid": True, "sample_ms": 2000, "raw_adc": 2000}
+    good = decoder.accept(json.dumps(corrected), now=2.0)
+    assert good.seq == 2
+    assert good.readings["soil"]["raw_adc"] == 2000
+    assert not good.motion_authorized
+    assert not good.charging_authorized
+    assert not good.person_identified
