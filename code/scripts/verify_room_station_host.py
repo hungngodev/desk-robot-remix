@@ -23,8 +23,24 @@ def run_tests(station: Path, build: Path) -> None:
         "void bme_step(", 1
     )[1].split("void bme_observation(", 1)[0]
     (build / "bme_step_under_test.h").write_text(temperature + step)
+    # Exercise the actual firmware's default, acquisition and JSON paths,
+    # without requiring Arduino or duplicating their decision in a test fake.
+    soil_prefix = "\n".join(
+        line for line in firmware.split("namespace {", 1)[0].splitlines()
+        if not line.startswith("#include ")
+    ) + "\n"
+    report_ms = "constexpr uint32_t kReportMs" + firmware.split(
+        "constexpr uint32_t kReportMs", 1
+    )[1].split(";", 1)[0] + ";\n"
+    jsbool = "void jsbool(" + firmware.split(
+        "void jsbool(", 1
+    )[1].split("void number(", 1)[0]
+    soil = "#if ROOM_SOIL_FITTED\n" + firmware.split(
+        "#if ROOM_SOIL_FITTED\n", 1
+    )[1].split("// The pinned Adafruit AMG88xx", 1)[0]
+    (build / "soil_profile_under_test.h").write_text(soil_prefix + report_ms + jsbool + soil)
     cmd = [
-        compiler, "-std=c++17", "-Wall", "-Wextra", "-Wconversion", "-Werror",
+        compiler, "-Wall", "-Wextra", "-Wconversion", "-Werror",
         "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
         "-fno-omit-frame-pointer", f"-I{includes}", f"-I{build}",
     ]
@@ -40,8 +56,26 @@ def run_tests(station: Path, build: Path) -> None:
                 break
     for source in sources:
         executable = build / source.stem
+        if source.name == "soil_profile_tests.cpp":
+            # Expected behavior is independent of the production macro. The
+            # default case intentionally has no -DROOM_SOIL_FITTED argument.
+            for standard in ("c++11", "c++17"):
+                for profile, flags in (
+                    ("default", ["-DEXPECT_SOIL_ENABLED=0"]),
+                    ("bench", ["-DEXPECT_SOIL_ENABLED=0", "-DROOM_SOIL_FITTED=0"]),
+                    ("full", ["-DEXPECT_SOIL_ENABLED=1", "-DROOM_SOIL_FITTED=1"]),
+                ):
+                    print(f"Sanitizer test: {source.name} {standard} {profile}", flush=True)
+                    subprocess.run(
+                        [*cmd, f"-std={standard}", *flags, str(source), "-o", str(executable)],
+                        check=True, timeout=30,
+                    )
+                    subprocess.run([str(executable)], check=True, timeout=15)
+            continue
         print(f"Sanitizer test: {source.name}", flush=True)
-        subprocess.run([*cmd, str(source), "-o", str(executable)], check=True, timeout=30)
+        subprocess.run(
+            [*cmd, "-std=c++17", str(source), "-o", str(executable)], check=True, timeout=30
+        )
         subprocess.run([str(executable)], check=True, timeout=15)
 
 
