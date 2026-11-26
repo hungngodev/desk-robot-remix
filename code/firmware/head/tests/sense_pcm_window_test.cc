@@ -85,7 +85,47 @@ static void jpeg_burst_phase_recovery() {
   assert(capture.discard() == storage.data());
 }
 
+// A lapped reference is reported by the codec as invalid even if the
+// callback timing is perfect. Recovery must not qualify the same window.
+static void reference_lap_invalidates_capture() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 320> mic{}, ref{}, invalid{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  constexpr std::int64_t start = 1000000;
+  constexpr std::int16_t sentinel = 3210;
+  for (int fault : {2, 100, 200}) {
+    storage.fill(sentinel);
+    SensePcmWindow capture;
+    assert(capture.begin(storage.data(), start));
+    for (int i = 1; i <= 200; ++i) {
+      const bool valid = i != fault;
+      capture.offer(mic.data(), valid ? ref.data() : invalid.data(), 320,
+                    start + i * 20000, valid);
+      if (i < fault) {
+        assert(!capture.failed());
+        assert(capture.frames_received() == static_cast<unsigned>(i) * 320);
+      } else {
+        assert(capture.failed() && !capture.ready());
+        assert(capture.frames_received() == static_cast<unsigned>(fault - 1) * 320);
+      }
+    }
+    assert(capture.take().interleaved == nullptr);
+    assert(capture.occupied());
+    for (std::size_t i = capture.frames_received() * 2; i < storage.size(); ++i)
+      assert(storage[i] == sentinel);
+    assert(capture.discard() == storage.data());
+    assert(!capture.occupied());
+    assert(capture.begin(storage.data(), start + 5000000));
+    for (int i = 1; i <= 200; ++i)
+      capture.offer(mic.data(), ref.data(), 320, start + 5000000 + i * 20000, true);
+    assert(capture.ready() && !capture.failed());
+    assert(capture.take().frames == SensePcmWindow::kFrames);
+  }
+}
+
 int main() {
+  reference_lap_invalidates_capture();
   jpeg_burst_phase_recovery();
   static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};
   assert(SensePcmWindow::kBytes == 256000);
