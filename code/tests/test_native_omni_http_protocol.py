@@ -1,10 +1,15 @@
-"""Pure model HTTP boundary tests without a socket, model, or physical head."""
+"""Model HTTP boundary tests without a model or physical head."""
+import asyncio
 import base64
+import json
 import wave
 from io import BytesIO
 from pathlib import Path
 
+import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 
 @pytest.fixture
@@ -130,3 +135,80 @@ def test_decode_accepts_padded_odd_metadata_chunk(protocol):
     raw = _wav(pcm) + b"JUNK\x01\x00\x00\x00a\x00"
     raw = raw[:4] + (len(raw) - 8).to_bytes(4, "little") + raw[8:]
     assert protocol.decode_tool_completion({"choices": [_audio(raw)]}) == (pcm, "")
+
+
+async def _chunks(*parts):
+    for part in parts:
+        yield part
+
+
+@pytest.mark.asyncio
+async def test_read_model_completion_accepts_exact_body_limit(protocol, monkeypatch):
+    pcm = b"\x01\x00" * 240
+    body = json.dumps({"choices": [_audio(_wav(pcm))]}).encode("utf-8")
+    monkeypatch.setattr(protocol, "MAX_MODEL_RESPONSE_BYTES", len(body))
+    assert await protocol.read_tool_completion(_chunks(body[:17], body[17:])) == (pcm, "")
+
+
+@pytest.mark.asyncio
+async def test_read_model_completion_stops_at_body_limit(protocol, monkeypatch):
+    monkeypatch.setattr(protocol, "MAX_MODEL_RESPONSE_BYTES", 8)
+
+    async def oversized():
+        yield b"12345678"
+        yield b"9"
+        pytest.fail("Body reader continued after exceeding its byte limit")
+
+    with pytest.raises(ValueError, match="response limit"):
+        await protocol.read_tool_completion(oversized())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [b"{", b"\xff"], ids=["partial_json", "invalid_utf8"])
+async def test_read_model_completion_rejects_invalid_json(protocol, body):
+    with pytest.raises(ValueError, match="Invalid model chat completion JSON"):
+        await protocol.read_tool_completion(_chunks(body))
+
+
+@pytest.mark.asyncio
+async def test_read_model_completion_propagates_timeout_and_cancellation(protocol):
+    waiting = asyncio.Event()
+
+    async def slow():
+        yield b"{"
+        waiting.set()
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(protocol.read_tool_completion(slow()))
+    try:
+        await asyncio.wait_for(waiting.wait(), timeout=1)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(task, timeout=0.01)
+        assert task.cancelled()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_read_model_completion_obeys_client_total_timeout(protocol):
+    release = asyncio.Event()
+
+    async def slow_response(request):
+        response = web.StreamResponse(headers={"Content-Type": "application/json"})
+        await response.prepare(request)
+        await response.write(b"{")
+        await release.wait()
+        return response
+
+    app = web.Application()
+    app.router.add_get("/", slow_response)
+    async with TestServer(app) as server, aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                server.make_url("/"), timeout=aiohttp.ClientTimeout(total=0.2),
+            ) as response:
+                with pytest.raises(asyncio.TimeoutError):
+                    await protocol.read_tool_completion(response.content.iter_chunked(64 * 1024))
+        finally:
+            release.set()

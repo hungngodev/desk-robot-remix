@@ -1,14 +1,19 @@
 """Pure wire helpers for the native model's realtime and HTTP endpoints.
 
-No session state, credentials, network I/O, or playback authority lives here.
+No session state, credentials, connection ownership, or playback authority lives here.
 """
 from __future__ import annotations
 
 import base64
 import ipaddress
+import json
 import wave
+from collections.abc import AsyncIterable
 from io import BytesIO
 from urllib.parse import urlsplit
+
+
+MAX_MODEL_RESPONSE_BYTES = 2_000_000
 
 
 def approved_backend_url(url: str) -> str:
@@ -94,3 +99,17 @@ def decode_tool_completion(result: object) -> tuple[bytes, str]:
     except (EOFError, wave.Error) as exc:
         raise ValueError("Invalid model WAV container") from exc
     return pcm, generated_text
+
+
+async def read_tool_completion(chunks: AsyncIterable[bytes]) -> tuple[bytes, str]:
+    """Bound the decoded HTTP body before parsing JSON or speech audio."""
+    body = bytearray()
+    async for chunk in chunks:
+        if len(chunk) > MAX_MODEL_RESPONSE_BYTES - len(body):
+            raise ValueError("Model chat completion exceeds response limit")
+        body.extend(chunk)
+    try:
+        result = json.loads(body.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:
+        raise ValueError("Invalid model chat completion JSON") from exc
+    return decode_tool_completion(result)

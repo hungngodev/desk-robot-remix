@@ -33,7 +33,7 @@ from desk_robot_omni_audio import (
 from desk_robot_omni_http_protocol import (
     approved_backend_url,
     chat_completion_endpoint,
-    decode_tool_completion,
+    read_tool_completion,
 )
 from desk_robot_voice_intents import (
     _advice_only_request,
@@ -1314,8 +1314,14 @@ class NativeOmniSession:
             ) as response:
                 if response.status != 200:
                     raise RuntimeError("Model chat completion unavailable")
-                result = await response.json()
-            pcm, generated_text = decode_tool_completion(result)
+                content_type = response.content_type
+                if not (content_type == "application/json" or (
+                    content_type.startswith("application/") and content_type.endswith("+json")
+                )):
+                    raise ValueError("Expected JSON model chat completion")
+                pcm, generated_text = await read_tool_completion(
+                    response.content.iter_chunked(64 * 1024)
+                )
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return

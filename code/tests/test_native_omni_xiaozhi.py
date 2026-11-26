@@ -19,6 +19,21 @@ from aiohttp.test_utils import TestServer
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class _JsonResponseBody:
+    """Expose the same chunked body interface as aiohttp's model response."""
+
+    content_type = "application/json"
+
+    @property
+    def content(self):
+        return self
+
+    async def iter_chunked(self, size):
+        body = json.dumps(await self.json()).encode("utf-8")
+        for offset in range(0, len(body), size):
+            yield body[offset:offset + size]
+
+
 @pytest.fixture
 def native(monkeypatch):
     fake_bridge = SimpleNamespace(
@@ -3865,7 +3880,7 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
     encoded = base64.b64encode(raw).decode()
     calls = []
 
-    class Response:
+    class Response(_JsonResponseBody):
         status = 200
         async def __aenter__(self):
             return self
@@ -4183,7 +4198,7 @@ async def test_native_tool_speech_rechecks_live_consent_after_model_completion(
             assert url.endswith("/v1/chat/completions")
             self.posts += 1
 
-            class Speech:
+            class Speech(_JsonResponseBody):
                 status = 200
 
                 async def __aenter__(self):
@@ -4283,7 +4298,7 @@ async def test_native_private_speech_rechecks_consent_after_slow_model_completio
             assert url.endswith("/v1/chat/completions")
             self.posts += 1
 
-            class Speech:
+            class Speech(_JsonResponseBody):
                 status = 200
 
                 async def __aenter__(self):
@@ -4528,7 +4543,7 @@ async def test_private_memory_edit_during_native_tts_never_queues_old_audio(nati
         wav.writeframes(bytes(9600))
     encoded = base64.b64encode(output.getvalue()).decode()
 
-    class Response:
+    class Response(_JsonResponseBody):
         status = 200
         def __init__(self, data):
             self.data = data
@@ -5241,7 +5256,7 @@ async def test_native_asr_camera_and_battery_clauses_are_spoken_together(
     ):
         monkeypatch.setitem(sys.modules, name, mod)
 
-    class Response:
+    class Response(_JsonResponseBody):
         status = 200
         async def __aenter__(self):
             return self
@@ -5504,7 +5519,7 @@ async def test_native_tool_chat_finishing_after_barge_cannot_queue_speech(native
         wav.writeframes(bytes(48000))
     blob = base64.b64encode(audio.getvalue()).decode()
 
-    class Response:
+    class Response(_JsonResponseBody):
         status = 200
         async def __aenter__(self):
             arrived.set()
@@ -5649,7 +5664,7 @@ async def test_native_completed_audio_tool_result_reaches_same_model_audio_queue
         wav.writeframes(bytes(48000))
     wav64 = base64.b64encode(audio.getvalue()).decode()
 
-    class ChatResult:
+    class ChatResult(_JsonResponseBody):
         status = 200
         async def __aenter__(self):
             return self
@@ -8989,7 +9004,7 @@ async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_si
     encoded = base64.b64encode(wav_data.getvalue()).decode()
     sent = []
 
-    class Response:
+    class Response(_JsonResponseBody):
         status = 200
         async def __aenter__(self):
             return self
