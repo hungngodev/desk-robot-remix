@@ -40,6 +40,7 @@ def native(monkeypatch):
         connections={},
         robot_for_device=lambda dev: "robot-01" if dev == "mac-01" else None,
         lease_stopping=False, lease_ids=frozenset(), lease_until=0.0,
+        speaker_lock=asyncio.Lock(),
         human_speech_active=lambda: False,
     )
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", fake_bridge)
@@ -10277,3 +10278,31 @@ async def test_native_mixed_batch_rejects_stale_entry_before_dispatch(
     assert facts == []
     assert session.native_readonly_tools_dropped == 2
     assert session.native_readonly_tools_completed == 0
+
+
+@pytest.mark.parametrize("existing_session", [False, True])
+async def test_native_defers_while_expired_mac_lease_still_transmits(
+    native, monkeypatch, existing_session,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    monkeypatch.setenv("DESK_ROBOT_OMNI_ROBOTS", "robot-01")
+    bridge.lease_ids = frozenset({"mac-02"})
+    bridge.lease_until = time.monotonic() - 1
+    calls = []
+
+    def reject_start(*args, **kwargs):
+        calls.append("start")
+        raise ValueError("test provider unavailable")
+
+    monkeypatch.setattr(module, "NativeOmniSession", reject_start)
+    if existing_session:
+        module._sessions["mac-01"] = SimpleNamespace(
+            conn=conn, closed=False, queue_mic=lambda *_: calls.append("pcm"),
+        )
+    async with bridge.speaker_lock:
+        assert module.route_audio(conn, b"\0" * 1920, True) is True
+        assert calls == []
+    assert module.route_audio(conn, b"\0" * 1920, True) is True
+    assert calls == ["pcm" if existing_session else "start"]
