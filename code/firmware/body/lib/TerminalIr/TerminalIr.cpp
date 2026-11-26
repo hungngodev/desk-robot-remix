@@ -57,7 +57,8 @@ void TerminalIr::poll(std::uint32_t now_ms) {
   // Legacy ESP-IDF 4.4 RMT supplies no per-packet receive timestamp.
   // A late poll or queued backlog must discard both receivers' prior
   // directional evidence, not stamp an old queued NEC burst as new.
-  bool window_ok = queue_.on_poll(now_ms);
+  const bool timely_start = queue_.on_poll(now_ms);
+  bool window_ok = timely_start;
   std::uint32_t candidate_code[2] = {};
   bool candidate_valid[2] = {};
   // A fixed CPU budget bounds processing of repeated ambient IR noise.
@@ -108,7 +109,7 @@ void TerminalIr::poll(std::uint32_t now_ms) {
   if (!window_ok || receipt_window_ms > 100U) {
     // Also discard a candidate from the opposite receiver on any stall.
     // Quarantine lasts through a complete queue drain on both receivers.
-    if (window_ok) queue_.quarantine(); // timely start, overlong drain
+    if (timely_start && receipt_window_ms > 100U) queue_.quarantine();
     readings_.invalidate();
     return;
   }

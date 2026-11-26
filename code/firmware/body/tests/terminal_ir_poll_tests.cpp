@@ -199,6 +199,21 @@ int main() {
       push(side); poll(ir, now + 25);
       CHECK(ir.evidence(now).same_code);
     }
+    // An ambiguous batch can also overrun its receipt window. The next
+    // timely poll must drain both receivers before either can reacquire.
+    for (unsigned side = 0; side != 2; ++side) {
+      const auto before_ambiguous = ir.evidence(now);
+      receive_cost = 16;
+      push(side, 2); push(1 - side);
+      const auto start = now + 25U;
+      poll(ir, start); check_unmatched(ir);
+      CHECK(now == start + 80U); // 25 + five receives * 16 = 105 ms
+      receive_cost = 0;
+      pair(); poll(ir, now + 1U); check_unmatched(ir);
+      CHECK(ir.evidence(now).left_seq == before_ambiguous.left_seq);
+      CHECK(ir.evidence(now).right_seq == before_ambiguous.right_seq);
+      pair(); poll(ir, now + 25U); check_matched(ir, 25);
+    }
     // Tear down before isolating a second receiver history for rollover.
     CHECK(!ir.begin(36, 36));
     CHECK(!queues[0].installed && !queues[1].installed);
