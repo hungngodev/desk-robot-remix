@@ -5,6 +5,10 @@ import asyncio
 from collections.abc import Callable
 
 
+class FrameAdmissionDropped(RuntimeError):
+    """An optional frame lost admission; no native work was submitted."""
+
+
 class LatestFrameAdmission:
     """One pending ticket per robot; replacement never changes fleet order."""
 
@@ -26,20 +30,20 @@ class LatestFrameAdmission:
         reserve: Callable[[], bool], admit: Callable[[], bool],
     ) -> None:
         if self._closed or not admit() or not 0 <= clock() - received < 1.0:
-            raise RuntimeError("Camera preprocessing admission invalidated or expired")
+            raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
         previous = self._pending.get(robot_id)
         if previous is not None and received <= previous[1]:
-            raise RuntimeError("Camera preprocessing superseded by newer frame")
+            raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
         ticket = (object(), received)
         self._pending[robot_id] = ticket
         self.notify()
         try:
             while True:
                 if self._pending.get(robot_id) is not ticket:
-                    raise RuntimeError("Camera preprocessing superseded by newer frame")
+                    raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
                 remaining = 1.0 - (clock() - received)
                 if self._closed or not admit() or not 0 < remaining <= 1.0:
-                    raise RuntimeError("Camera preprocessing admission invalidated or expired")
+                    raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
                 if next(iter(self._pending)) == robot_id and reserve():
                     return
                 self._changed.clear()
@@ -47,7 +51,7 @@ class LatestFrameAdmission:
                     async with asyncio.timeout(remaining):
                         await self._changed.wait()
                 except TimeoutError as exc:
-                    raise RuntimeError("Camera preprocessing admission expired") from exc
+                    raise FrameAdmissionDropped("Camera preprocessing admission expired") from exc
         finally:
             if self._pending.get(robot_id) is ticket:
                 del self._pending[robot_id]

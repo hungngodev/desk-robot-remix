@@ -32,7 +32,7 @@ from .operations import _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
-from .vision_admission import LatestFrameAdmission
+from .vision_admission import FrameAdmissionDropped, LatestFrameAdmission
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
 # A saturated identity fence refuses new context rather than evicting live IDs.
@@ -2247,17 +2247,22 @@ class MultimodalOrchestrator:
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
         question = self._question_epoch[robot_id]
-        prepared = await self._prepare_bounded(
-            jpeg, robot_id=robot_id, received=now,
-            admit=lambda: (
-                self._camera_grant_valid(robot_id, camera_grant)
-                and generation == self.hub._generation[robot_id]
-                and turn == self._turn_epoch[robot_id]
-                and question == self._question_epoch[robot_id]
-                and now >= self._last_fleet_human_turn_at
-                and not self._any_human_active(time.monotonic())
-            ),
-        )
+        try:
+            prepared = await self._prepare_bounded(
+                jpeg, robot_id=robot_id, received=now,
+                admit=lambda: (
+                    self._camera_grant_valid(robot_id, camera_grant)
+                    and generation == self.hub._generation[robot_id]
+                    and turn == self._turn_epoch[robot_id]
+                    and question == self._question_epoch[robot_id]
+                    and now >= self._last_fleet_human_turn_at
+                    and not self._any_human_active(time.monotonic())
+                ),
+            )
+        except FrameAdmissionDropped:
+            # External proactive offers have always silently discarded stale
+            # frames. Only an expected queue drop is benign, not decode errors.
+            return
         if not self._camera_grant_valid(robot_id, camera_grant):
             # An old JPEG cannot enter the regranted scene after Pillow.
             return

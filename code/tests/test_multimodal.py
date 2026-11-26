@@ -4538,3 +4538,63 @@ async def test_camera_opt_out_purges_every_hub_without_wait(settings, regrant):
             assert service.hub._generation[rid] == generations[rid] + 1
     finally:
         await service.close()
+
+
+async def test_optional_fleet_native_admission_retains_human_and_cancellation_budget(monkeypatch):
+    import threading
+
+    import desk_robot.multimodal as media
+    from desk_robot.vision_admission import FrameAdmissionDropped
+
+    entered = threading.Event()
+    release = threading.Event()
+    seen = []
+
+    def prepare(jpeg):
+        seen.append(jpeg)
+        if jpeg == b"active":
+            entered.set()
+            assert release.wait(2)
+        return jpeg, b"", 0.0
+
+    monkeypatch.setattr(media, "_prepare", prepare)
+    pets = [f"robot-{index:02d}" for index in range(1, 6)]
+    policy = config()
+    policy.robots = [SimpleNamespace(id=robot) for robot in pets]
+    visual = MultimodalOrchestrator(
+        policy, {robot: Head() for robot in pets}, Vision(), asyncio.Lock(),
+    )
+
+    async def offer(robot, jpeg):
+        return await visual._prepare_bounded(
+            jpeg, robot_id=robot, received=time.monotonic(), admit=lambda: True,
+        )
+
+    active = asyncio.create_task(offer(pets[0], b"active"))
+    pending = []
+    try:
+        assert await asyncio.to_thread(entered.wait, 0.5)
+        pending = [asyncio.create_task(offer(robot, robot.encode())) for robot in pets]
+        await asyncio.sleep(0)
+        latest = asyncio.create_task(offer(pets[0], b"latest"))
+        pending.append(latest)
+        await asyncio.sleep(0)
+        active.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await active
+        with pytest.raises(FrameAdmissionDropped, match="superseded"):
+            await pending[0]
+        assert seen == [b"active"]
+        human = await visual._prepare_bounded(b"human", priority=True)
+        assert human[0] == b"human"
+        assert seen == [b"active", b"human"]
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(*pending[1:]), 1)
+        assert [result[0] for result in results] == [
+            *(robot.encode() for robot in pets[1:]), b"latest",
+        ]
+        assert seen == [b"active", b"human", b"latest", *(r.encode() for r in pets[1:])]
+    finally:
+        release.set()
+        await asyncio.gather(active, *pending, return_exceptions=True)
+        await visual.close()

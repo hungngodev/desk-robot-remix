@@ -2,7 +2,7 @@ import asyncio
 import time
 
 import pytest
-from desk_robot.vision_admission import LatestFrameAdmission
+from desk_robot.vision_admission import FrameAdmissionDropped, LatestFrameAdmission
 
 
 @pytest.mark.asyncio
@@ -87,4 +87,39 @@ async def test_cancel_revocation_and_close_do_not_reserve_or_block_peers():
     with pytest.raises(RuntimeError, match="invalidated"):
         await pending
     assert not gate._pending
+    assert admitted == [True]
+
+
+@pytest.mark.asyncio
+async def test_expired_and_out_of_order_frames_do_not_displace_newer_ticket():
+    gate = LatestFrameAdmission()
+    clock = [10.0]
+    busy = True
+    admitted = []
+
+    def reserve():
+        if busy:
+            return False
+        admitted.append(True)
+        return True
+
+    async def offer(received):
+        await gate.acquire(
+            "robot-01", received, clock=lambda: clock[0],
+            reserve=reserve, admit=lambda: True,
+        )
+
+    waiting = asyncio.create_task(offer(10.0))
+    await asyncio.sleep(0)
+    with pytest.raises(FrameAdmissionDropped, match="superseded"):
+        await offer(9.9)
+    assert gate._pending["robot-01"][1] == 10.0
+    clock[0] = 11.1
+    busy = False
+    gate.notify()
+    with pytest.raises(FrameAdmissionDropped, match="expired"):
+        await waiting
+    assert not admitted
+    assert not gate._pending
+    await offer(11.1)
     assert admitted == [True]
