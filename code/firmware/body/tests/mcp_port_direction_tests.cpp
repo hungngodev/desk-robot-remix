@@ -60,13 +60,42 @@ static void check_every_direction_bit() {
   }
 }
 
-static void check_reset_and_transport_faults() {
-  for (const unsigned reg : {0x0CU, 0x0DU}) {
-    Registers regs;
-    desk_robot::McpPortDirectionLock lock;
-    regs.values[reg] = 0;
-    CHECK(!regs.verify(lock) && lock.faulted());
+// Verify every pullup byte, including extra enabled pullups on externally
+// biased inputs. Fault containment may only change direction and OLATB.
+static void check_every_pullup_value() {
+  for (const bool haptic : {false, true}) {
+    for (const unsigned reg : {0x0CU, 0x0DU}) {
+      for (unsigned value = 0; value < 256; ++value) {
+        Registers regs;
+        desk_robot::McpPortDirectionLock lock;
+        if (haptic) {
+          lock.expect_haptic_output();
+          regs.values[1] = 0xFB;
+        }
+        CHECK(regs.verify(lock) && regs.writes == 0);
+        const auto expected = regs.values[reg];
+        regs.values[reg] = static_cast<std::uint8_t>(value);
+        const auto pullup_a = regs.values[0x0C];
+        const auto pullup_b = regs.values[0x0D];
+        regs.values[0x15] = haptic ? 0x04 : 0;
+        if (value == expected) {
+          CHECK(regs.verify(lock) && lock.verified() && regs.writes == 0);
+          continue;
+        }
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+        CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+        CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
+        CHECK(regs.values[0x0C] == pullup_a && regs.values[0x0D] == pullup_b);
+        const auto writes = regs.writes;
+        regs.values[reg] = expected;
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+        CHECK(regs.writes == writes);
+      }
+    }
   }
+}
+
+static void check_reset_and_transport_faults() {
   Registers missing_optional;
   desk_robot::McpPortDirectionLock dock_only;
   missing_optional.fail_read = 0x0D;
@@ -132,6 +161,7 @@ static void check_direction_drift_after_verified_reset() {
 int main() {
   try {
     check_every_direction_bit();
+    check_every_pullup_value();
     check_reset_and_transport_faults();
     check_direction_drift_after_verified_reset();
     std::cout << "PASS MCP23017 direction lock and verified reset\n";
