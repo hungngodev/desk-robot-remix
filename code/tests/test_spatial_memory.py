@@ -326,6 +326,9 @@ def test_forgotten_spatial_episode_cannot_replay_after_wal_restart(tmp_path):
         assert remember(store, robot, "forgotten", when)
         assert SpatialMemory(store).attach(robot, "forgotten", old)
 
+    # Visual recall is metadata-only: never create thumbnails or raw frames.
+    expected_files = {f"{robot}.sqlite3" for robot in robots}
+    assert {entry.name for entry in root.rglob("*")} == expected_files
     path = root / "robot-01.sqlite3"
     with closing(sqlite3.connect(path)) as reader:
         assert reader.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
@@ -365,11 +368,18 @@ def test_forgotten_spatial_episode_cannot_replay_after_wal_restart(tmp_path):
             assert conn.execute(
                 "SELECT event_id FROM spatial_observations",
             ).fetchall() == [("fresh",)]
+            # Public provenance lookup JOINs memories and would hide an orphan.
+            assert conn.execute(
+                "SELECT event_id FROM camera_provenance",
+            ).fetchall() == [("fresh",)]
         # A different robot may have independently retained the same ID.
         peer = spatial.last_seen("robot-02", "flat_key", now=when + 1)
         assert peer is not None and peer.event_id == "forgotten"
         reader.rollback()
 
+    # Once the last WAL reader closes, no journal or image file should remain.
+    # Do not require this during an active reader's valid historical snapshot.
+    assert {entry.name for entry in root.rglob("*")} == expected_files
     final = MemoryStore(root, robots)
     assert final.get_episode("robot-01", "forgotten") is None
     assert [entry.event_id for entry in final.search("robot-01", "key")] == ["fresh"]
@@ -377,6 +387,7 @@ def test_forgotten_spatial_episode_cannot_replay_after_wal_restart(tmp_path):
         "robot-01", "flat_key", now=when + 200_000,
     )
     assert sighting is not None and sighting.status == "stale"
+    assert {entry.name for entry in root.rglob("*")} == expected_files
 
 
 @pytest.mark.parametrize(
