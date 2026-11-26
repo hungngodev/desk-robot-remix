@@ -107,6 +107,7 @@ _PHYSICAL_INITIATIVE_KINDS = PHYSICAL_INITIATIVE_KINDS
 
 
 _OPTIONAL_SPEECH_DEDUP_WINDOW_S = 600.0
+_BODY_STATUS_TIMEOUT_SECONDS = 2.5
 
 
 def _initiative_evidence(change: SceneChange) -> bool:
@@ -224,6 +225,7 @@ class PetState:
     last_touch_boot_id: int | None = None
     retired_touch_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_safety_fault: str | None = None
+    last_safety_ready: bool | None = None
     last_safety_was_possible_lift: bool = False
     last_safety_received_at: float = -math.inf
     last_social_fault_at: float = -math.inf
@@ -581,6 +583,7 @@ class PetController:
         state.last_extra_boot_id = None
         state.retired_extra_boot_ids.clear()
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
+        state.last_safety_ready = None
         state.last_safety_was_possible_lift = False
         state.last_safety_received_at = -math.inf
         state.aux_reads = 0
@@ -1830,21 +1833,22 @@ class PetController:
         incident and must not create repeated autobiographical memories.
         """
         received_at = time.monotonic() if received_at is None else received_at
-        safety = body.get("safety")
-        if not isinstance(safety, dict):
+        state = self.states[robot_id]
+        # A delayed response from a retired observer must not consume the
+        # current generation's first real fault transition.
+        if not state.enabled or state.generation != generation:
             return
-        fault = safety.get("fault")
+        safety = body.get("safety")
+        fault = safety.get("fault") if isinstance(safety, dict) else None
         if (
             not isinstance(fault, str) or not 1 <= len(fault) <= 48
             or safety.get("required") is not True
             or type(safety.get("ready")) is not bool
             or any(ch not in "abcdefghijklmnopqrstuvwxyz_" for ch in fault)
         ):
-            return
-        state = self.states[robot_id]
-        # A delayed response from a retired observer must not consume the
-        # current generation's first real fault transition.
-        if not state.enabled or state.generation != generation:
+            if received_at >= state.last_safety_received_at:
+                state.last_safety_ready = None
+                state.last_safety_received_at = received_at
             return
         previous = state.last_safety_fault
         # A routine status received before a fault must not clear the fault
@@ -1855,6 +1859,8 @@ class PetController:
                 and (fault != "none" or safety["ready"] is not True
                      or received_at <= state.last_safety_received_at)):
             return
+        if received_at >= state.last_safety_received_at:
+            state.last_safety_ready = safety["ready"]
         state.last_safety_received_at = max(state.last_safety_received_at, received_at)
         state.last_safety_fault = fault
         previous_possible_lift = state.last_safety_was_possible_lift
@@ -2151,7 +2157,7 @@ class PetController:
             # not leave proactive observation active without touch/safety IO.
             try:
                 body = await _bounded_head_reply(
-                    getter(), seconds=2.5,
+                    getter(), seconds=_BODY_STATUS_TIMEOUT_SECONDS,
                     timeout_message="Pet WROOM body status read timed out",
                 )
             except asyncio.CancelledError:
@@ -2806,9 +2812,17 @@ class PetController:
         )
 
     def _social_safety_clear(self, robot_id: str) -> bool:
-        # Stationary social speech grants no motion; an observed local fault
-        # still vetoes optional peer activity until it has actually cleared.
-        return self.states[robot_id].last_safety_fault in (None, "none", "not_required")
+        # Stationary social speech grants no motion. Hardware participants
+        # still need a recent explicit ready report; simulation has no WROOM.
+        state = self.states[robot_id]
+        if self.settings.mode != "hardware":
+            return state.last_safety_fault in (None, "none", "not_required")
+        age = time.monotonic() - state.last_safety_received_at
+        return (
+            state.last_safety_fault == "none"
+            and state.last_safety_ready is True
+            and 0 <= age <= self.touch_interval + _BODY_STATUS_TIMEOUT_SECONDS
+        )
 
     def _social_peer(self, robot_id: str, kind: str, now: float) -> str | None:
         """Offer a short, shared witnessed event to a different consenting pet.

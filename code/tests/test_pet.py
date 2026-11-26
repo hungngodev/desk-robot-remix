@@ -3174,6 +3174,9 @@ async def test_camera_derived_social_turn_revokes_before_group_speaker(
     for robot_id in ("robot-01", "robot-02"):
         pet.states[robot_id].enabled = True
         pet.states[robot_id].generation = 11
+        await pet._observe_body_safety(robot_id, 11, {"safety": {
+            "required": True, "ready": True, "fault": "none",
+        }})
     pet.set_voice_monitor_ready(True)
     try:
         pet._consider_speech(
@@ -5921,6 +5924,48 @@ async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await
         assert "Group conversation consent revoked" in (
             pet.states["robot-01"].last_error or ""
         )
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+@pytest.mark.parametrize("invalid", [
+    {},
+    {"safety": {"required": True, "ready": False, "fault": "none"}},
+    {"safety": {"required": True, "ready": "true", "fault": "none"}},
+    {"safety": {"required": False, "ready": True, "fault": "not_required"}},
+])
+async def test_hardware_social_safety_requires_current_ready_receipt(fleet, tmp_path, invalid):
+    fleet.mode = "hardware"
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0)
+    rid, peer = "robot-01", "robot-02"
+    for robot_id in (rid, peer):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 12
+    now = time.monotonic()
+    ready = {"safety": {"required": True, "ready": True, "fault": "none"}}
+    try:
+        assert not pet._social_safety_clear(rid)
+        assert pet._social_peer(rid, "nfc_tag", now) is None
+        await pet._observe_body_safety(peer, 12, ready, received_at=now - 1)
+        await pet._observe_body_safety(rid, 12, ready, received_at=now - 10)
+        assert not pet._social_safety_clear(rid)
+        await pet._observe_body_safety(rid, 12, ready, received_at=now - 1)
+        assert pet._social_peer(rid, "nfc_tag", now) == peer
+        await pet._observe_body_safety(rid, 11, invalid, received_at=now - 0.8)
+        assert pet._social_safety_clear(rid)
+        await pet._observe_body_safety(rid, 12, invalid, received_at=now - 0.5)
+        assert not pet._social_safety_clear(rid)
+        assert pet._social_peer(rid, "nfc_tag", now) is None
+        await pet._observe_body_safety(rid, 12, ready, received_at=now - 0.7)
+        assert not pet._social_safety_clear(rid)
+        await pet._observe_body_safety(rid, 12, ready, received_at=now)
+        assert pet._social_peer(rid, "nfc_tag", now) == peer
     finally:
         for state in pet.states.values():
             state.enabled = False
