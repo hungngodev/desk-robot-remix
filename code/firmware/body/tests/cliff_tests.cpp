@@ -389,21 +389,36 @@ void duplicate_conversion_timestamp_requires_new_sensor_evidence() {
 }
 
 void invalid_channel_requires_five_new_measurements() {
-  CliffGuard guard;
-  ready(guard, 100);
-  guard.sample(5, 45, true, 101);
-  CHECK(guard.fault() == CliffFault::InvalidChannel);
-  for (std::uint8_t sensor = 0; sensor < desk_robot::kCliffSensorCount; ++sensor) {
-    const auto old = guard.diagnostic(sensor, 101);
-    CHECK(old.present && !old.valid); // preserve raw mm but deny clearance
+  // Optional lanes 5..7 must stay in TofBus diagnostics. Directly routing
+  // any noncritical channel into CliffGuard is an error, not a side reading.
+  for (unsigned raw = 5; raw <= 255; ++raw) {
+    const auto channel = static_cast<std::uint8_t>(raw);
+    for (const bool valid : {false, true}) {
+      CliffGuard guard;
+      ready(guard, 100);
+      const auto absent = guard.diagnostic(channel, 101);
+      CHECK(!absent.present && !absent.valid);
+      CHECK(guard.fault() == CliffFault::None);
+      guard.sample(channel, 45, valid, 101);
+      CHECK(guard.fault() == CliffFault::InvalidChannel);
+      CHECK(guard.fault_sensor() == desk_robot::kNoFaultSensor);
+      CHECK(!guard.evaluate(101));
+      for (std::uint8_t sensor = 0; sensor < 5; ++sensor) {
+        const auto old = guard.diagnostic(sensor, 101);
+        CHECK(old.present && !old.valid);
+        CHECK(old.distance_mm == (sensor == 4 ? 300 : 45));
+        CHECK(old.age_ms == 1);
+      }
+      for (std::uint8_t sensor = 0; sensor < 5; ++sensor) {
+        CHECK(!guard.try_rearm(102));
+        guard.sample(sensor, sensor == 4 ? 300 : 45, true, 102);
+        CHECK(guard.fault() == CliffFault::InvalidChannel);
+      }
+      CHECK(!guard.evaluate(102));
+      CHECK(guard.try_rearm(102));
+      CHECK(guard.evaluate(102));
+    }
   }
-  CHECK(!guard.try_rearm(101));
-  for (std::uint8_t sensor = 0; sensor < desk_robot::kFloorSensorCount; ++sensor)
-    guard.sample(sensor, 45, true, 102);
-  CHECK(!guard.try_rearm(102)); // front channel still not refreshed
-  guard.sample(4, 300, true, 102);
-  CHECK(guard.try_rearm(102));
-  CHECK(guard.evaluate(102));
 }
 
 void unsigned_clock_rollover() {
