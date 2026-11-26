@@ -340,9 +340,9 @@ class HsmBehavior {
           break;  // do not interrupt the speech
         }
         if (state_ == State::kInteracting) {
-          // touched again: restart the timer and the nod
+          // Keep the smile alive, but let the entry nod finish naturally.
+          // A new interaction can nod again after this one has decayed.
           entered_ms_ = now_;
-          action_.motion = Motion::kNod;
           break;
         }
         transition(State::kInteracting, "touched");
