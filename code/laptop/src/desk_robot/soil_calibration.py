@@ -1,9 +1,10 @@
 """Relative plant moisture only from user-measured ADC calibration endpoints.
 
-This is not a vendor-independent moisture sensor model. It only maps one
-specific soil probe's measured dry and wet values to a local 0..100 scale.
+For the selected SEN0193 probe, dry ADC must exceed wet ADC. This maps
+one probe's measured references to a local 0..100 scale.
 The actual board and soil still require a physical calibration procedure.
 """
+
 from dataclasses import dataclass
 
 
@@ -18,6 +19,8 @@ class SoilCalibration:
                 raise ValueError("Soil calibration requires 12-bit measured ADC integers")
         if abs(self.dry_adc - self.wet_adc) < 100:
             raise ValueError("Soil wet and dry measured ADC values are too close")
+        if self.dry_adc < self.wet_adc:
+            raise ValueError("SEN0193 dry ADC must exceed wet ADC")
 
     def percentage(self, raw_adc: int) -> int:
         if type(raw_adc) is not int or not 1 <= raw_adc <= 4094:

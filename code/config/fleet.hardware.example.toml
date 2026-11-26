@@ -27,7 +27,8 @@ room_station_context_enabled = false
 # soil probe to the owned Feather A0 / D14 / nRF P0.04, enable the probe
 # in the explicit ROOM_SOIL_FITTED=1 firmware build and measure TWO actual
 # raw 12-bit references with this same probe in genuinely dry and wet media.
-# Both fields must be specified together, must be 1..4094 and differ by >=100.
+# Both fields must be specified together, must be 1..4094, and SEN0193 dry
+# ADC must exceed wet ADC by at least 100 counts.
 # No synthetic dry/wet numbers are supplied: do not copy sample thresholds.
 # room_station_soil_dry_adc = MEASURED_DRY_INTEGER
 # room_station_soil_wet_adc = MEASURED_WET_INTEGER
