@@ -485,10 +485,13 @@ int main() {
         self.assertIn('if (priority_active) {', face)
         renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
         self.assertIn('OledDisplay::SetEmotion("neutral");', renderer)
-        self.assertIn('else if (!voice_link_lost &&\n                                   requested_mood != desk_robot::CosmeticMood::kNone)', face)
+        mood_gate = ('else if (!voice_link_lost && '
+                     'requested_mood != desk_robot::CosmeticMood::kNone)')
+        normalized_face = ' '.join(face.split())
+        self.assertIn(mood_gate, normalized_face)
         self.assertLess(
-            face.index('if (priority_active) {'),
-            face.index('else if (!voice_link_lost &&\n                                   requested_mood != desk_robot::CosmeticMood::kNone)'),
+            normalized_face.index('if (priority_active) {'),
+            normalized_face.index(mood_gate),
         )
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
         self.assertIn('xTaskCreate(BodyPollTask, "sense_body_poll"', source)
