@@ -29,6 +29,18 @@ job for one commit is not evidence that newer commits or an actual robot pass.
 Never close a physical safety or buying gate from synthetic tests,
 documentation improvements or a historical all green CI run.
 
+### Mac API lifecycle evidence boundary
+
+The `api_lifecycle.runtime_lifespan` host owner preserves startup/serving failures
+(including cancellation) when cleanup also raises, logs and notes the secondary
+failure, and clears API readiness before cleanup. A standalone cleanup failure
+still propagates. `code/tests/test_api_lifecycle_owner.py` exercises these cases;
+`code/tests/test_host_lifecycle_smoke.py` covers integrated simulated ownership.
+These software regression definitions do not establish a current-head CI pass.
+Neither Mac readiness nor successful host cleanup establishes WROOM loaded STOP,
+XIAO acoustic silence, USB connectivity, charging, or any physical acceptance.
+The physical and procurement HOLDs remain unchanged.
+
 ## November 24, 2026 PR #17 software burn-down, CI repair, and Guide 90 wiring checkpoint
 
 This update resolves software CI drift, cross-layer runtime gaps, and

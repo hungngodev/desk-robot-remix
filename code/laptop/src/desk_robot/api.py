@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import hmac
 import json
-import logging
 import secrets
 import time
 from collections.abc import Mapping
@@ -19,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .api_dock_routes import register_dock_routes
 from .api_ingress import APIIngress, authorized_token, require_configured_robot, token_matches
-from .api_lifecycle import require_runtime_ready, runtime_ready
+from .api_lifecycle import require_runtime_ready, runtime_lifespan, runtime_ready
 from .api_memory_routes import (
     CoreMemoryRequest as CoreMemoryRequest,
 )
@@ -125,27 +124,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Separate operator and model credentials: models cannot mint motion permits.
         app.state.operator_token, app.state.tool_token = api_credentials(settings)
         app.state.runtime = runtime if runtime is not None else await Runtime.create(settings)
-        app.state.runtime_started = False
-        cancelled = False
-        try:
-            start = getattr(app.state.runtime, "start", None)
-            if callable(start):
-                await start()
-            app.state.runtime_started = True
+        async with runtime_lifespan(app.state):
             yield
-        except asyncio.CancelledError:
-            cancelled = True
-            raise
-        finally:
-            app.state.runtime_started = False
-            try:
-                await app.state.runtime.close()
-            except Exception as error:
-                if not cancelled:
-                    raise
-                logging.getLogger(__name__).error(
-                    "Runtime shutdown failed after lifespan cancellation", exc_info=error,
-                )
 
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
     app.add_middleware(

@@ -74,6 +74,13 @@ design is intended to refuse arming without fresh required sensors and calibrati
 but the real bench stop margin remains unmeasured. Physical fit, power, speech
 interruption, pickup and fleet play are still open.
 
+Mac API lifecycle readiness is a host admission state, not hardware connectivity,
+physical STOP confirmation or movement authority. `/v1/health` keeps
+`physical_acceptance_pass=false` in either mode. Startup or serving failure remains
+primary even if runtime cleanup also fails; the cleanup failure is logged and noted,
+and a standalone cleanup failure propagates. See the lifecycle regression contract in
+[verification](records/verification.md#mac-api-lifecycle-evidence-boundary).
+
 [Implementation progress](guides/firmware-foundation.md) · [Test evidence](records/verification.md) · [Reuse and licenses](source-map.md)
 
 
