@@ -9,6 +9,11 @@
 #include "TofResult.h"
 #include "../include/TofTransactions.h"
 
+static_assert(desk_robot::kTofPollAndRecoveryBudgetMs < desk_robot::kMaxDriveMs,
+              "ToF budget must fit the actual drive permit");
+static_assert(desk_robot::kTofPollAndRecoveryBudgetMs < desk_robot::kWatchdogMs,
+              "ToF budget must fit the actual command watchdog");
+
 constexpr desk_robot::TofResult cold_range;
 static_assert(cold_range.signal_97 == 0 && cold_range.ambient_97 == 0 &&
               cold_range.distance_mm == 0 && !cold_range.accepted, "Range must start invalid");
@@ -31,12 +36,15 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(bus.begin(21, 22, -1));
   CHECK(bus.ready());
   CHECK(bus.boot_health_mask() == (DESK_ROBOT_EXTRA_RANGERS ? 0xffU : 0x1fU));
-  CHECK(Wire.getTimeOut() == 10);
+  CHECK(Wire.getTimeOut() == desk_robot::kTofWireTimeoutMs);
   CHECK(Wire.tof_init_timeouts.size() == (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U));
   for (auto timeout : Wire.tof_init_timeouts) CHECK(timeout == 80);
   CHECK(Wire.ranges == 0 && Wire.extras == 0);
-  for (std::uint32_t i = 0; i < 5; ++i)
+  for (std::uint32_t i = 0; i < 5; ++i) {
+    const auto before = Wire.transactions;
     bus.poll(guard, 10U * i);
+    CHECK(Wire.transactions - before <= desk_robot::kTofMaxPollWireCalls);
+  }
   CHECK(Wire.tof_samples == 5);
   CHECK(guard.try_rearm(50));
   CHECK(guard.evaluate(50));
@@ -665,6 +673,7 @@ int main() {
           CHECK(Wire.tof_samples == samples + (clear_timeout ? 1U : 0U));
           CHECK(Wire.tof_register_stop_transmissions == stops + (clear_timeout ? 1U : 0U));
           CHECK(Wire.transactions - transactions == (clear_timeout ? 9U : 6U));
+          CHECK(Wire.transactions - transactions <= desk_robot::kTofMaxPollWireCalls);
           CHECK(bus.errors() == errors + 1);
           CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
           for (std::uint8_t lane = 0; lane < 8; ++lane)
@@ -1373,6 +1382,7 @@ int main() {
             digitalRead(22) == HIGH);
       CHECK(lines.restore_calls == 1 && Wire.tof_samples == samples);
       CHECK(Wire.transactions == transactions + 4);
+      CHECK(Wire.transactions - transactions <= desk_robot::kTofMaxRecoveryWireCalls);
       CHECK(Wire.ranges == 0 && Wire.extras == 0 && bus.bus_accessible());
       CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
       CHECK(!guard.try_rearm(61));

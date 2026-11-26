@@ -159,7 +159,7 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   // controller's independent 10ms I2C transaction timeout.
   wire_started_ = wire_.begin(sda, scl, 400000);
   if (!wire_started_) return false;
-  wire_.setTimeOut(10);
+  wire_.setTimeOut(kTofWireTimeoutMs);
   if (!bus_accessible()) return false;
   // TCA9548A straps: 0x70 (A2/A1/A0 low) ranges; 0x71 (A0 high) accessories.
   // Only the five-ranger bench may omit 0x71; the eight-ranger build
