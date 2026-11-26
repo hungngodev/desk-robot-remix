@@ -1195,3 +1195,90 @@ def test_readonly_planner_rejects_marked_unsigned_voice_request(settings):
     )
     assert response.status_code == 409
 
+
+def test_readonly_inspection_preserves_active_navigation(settings, monkeypatch):
+    """Voice selection and grid reads cannot replace a running route or renew its map."""
+    from copy import deepcopy
+    from dataclasses import asdict
+
+    from desk_robot.controller import Coordinator, Job
+    from desk_robot.memory import MemoryStore
+    from desk_robot.route_planner import SafetyEnvelope
+    from desk_robot.simulator import SimulationVision
+    from desk_robot.spatial_grid import RangeCellBatch
+    from desk_robot.spatial_runtime import SpatialRuntime
+    from fastapi.testclient import TestClient
+
+    robot_id = "robot-01"
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    spatial = SpatialRuntime(
+        settings, MemoryStore(settings.memory_dir, [robot.id for robot in settings.robots]),
+    )
+    now = 1_000_000
+    monkeypatch.setattr(spatial, "now_us", lambda: now)
+    grid = spatial.bind_qualified_grid(
+        robot_id, body_boot=1, origin_id="origin", anchor_id="anchor",
+        calibration_id="cal", camera_boot=1, width=7, height=7,
+        envelope=SafetyEnvelope(3, 2, 2, 32, True), anchored=True,
+    )
+    cells = tuple((x, y) for y in range(7) for x in range(7))
+    for lane, kind in ((0, "floor_supported"), (4, "obstacle_clear")):
+        spatial.record_range_batch(robot_id, RangeCellBatch(
+            robot_id, 1, "origin", grid.epoch, "cal", lane, 1,
+            now - 100, now, kind, cells, True,
+        ), now_us=now)
+    route, _, _ = spatial.plan_navigation(robot_id, start=(2, 3), goal=(4, 3))
+    assert route.status == "planned" and route.may_execute is False
+    coordinator = Coordinator(settings, {}, SimulationVision())
+    coordinator.spatial = spatial
+    job = Job("a" * 32, robot_id, "navigate", state="running", result=asdict(route))
+    coordinator.jobs[job.id] = job
+    coordinator._fleet_motion_owner = job.id
+
+    class Planner:
+        async def reply(self, history):
+            return '{"tools":[{"route":"navigate"},{"route":"status"}]}'
+
+    runtime = SimpleNamespace(
+        coordinator=coordinator, spatial=spatial,
+        conversation=SimpleNamespace(chat=Planner()),
+    )
+    app = create_app(settings, runtime=runtime)
+    app.state.runtime = runtime
+    app.state.operator_token = "operator-test-token"
+    app.state.tool_token = "tool-test-token"
+    headers = {"Authorization": "Bearer tool-test-token"}
+    state = spatial.state(robot_id)
+    grid_before = deepcopy(vars(grid))
+    pose_before = deepcopy(vars(state.pose_fence))
+    job_before = deepcopy(job.data())
+    snapshot = grid.to_route_snapshot(now_us=now)
+
+    client = TestClient(app)
+    for _ in range(2):
+        plan = client.post(
+            f"/v1/pet/{robot_id}/plan-readonly", headers=headers,
+            json={"transcript": "Check your safety status"},
+        )
+        assert plan.status_code == 200
+        assert [tool["route"] for tool in plan.json()["tools"]] == ["status"]
+        assert plan.json()["motor_authorized"] is False
+        summary = client.get(f"/v1/robots/{robot_id}/spatial/grid", headers=headers)
+        assert summary.status_code == 200
+        assert summary.json()["cell_counts"] == {"safe": 49}
+        assert summary.json()["navigation_authorized"] is False
+        assert summary.json()["expires_at_us"] == snapshot.expires_at_us
+        assert spatial.state(robot_id) is state and state.grid is grid
+        assert vars(grid) == grid_before
+        assert vars(state.pose_fence) == pose_before
+        assert coordinator.jobs == {job.id: job}
+        assert job.data() == job_before
+        assert coordinator._fleet_motion_owner == job.id
+        assert not coordinator.tasks and not coordinator.permits
+
+    other, _, _ = spatial.plan_navigation(robot_id, start=(2, 3), goal=(3, 3))
+    assert other.status == "planned" and other.cells != route.cells
+    assert grid.to_route_snapshot(now_us=now) == snapshot
+    assert vars(grid) == grid_before
+    assert job.data() == job_before and coordinator._fleet_motion_owner == job.id
