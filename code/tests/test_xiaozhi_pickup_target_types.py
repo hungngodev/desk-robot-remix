@@ -20,6 +20,10 @@ def _handler():
         if isinstance(n, ast.AsyncFunctionDef) and n.name == "desk_robot_pickup"
     )
     node.decorator_list = []
+    validator = next(
+        n for n in module.body
+        if isinstance(n, ast.FunctionDef) and n.name == "_valid_tool_payload"
+    )
     calls = []
 
     async def call(*args):
@@ -37,7 +41,7 @@ def _handler():
         "Action": SimpleNamespace(REQLLM="request_llm"),
         "voice_turn_response": lambda result: ActionResponse("request_llm", result),
     }
-    exec(compile(ast.fix_missing_locations(ast.Module(body=[node], type_ignores=[])),
+    exec(compile(ast.fix_missing_locations(ast.Module(body=[validator, node], type_ignores=[])),
                  str(SOURCE), "exec"), scope)
     return scope["desk_robot_pickup"], calls
 
@@ -50,7 +54,18 @@ def test_malformed_pickup_targets_do_not_reach_mac(target):
     handler, calls = _handler()
     response = asyncio.run(handler(object(), target))
     assert response.action == "request_llm"
-    assert response.result == {"error": "Target must be key or candy"}
+    assert response.result == {"error": "Invalid robot tool arguments", "retried": False}
+    assert calls == []
+
+
+@pytest.mark.parametrize("extra", [
+    {"angle": 90}, {"pwm": 1500}, {"command": "grip 90"},
+    {"grip_open": 60}, {"grip_closed": 120}, {"permit": True},
+])
+def test_pickup_rejects_raw_actuator_overrides(extra):
+    handler, calls = _handler()
+    response = asyncio.run(handler(object(), "key", **extra))
+    assert response.result == {"error": "Invalid robot tool arguments", "retried": False}
     assert calls == []
 
 
@@ -117,15 +132,15 @@ def test_real_registry_binds_desk_robot_pickup_schema_and_runtime_guards(monkeyp
         return {"robot_id": "pet1", "id": "job1"}
 
     monkeypatch.setattr(tools_mod, "call", fake_call)
-    with pytest.raises(TypeError):
-        asyncio.run(item.func(object()))
+    missing = asyncio.run(item.func(object()))
+    assert missing.result == {"error": "Invalid robot tool arguments", "retried": False}
 
     wrong = asyncio.run(item.func(object(), 123))
     assert wrong.action == register_mod.Action.REQLLM
-    assert wrong.result == {"error": "Target must be key or candy"}
+    assert wrong.result == {"error": "Invalid robot tool arguments", "retried": False}
     coin = asyncio.run(item.func(object(), "coin"))
     assert coin.action == register_mod.Action.REQLLM
-    assert coin.result == {"error": "Target must be key or candy"}
+    assert coin.result == {"error": "Invalid robot tool arguments", "retried": False}
     assert bridge_calls == []
 
     conn = object()

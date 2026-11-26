@@ -434,7 +434,10 @@ def description(name, text, properties=None, required=None):
     ToolType.IOT_CTL,
 )
 async def desk_robot_pickup(conn, /, target=None, **unexpected):
-    result = await call(conn, "pickup", {"target": target, **unexpected})
+    payload = {"target": target, **unexpected}
+    if not _valid_tool_payload("pickup", payload):
+        return voice_turn_response({"error": "Invalid robot tool arguments", "retried": False})
+    result = await call(conn, "pickup", payload)
     # The Mac Coordinator owns job identities and progress. A WebSocket
     # connection may vanish while the accepted job continues.
     return voice_turn_response(result)

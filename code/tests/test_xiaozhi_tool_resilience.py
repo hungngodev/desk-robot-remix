@@ -69,6 +69,7 @@ async def test_tool_bridge_refuses_missing_or_shared_signing_secret_before_http(
 
 @pytest.mark.parametrize("route", [
     "arm", "enable", "move", "drive", "../enable", "charger/enable", "",
+    "grip", "release", "servo", "pwm", "lift", "manual",
 ])
 async def test_xiaozhi_tool_router_refuses_unregistered_physical_actions_before_http(
     bridge_tools, monkeypatch, route,
@@ -1513,6 +1514,9 @@ async def test_shared_tool_rejects_nonstring_route_before_http(
     ("pickup", {}),
     ("pickup", {"target": []}),
     ("pickup", {"target": "key", "permit": True}),
+    ("pickup", {"target": "key", "angle": 90}),
+    ("pickup", {"target": "key", "pwm": 1500}),
+    ("pickup", {"target": "candy", "command": "grip 90"}),
     ("pickup", {"target": "coin"}),
     ("status", {"robot_id": "robot-02"}),
     ("look", {"question": "  "}),
