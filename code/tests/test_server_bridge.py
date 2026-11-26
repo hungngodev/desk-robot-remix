@@ -497,8 +497,9 @@ async def test_legacy_brain_blends_live_mac_evidence_per_pet_without_history_blo
     assert calls == ["mac-01", "mac-01", "mac-02"]
 
 
+@pytest.mark.parametrize("failure", [None, RuntimeError, asyncio.CancelledError])
 async def test_legacy_brain_clears_old_context_when_mac_revokes_permission(
-    bridge, monkeypatch,
+    bridge, monkeypatch, caplog, failure,
 ):
     import types
 
@@ -512,11 +513,15 @@ async def test_legacy_brain_clears_old_context_when_mac_revokes_permission(
          "raw_media_included": False, "persistent_memory_included": False,
          "model_context_untrusted_not_instructions": True,
          "motor_authorized": False, "charging_authorized": False},
-        {"error": "Mac context permission revoked"},
+        ({"error": "Mac context permission revoked"} if failure is None
+         else failure("private tool input")),
     ]
 
     async def call(*_):
-        return responses.pop(0)
+        response = responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
     pkg = types.ModuleType("plugins_func")
     pkg.__path__ = []
@@ -535,11 +540,23 @@ async def test_legacy_brain_clears_old_context_when_mac_revokes_permission(
     assert conn.dialogue.dialogue == [system]
     assert "touch_tap" in conn.dialogue.get_llm_dialogue_with_memory()[-1]["content"]
     assert system.content == "Original robot identity"
-    await bridge.inject_live_context_into_legacy_llm(conn)
+    if failure is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await bridge.inject_live_context_into_legacy_llm(conn)
+    else:
+        await bridge.inject_live_context_into_legacy_llm(conn)
     assert conn.dialogue.dialogue == [system]
     assert conn.dialogue.get_llm_dialogue_with_memory() == [
         {"role": "system", "content": "Original robot identity"}
     ]
+    records = [
+        record for record in caplog.records
+        if getattr(record, "bridge_operation", None) == "legacy_live_context"
+    ]
+    assert len(records) == (1 if failure is RuntimeError else 0)
+    if records:
+        assert records[0].bridge_exception_type == "RuntimeError"
+    assert "private tool input" not in caplog.text
 
 
 async def test_legacy_brain_drops_old_mac_reply_after_new_voice_turn(
@@ -3636,6 +3653,43 @@ async def test_inflight_normal_stop_cannot_clear_newer_vad(bridge, monkeypatch, 
     finally:
         release.set()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_normal_barge_logs_cleanup_failure_without_losing_stop(bridge, monkeypatch, caplog):
+    head = conn("mac-01")
+    head.client_listen_mode = "realtime"
+    head.client_is_speaking = True
+    head.session_id = "private-barge-session"
+    events = []
+    head.clear_queues = lambda: events.append("clear")
+    head.clearSpeakStatus = lambda: events.append("status")
+    bridge.register(head)
+
+    async def urgent(_owner):
+        events.append("STOP")
+
+    async def broken(_owner):
+        raise RuntimeError("private model state")
+
+    async def preempt_peers(_device):
+        return None
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        send_external_urgent_stop=urgent, on_barge=broken,
+        preempt_others_for_human=preempt_peers,
+    ))
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    assert await bridge.interrupt_for_normal_voice(head, True)
+    assert events == ["clear", "STOP", "status"]
+    assert head.client_abort
+    records = [
+        record for record in caplog.records
+        if getattr(record, "bridge_operation", None) == "normal_barge_cleanup"
+    ]
+    assert len(records) == 1
+    assert records[0].bridge_exception_type == "RuntimeError"
+    assert "private model state" not in caplog.text
+    assert "private-barge-session" not in caplog.text
 
 
 async def test_normal_barge_propagates_cancellation_during_native_cleanup(bridge, monkeypatch):
