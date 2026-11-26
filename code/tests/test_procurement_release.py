@@ -1755,11 +1755,26 @@ def test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references():
     rewrites every generated five-robot CSV source field. The first robot
     pilot cart must not invalidate the original full fleet register.
     """
-    assert set(mod.SOURCE_REFERENCES) == {
-        "cliff_obstacle", "i2c_mux", "mcp23017", "amp", "speaker"
+    # A same-length tuple can still leak a pilot SKU or supplier URL into
+    # the canonical fleet report. Pin the reviewed reference identities.
+    assert mod.SOURCE_REFERENCES == {
+        "cliff_obstacle": (
+            "ElectroPeak", "SEN-19-006",
+            "https://electropeak.com/gy-530-vl53l0x-laser-range-finder",
+        ),
+        "i2c_mux": ("Generic", "TCA9548A", "https://www.ti.com/product/TCA9548A"),
+        "mcp23017": (
+            "Generic", "MCP23017", "https://www.microchip.com/en-us/product/MCP23017",
+        ),
+        "amp": (
+            "Generic", "MAX98357A", "https://www.analog.com/en/products/max98357a.html",
+        ),
+        "speaker": (
+            "Challenge Electronics", "CS20-02P110-04-1X",
+            "https://www.digikey.com/en/products/detail/challenge-electronics/"
+            "CS20-02P110-04-1X/30407069",
+        ),
     }
-    assert all(len(candidate) == 3
-               for candidate in mod.SOURCE_REFERENCES.values())
     assert all(len(candidate) == 6
                for candidate in mod.PILOT_SAMPLE_PRODUCTS.values())
     assert all(isinstance(candidate[4], int) and candidate[4] > 0
