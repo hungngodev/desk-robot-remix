@@ -12,6 +12,7 @@ public:
     struct Snapshot {
         uint64_t generation = 0;
         uint64_t frames = 0;
+        uint64_t window_id = 0;
     };
 
     uint64_t generation() const noexcept { return generation_; }
@@ -19,10 +20,7 @@ public:
     void Reset() noexcept {
         ++generation_;
         frames_ = 0;
-        window_active_ = false;
-        first_window_accept_us_ = 0;
-        last_window_accept_us_ = 0;
-        window_minimum_us_ = 0;
+        ClearWindow();
     }
 
     void RecordAccepted(uint64_t started_generation, int accepted,
@@ -42,15 +40,19 @@ public:
         }
     }
 
-    Snapshot SnapshotNow() const noexcept { return {generation_, frames_}; }
+    Snapshot SnapshotNow() const noexcept { return {generation_, frames_, window_id_}; }
 
     Snapshot BeginWindow() noexcept {
+        ClearWindow();
+        ++window_id_;
         window_start_ = SnapshotNow();
         window_active_ = true;
-        first_window_accept_us_ = 0;
-        last_window_accept_us_ = 0;
-        window_minimum_us_ = 0;
         return window_start_;
+    }
+
+    // A delayed close from an older capture must not close a replacement.
+    void EndWindow(Snapshot start) noexcept {
+        if (MatchesWindow(start)) ClearWindow();
     }
 
     // A microphone callback can overlap authorization and be discarded.
@@ -59,10 +61,7 @@ public:
     // completed the four-second recording, and subsequent accepts retain
     // the first qualifying time for the existing endpoint fence.
     void FenceWindowStart(Snapshot start, int64_t first_sample_us) noexcept {
-        if (!window_active_ || generation_ != start.generation ||
-            window_start_.generation != start.generation ||
-            window_start_.frames != start.frames ||
-            first_sample_us <= 0 || window_minimum_us_ != 0) return;
+        if (!MatchesWindow(start) || first_sample_us <= 0 || window_minimum_us_ != 0) return;
         window_minimum_us_ = first_sample_us;
         if (first_window_accept_us_ < first_sample_us) {
             first_window_accept_us_ = last_window_accept_us_ >= first_sample_us
@@ -71,16 +70,29 @@ public:
     }
 
     bool AdvancedSince(Snapshot start, int64_t capture_end_us) const noexcept {
-        return window_active_ && generation_ == start.generation &&
-               window_start_.generation == start.generation &&
-               window_start_.frames == start.frames &&
+        return MatchesWindow(start) &&
                frames_ > start.frames && first_window_accept_us_ > 0 &&
                first_window_accept_us_ <= capture_end_us;
     }
 
 private:
+    bool MatchesWindow(Snapshot start) const noexcept {
+        return window_active_ && generation_ == start.generation &&
+               window_start_.generation == start.generation &&
+               window_start_.frames == start.frames &&
+               window_start_.window_id == start.window_id;
+    }
+
+    void ClearWindow() noexcept {
+        window_active_ = false;
+        first_window_accept_us_ = 0;
+        last_window_accept_us_ = 0;
+        window_minimum_us_ = 0;
+    }
+
     uint64_t generation_ = 0;
     uint64_t frames_ = 0;
+    uint64_t window_id_ = 0;
     Snapshot window_start_{};
     int64_t first_window_accept_us_ = 0;
     int64_t last_window_accept_us_ = 0;

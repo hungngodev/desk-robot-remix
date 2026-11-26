@@ -175,6 +175,10 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         {
             std::lock_guard<std::mutex> lock(bench_mutex_);
             bench_window_.invalidate_read(failed_read_us);
+            if (bench_window_.failed()) {
+                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                speaker_activity_.EndWindow(bench_speaker_at_start_);
+            }
         }
 #endif
         // Count actual driver failures in every build, not just private AEC
@@ -268,6 +272,10 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
                 bench_speaker_activity_in_window_ =
                     speaker_activity_.AdvancedSince(
                         bench_speaker_at_start_, bench_window_.last_sample_us());
+                speaker_activity_.EndWindow(bench_speaker_at_start_);
+            } else if (bench_window_.failed()) {
+                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                speaker_activity_.EndWindow(bench_speaker_at_start_);
             }
         }
     }
@@ -422,6 +430,10 @@ void SenseReferenceCodec::BenchPcmExpiry(void* context) {
             esp_timer_get_time() - codec->bench_started_us_ < 12'000'000)
             return;
         expired = codec->bench_window_.discard();
+        {
+            std::lock_guard<std::mutex> reference_lock(codec->reference_mutex_);
+            codec->speaker_activity_.EndWindow(codec->bench_speaker_at_start_);
+        }
         codec->bench_capture_generation_.fetch_add(
             1, std::memory_order_acq_rel);
         codec->bench_started_us_ = 0;
@@ -484,6 +496,10 @@ bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) 
     if (privacy_changed()) {
         (void)esp_timer_stop(bench_expiry_timer_);
         bench_started_us_ = 0;
+        {
+            std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+            speaker_activity_.EndWindow(bench_speaker_at_start_);
+        }
         ReleaseBenchPcmCapture(bench_window_.discard());
         return false;
     }
@@ -533,6 +549,10 @@ void SenseReferenceCodec::AbortBenchPcmCapture(bool revoke_consent) {
         // fence is invalidated immediately.
         bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
         data = bench_window_.discard();
+        {
+            std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+            speaker_activity_.EndWindow(bench_speaker_at_start_);
+        }
         bench_started_us_ = 0;
     }
     ReleaseBenchPcmCapture(data);

@@ -137,6 +137,38 @@ int main() {
         }
         window.discard();
     }
+    activity.Reset();
+
+    // 20 ms playback bursts: STOP, abandoned capture, immediate replacement.
+    // Equal frame counters must not make two capture identities equivalent.
+    for (int64_t i = 1; i <= 256; ++i) {
+        const int64_t t = i * 20000;
+        const auto old_generation = activity.generation();
+        const auto old = activity.BeginWindow();
+        activity.RecordAccepted(old_generation, 640, t);
+        assert(activity.AdvancedSince(old, t));
+        activity.Reset();
+        const auto abandoned = activity.BeginWindow();
+        activity.EndWindow(abandoned);
+        const auto current = activity.BeginWindow();
+        assert(current.frames == abandoned.frames);
+        activity.EndWindow(abandoned);
+        activity.FenceWindowStart(abandoned, t + 19000);
+        activity.FenceWindowStart(current, t + 1000);
+        activity.RecordAccepted(old_generation, 640, t + 2000);
+        assert(!activity.AdvancedSince(current, t + 2000));
+        activity.RecordAccepted(activity.generation(), 640, t + 999);
+        assert(!activity.AdvancedSince(current, t + 2000));
+        activity.RecordAccepted(activity.generation(), 640, t + 1000);
+        assert(!activity.AdvancedSince(current, t + 999));
+        assert(activity.AdvancedSince(current, t + 1000));
+        assert(!activity.AdvancedSince(old, t + 1000));
+        assert(!activity.AdvancedSince(abandoned, t + 1000));
+        activity.EndWindow(current);
+        activity.RecordAccepted(activity.generation(), 640, t + 19999);
+        assert(!activity.AdvancedSince(current, t + 19999));
+        activity.Reset();
+    }
 }
 """
     )
@@ -169,6 +201,8 @@ def test_selected_codec_requires_current_generation_activity_for_bench_capture()
     assert returned < timestamp < publish_lock
     assert "speaker_activity_.Reset();" in source
     assert "speaker_activity_.BeginWindow();" in source
+    assert "speaker_activity_.EndWindow(bench_speaker_at_start_);" in source
+    assert "codec->speaker_activity_.EndWindow(codec->bench_speaker_at_start_);" in source
     assert "if (!had_frames && bench_window_.frames_received() != 0)" in source
     assert "speaker_activity_.FenceWindowStart(" in source
     assert "bench_speaker_at_start_, bench_window_.first_sample_us());" in source
