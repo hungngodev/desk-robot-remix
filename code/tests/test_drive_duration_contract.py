@@ -49,6 +49,7 @@ def test_duration_helper_rejects_unvalidated_commands(command):
 def test_manual_drive_rejects_before_job_submission(command):
     coordinator = Mock()
     coordinator.robot.return_value.motion_enabled = True
+    coordinator.dock_inhibited.return_value = False  # not on dock; validate command bounds
     with pytest.raises(ValueError):
         drive_duration_ms(command)
     with pytest.raises(ValueError):
