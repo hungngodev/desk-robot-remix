@@ -292,8 +292,9 @@ class SpatialRuntime:
         # No live producer yet proves camera exposure against a stationary
         # motion bracket. Reject both positive and negative camera claims;
         # an unproven frame must not enter the route cache or episode store.
-        if self.settings.mode == "hardware" and evidence.source in (
-            "camera_seen", "camera_not_seen",
+        if self.settings.mode == "hardware" and (
+            evidence.source in ("camera_seen", "camera_not_seen")
+            or spatial_evidence is not None
         ):
             return False
         state.observations.append(evidence)
