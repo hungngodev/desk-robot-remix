@@ -47,9 +47,17 @@ def _validate_wav_extent(encoded: bytes) -> None:
     if len(encoded) < 12 or int.from_bytes(encoded[4:8], "little") != len(encoded) - 8:
         raise ValueError("Incomplete or inconsistent model WAV container")
     offset = 12
+    audio_chunks: set[bytes] = set()
     while offset < len(encoded):
         if len(encoded) - offset < 8:
             raise ValueError("Incomplete model WAV container chunk header")
+        chunk_id = encoded[offset:offset + 4]
+        if chunk_id in (b"fmt ", b"data"):
+            # A model response must contain one unambiguous audio stream.
+            # wave.open ignores subsequent chunks after the first data chunk.
+            if chunk_id in audio_chunks:
+                raise ValueError("Duplicate model WAV audio chunk")
+            audio_chunks.add(chunk_id)
         size = int.from_bytes(encoded[offset + 4:offset + 8], "little")
         offset += 8 + size + (size & 1)
         if offset > len(encoded):

@@ -212,3 +212,16 @@ async def test_read_model_completion_obeys_client_total_timeout(protocol):
                     await protocol.read_tool_completion(response.content.iter_chunked(64 * 1024))
         finally:
             release.set()
+
+
+@pytest.mark.parametrize("chunk_id", [b"data", b"fmt "])
+def test_decode_rejects_duplicate_audio_chunks(protocol, chunk_id):
+    raw = _wav(b"\x01\x00" * 240)
+    # wave.open stops scanning at the first data chunk, silently ignoring
+    # another PCM payload or a conflicting format in the same container.
+    offset = raw.index(chunk_id, 12)
+    size = int.from_bytes(raw[offset + 4:offset + 8], "little")
+    raw += raw[offset:offset + 8 + size]
+    raw = raw[:4] + (len(raw) - 8).to_bytes(4, "little") + raw[8:]
+    with pytest.raises(ValueError, match="Duplicate model WAV"):
+        protocol.decode_tool_completion({"choices": [_audio(raw)]})
