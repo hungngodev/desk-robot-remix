@@ -140,9 +140,9 @@ class FloorProjectionCalibration:
             right = (u - self.lens.cx) / self.lens.fx
             down = (v - self.lens.cy) / self.lens.fy
         pitch = math.radians(self.pitch_down_deg)
-        ray_x = math.cos(pitch) - down * math.sin(pitch)
+        # Rotate in the forward/up (X/Z) plane; positive camera pitch points down.
+        ray_x, ray_z = rotate_xy(1.0, -down, -pitch)
         ray_y = -right
-        ray_z = -math.sin(pitch) - down * math.cos(pitch)
         # Require a strictly downward margin before distance amplification.
         ray_length = math.sqrt(ray_x * ray_x + ray_y * ray_y + ray_z * ray_z)
         if (not all(math.isfinite(x) for x in (ray_x, ray_y, ray_z, ray_length))
