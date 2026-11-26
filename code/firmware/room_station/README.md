@@ -17,20 +17,34 @@ owned PCB revision and pinned PlatformIO core before wiring.
 | --- | --- | --- |
 | SCD40 | I2C SDA D22/P0.12, SCL D23/P0.11; address 0x62 | Sensirion periodic CO2, humidity, temperature |
 | BME688 | Same 3.3 V compatible I2C bus; 0x77 or 0x76 | Upstream BME68x ambient and raw gas resistance, not VOC ppm |
-| AMG8833 | Same 3.3 V compatible I2C bus; address 0x69 | Checked 64-pixel thermal register reads; no identity recognition |
+| AMG8833 (optional, not selected for default checkout) | Same 3.3 V compatible I2C bus; address 0x69 | Checked 64-pixel thermal register reads; no identity recognition |
 | LD2410C | Serial1 RX D1/P0.24 from radar TX, TX D0/P0.25 to radar RX; common GND; VCC from a separately verified 5 V station branch, **never** the Feather 3V pin | Upstream LD2410 at 256000 baud, packet freshness bounded |
-| Capacitive soil | Analog A0/D14/P0.04 from **3.3V powered** capacitive probe, common ground | Three 12-bit ADC acquisitions, median and noise/rail rejection in the dedicated `room_full` profile; `room_bench` leaves it off |
+| Capacitive soil (SEN0193) | Analog A0/D14/P0.04 from **3.3V powered** capacitive probe, common ground | Three 12-bit ADC acquisitions, median and noise/rail rejection in the dedicated `room_full` profile; `room_bench` leaves it off |
 | Mac | Feather's USB serial at 115200 | Versioned one-line JSON observations, read-only, opt-in |
 
 Source for the Feather numbers:
 [Adafruit nRF52 Arduino Feather variant.h](https://github.com/adafruit/Adafruit_nRF52_Arduino/blob/master/variants/feather_nrf52840_express/variant.h)
 and [variant.cpp](https://github.com/adafruit/Adafruit_nRF52_Arduino/blob/master/variants/feather_nrf52840_express/variant.cpp).
+Qwiic and STEMMA QT are connector options on the same 100 kHz `Wire` bus,
+not separate buses. Use only 3.3 V power and logic for this mixed bus, with
+common ground. Check the exact carrier pin order and pullups to 3.3 V;
+the Feather Express has no default I2C pullups. Parallel breakout pullups
+must be assessed together, not blindly duplicated. Check effective pullup
+resistance and rise time with all fitted carriers before release. Do not
+assume the owned Feather has a native JST-SH connector: use a verified
+header-to-JST-SH harness if needed. See the
+[Feather pinout](https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/pinouts)
+and [Qwiic compatibility](https://learn.adafruit.com/introducing-adafruit-stemma-qt/sparkfun-qwiic).
+
 The nRF52 UART core computes a custom register divisor for 256000 baud, but
 that is **not** proof of correct live LD2410 packets on the physical board.
 
 **No direct 5 V logic is permitted on the Feather signal pins.**
 The pinned [ncmreynolds LD2410 v0.2.2](https://github.com/ncmreynolds/ld2410/tree/v0.2.2)
-documents the module supply as 5 V or higher while the UART I/O is 3.3 V.
+documents the module supply and 3.3 V UART I/O. Hi-Link's
+[LD2410C product reference](https://www.hlktech.net/index.php?id=65)
+specifies 5 V supply and 3.3 V serial output; do not infer a higher allowed
+supply voltage for the exact fitted carrier.
 The owned Feather's official pinout documents its USB power pin as only
 nominally 4.5 to 5.2 V, so that pin is a **candidate source, not a qualified
 5 V rail**. Do not connect LD2410C VCC to Feather 3V and do not assume the
@@ -50,7 +64,7 @@ powered station role. These are screening values, not permission to wire an
 unknown breakout. At 3.3 V, the SCD40 datasheet allows up to **205 mA peak**
 and 18 mA average in periodic measurement. Bosch lists the BME688 at up to
 **12 mA** for customized pressure, humidity, temperature and gas operation.
-The selected AMG8833 reference is about **4.5 mA typical**. LD2410C is on the
+The optional AMG8833 reference is about **4.5 mA typical**. LD2410C is on the
 separate 5 V branch and its protocol documentation requires supply capacity
 **greater than 200 mA**, with about 79 mA reference average current.
 
@@ -63,7 +77,8 @@ not represented by the bare sensor numbers.
 
 Before station purchase release or enclosure freeze, run the exact fitted
 carriers together: SCD40 periodic conversion, BME688 gas heater activity,
-AMG8833 streaming, LD2410C streaming and the fitted soil probe. Measure the
+AMG8833 streaming (only if the optional carrier is fitted), LD2410C streaming
+and the fitted soil probe. Measure the
 minimum 3.3 V at the farthest I2C carrier, minimum 5 V at the radar, USB input
 current, cable drop and regulator temperature while watching for resets, I2C
 errors and USB serial interruption. Keep the room station on HOLD until those

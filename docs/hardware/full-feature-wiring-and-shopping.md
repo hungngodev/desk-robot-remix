@@ -182,7 +182,7 @@ The dock has **five individual keyed cradles**, one for each pet, with camera-vi
 | LD2410C mmWave presence module | 1 | fixed room pod UART; purchasing still HOLD |
 | Capacitive soil probe | 1 | external plant accessory; purchasing still HOLD |
 | NFC game tags and magnets | 0 | OPTIONAL NOT SELECTED, DO NOT BUY; ten future game props are only a concept |
-| AMG8833 thermal array | 0 | OPTIONAL NOT SELECTED, DO NOT BUY; future separate thermal station concept |
+| AMG8833 thermal array | 0 | OPTIONAL NOT SELECTED, DO NOT BUY; optional carrier on the shared station I2C bus if later qualified |
 
 This legacy wiring reference is not a third shopping list. The only selected
 MAX30102 pads are the five robot-mounted paw pads (one per pet), with stock
@@ -191,7 +191,32 @@ roles and conditional quantities come from `full-feature-plan.json` and its
 two generated shopping lists. Optional NFC toy props and AMG8833 thermal
 hardware have selected quantity zero and are not a default checkout.
 
-The room accessory station may reuse the existing Feather nRF52840 over USB if its UART/I2C and firmware are verified; otherwise one generic ESP32C3. It publishes timestamped scoped context to the Mac and controls **no motors**. Human presence or heartbeat is **never** presented as identification, medical diagnosis or consent to monitor.
+The selected source target is the reported-owned Feather nRF52840 Express
+over USB, pending exact PCB and electrical qualification. The ESP32C3 is only
+a historical fallback concept, not an implemented or approved station target.
+Follow the [room station wiring and power guide](../../code/firmware/room_station/README.md)
+as the authoritative pin and commissioning reference.
+
+* I2C SDA D22/P0.12, SCL D23/P0.11: one 100 kHz 3.3 V `Wire` bus
+  shared by SCD40 (0x62), BME688 (0x77 or 0x76), and optional AMG8833 (0x69).
+  Qwiic and STEMMA QT share this bus; verify common ground, connector order,
+  pullups to 3.3 V, combined pullup resistance and rise time.
+* LD2410C: Serial1 RX D1/P0.24 from radar TX, TX D0/P0.25 to radar RX;
+  256000 baud, 3.3 V UART logic, common ground. VCC requires a separately
+  verified 5 V station branch with supply capacity greater than 200 mA,
+  never the Feather 3V pin. USB nominal 4.5 to 5.2 V is not a qualified rail.
+* SEN0193: A0/D14/P0.04, verified 3.3 V probe supply and 0 to 3.3 V
+  analog output; soil is disabled in the bench profile and enabled only
+  in the explicitly selected full profile after electrical checks.
+* The Feather regulator's 500 mA peak rating is not a continuous 3.3 V
+  budget from 5 V. Measure all fitted loads together, rail minima, USB
+  input current, cable drop, regulator temperature and serial continuity.
+
+Station purchase and physical wiring remain HOLD. The optional AMG8833
+is excluded from default checkout. BME688 reports raw gas resistance,
+not VOC ppm. The station publishes timestamped, opt-in read-only context
+to the Mac; it has no motor or charging authority and never identifies
+people or treats radar presence as consent to monitor.
 
 ## What is selected versus still unverified
 
