@@ -33,17 +33,24 @@ class ReplyTxQueue {
   bool enqueue_priority_line(const char* line) noexcept {
     if (line == nullptr) return false;
     std::size_t length = 0;
-    if (!bounded_line_length(line, kPriorityLineCapacity - 2, length) ||
-        priority_count_ == kPrioritySlots) {
+    if (!bounded_line_length(line, kPriorityLineCapacity - 2, length)) {
       ++dropped_;
       return false;
     }
-    const std::size_t slot = (priority_start_ + priority_count_) % kPrioritySlots;
+    std::size_t slot = (priority_start_ + priority_count_) % kPrioritySlots;
+    if (priority_count_ == kPrioritySlots) {
+      // Preserve the oldest receipt (possibly already on the wire). A
+      // duplicate tail must not exclude the other emergency command.
+      slot = (priority_start_ + kPrioritySlots - 1) % kPrioritySlots;
+      ++dropped_;
+      if (!replaceable_duplicate(line, slot)) return false;
+    } else {
+      ++priority_count_;
+    }
     std::memcpy(priority_[slot], line, length);
     priority_[slot][length] = '\r';
     priority_[slot][length + 1] = '\n';
     priority_lengths_[slot] = length + 2;
-    ++priority_count_;
     return true;
   }
 
@@ -109,6 +116,18 @@ class ReplyTxQueue {
  private:
   static constexpr std::size_t kPrioritySlots = 2;
   static constexpr std::size_t kPriorityLineCapacity = 64;
+  bool replaceable_duplicate(const char* incoming, std::size_t tail) const noexcept {
+    const char* opposite = std::strcmp(incoming, "OK stop") == 0 ? "OK halt" :
+                           std::strcmp(incoming, "OK halt") == 0 ? "OK stop" : nullptr;
+    if (opposite == nullptr) return false;
+    const auto matches = [this, opposite](std::size_t slot) {
+      constexpr std::size_t length = sizeof("OK stop") - 1;
+      return priority_lengths_[slot] == length + 2 &&
+             std::memcmp(priority_[slot], opposite, length) == 0;
+    };
+    return matches(priority_start_) && matches(tail);
+  }
+
   // Reject an embedded frame delimiter before copying any bytes. The scan
   // stops at the queue's capacity even when a caller supplies oversized text,
   // so malformed replies cannot add unbounded work to the motor service loop.

@@ -27,7 +27,36 @@ static_assert(noexcept(std::declval<const Queue&>().dropped()), "drop count quer
 // The generic serial backend can allocate or throw; do not promise otherwise.
 static_assert(!noexcept(std::declval<Queue&>().drain(std::declval<FakeSerial&>())), "serial drain can propagate backend exceptions");
 
+void test_distinct_urgent_receipt_survives_duplicate_burst() {
+  for (const bool stop_first : {false, true}) {
+    const char* first = stop_first ? "OK stop" : "OK halt";
+    const char* other = stop_first ? "OK halt" : "OK stop";
+    for (const std::size_t prefix : {0U, 1U, 8U}) {
+      desk_robot::ReplyTxQueue<16> queue;
+      FakeSerial serial;
+      assert(queue.enqueue_line("01234567890123"));
+      assert(queue.enqueue_priority_line(first));
+      assert(queue.enqueue_priority_line(first));
+      serial.free = 16;
+      assert(queue.drain(serial, prefix) == prefix);
+      assert(queue.enqueue_priority_line(other));
+      assert(queue.dropped() == 1);
+      assert(queue.pending() == 34 - prefix);
+      assert(!queue.enqueue_priority_line(first));
+      assert(queue.dropped() == 2);
+      while (queue.pending()) {
+        serial.free = 16;
+        serial.per_write = 3;
+        assert(queue.drain(serial) > 0);
+      }
+      assert(serial.sent == std::string(first) + "\r\n" + other +
+                               "\r\n01234567890123\r\n");
+    }
+  }
+}
+
 int main() {
+  test_distinct_urgent_receipt_survives_duplicate_burst();
   desk_robot::ReplyTxQueue<128> head, usb;
   const std::string status(94, 's');
   assert(head.enqueue_line(status.c_str()));
