@@ -225,10 +225,11 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         features = (
             _rect(x, y, outer_w, base_l, dash=True)
             + _polygon(left) + _polygon(right)
-            + _text(20, 203, f"Nominal base: {_num(outer_w)} x {_num(base_l)} mm; channel: {_num(channel_w)} mm")
+            + _text(20, 203, f"Dashed base: {_num(outer_w)} x {_num(base_l)} mm; "
+                    f"channel: {_num(channel_w)} mm")
             + _text(20, 210, "ENTRY at TOP, BACKSTOP at BOTTOM; no contact or drill marks.")
         )
-        title = "Passive dock base and exact nominal flared rail footprints"
+        title = "Passive dock base and solid flared rail footprints"
     elif name == "power":
         pack_l, pack_w, tray_l, tray_w, tab_l, tab_w, tab_offset = dims
         full_l = tray_l + 2 * tab_l
@@ -243,7 +244,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _rect(x+tray_l, y+tray_w-tab_offset-tab_w, tab_l, tab_w, dash=True)
             + _rect(x + (tray_l - pack_l) / 2,
                     y + (tray_w - pack_w) / 2, pack_l, pack_w)
-            + _text(20, 169, f"Nominal body envelope: {_num(pack_l)} x {_num(pack_w)} mm")
+            + _text(20, 169, f"Solid: nominal body envelope: {_num(pack_l)} x {_num(pack_w)} mm")
             + _text(20, 176, f"Nominal tray body: {_num(tray_l)} x {_num(tray_w)} mm (dashed)")
             + _text(20, 183, f"Overall span including tabs: {_num(full_l)} x {_num(tray_w)} mm")
             + _text(20, 190, "EXCLUDES leads, NTC, PCM overhang, charger, boost and fuses.")
@@ -277,6 +278,10 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _text(20, 255, "50 mm horizontal print scale")
             + _rect(173, 229, 8, 25)
             + _text(146, 262, "25 mm vertical")
+            + _text(15, 270,
+                    "FDM starting layer height: 0.2 mm; nozzle diameter is separate.", size=3)
+            + _text(15, 275,
+                    "Calibrate XY clearance on a coupon; 0.2 mm is not a fit tolerance.", size=3)
             + _text(15, 280, "BACK / BOTTOM of paper. Never mirror a mounting pattern blindly.")
             + '</svg>\n')
 

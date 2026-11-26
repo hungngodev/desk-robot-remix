@@ -631,6 +631,13 @@ def test_a4_calibration_centerlines_and_no_drill_marks(tmp_path):
         labels = [element.text for element in root.findall(f"{ns}text")]
         assert "Measure all three lengths between stroke centers, not outer edges." in labels
         assert "50 mm horizontal print scale" in labels
+        assert "FDM starting layer height: 0.2 mm; nozzle diameter is separate." in labels
+        assert "Calibrate XY clearance on a coupon; 0.2 mm is not a fit tolerance." in labels
+        if filename == "dock_guide_reference_A4.svg":
+            assert any("solid flared rail" in label for label in labels)
+            assert any(label.startswith("Dashed base:") for label in labels)
+        if filename == "power_reference_A4.svg":
+            assert any(label.startswith("Solid: nominal body envelope:") for label in labels)
         assert any("FRONT / TOP" in label for label in labels)
         assert any("BACK / BOTTOM" in label for label in labels)
         assert any("NOT FOR DRILLING" in label for label in labels)
