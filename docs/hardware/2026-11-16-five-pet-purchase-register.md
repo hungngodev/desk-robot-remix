@@ -99,7 +99,7 @@ These extra purchase rows realize abstract BOM assemblies; do not count them as 
 | 5V switching regulator | [Pololu #4082 S13V30F5](https://www.pololu.com/product/4082) | 1 | 5 | $16.51 | 0 | One per pet, low cell current/thermal test; Low cell power input and thermal qualification missing |
 | Protected NTC 1S battery pack | UNSELECTED pack SKU needed | 1 | 5 | Unquoted | 0 | Five eventual, order only once fit and load measured |
 | Independent 5V dock adapter | [Mean Well GST18A05 P1J](https://www.meanwell.com/Upload/PDF/GST18A/GST18A-SPEC.PDF) | 1 | 5 | Unquoted | 1 | 5 eventual adapters; connector and protective circuit unselected |
-| Dock IR LED transistor/resistor driver channel | UNSELECTED driver PCB needed | 2 | 10 | Unquoted | 2 | 2 per dock, 10 total; current and switching validated on pilot |
+| Dock IR LED transistor/resistor driver channel | UNSELECTED driver PCB needed | 2 | 10 | Unquoted | 2 | 2 per dock, 10 total; current and switching require measured pilot validation |
 | Shared room controller | OWNED Feather nRF52840 | 1 | 1 | Unquoted | 0 | Exactly one shared station not five |
 | True room CO2 sensor | [7Semi SCD40 ES 12129](https://7semi.com/7semi-scd40-co2-temperature-and-humidity-sensor-breakout-i2c-qwiic/) | 1 | 1 | $33.00 | 1 | Exactly one shared station |
 | Room gas/environment sensor | [Pimoroni BME688](https://shop.pimoroni.com/products/bme688-breakout) | 1 | 1 | Unquoted | 1 | Exactly one station, raw gas not VOC ppm |

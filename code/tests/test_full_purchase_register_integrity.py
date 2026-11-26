@@ -361,9 +361,14 @@ def test_audit_supplemental_lineage_matches_current_register_contract():
         assert cells[0] not in rows, cells[0]
         rows[cells[0]] = cells
     assert set(rows) == set(EXTRA)
+    register_rows = supplemental_rows()
     for name, (_, count, parent, _) in EXTRA.items():
         assert int(rows[name][1]) == count, name
         assert rows[name][2] == f"`{parent}`", name
+        assert int(rows[name][4]) == int(register_rows[name][5]), name
     assert "BQ27441 excluded" in rows["BQ24075 power-path source, NO second SoC gauge"][5]
     assert "Required role" in rows["Required shared-station capacitive soil probe"][5]
     assert "not selected" in rows["Room thermal 8x8 array"][3]
+    assert "require measured pilot validation" in rows[
+        "Dock IR LED transistor/resistor driver channel"
+    ][5]

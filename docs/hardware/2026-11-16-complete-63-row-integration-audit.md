@@ -60,7 +60,7 @@ This report deliberately distinguishes a source path from real compatibility. A 
 
 ## Additional fourteen rows, without duplicate buying
 
-| Supplementary register entry | Quantity | Parent primary role | Disposition | Pilot shown | Physical blocker |
+| Supplementary register entry | Quantity | Parent primary role | Disposition | Legacy fit target | Physical blocker |
 | --- | ---: | --- | --- | ---: | --- |
 | N20 100:1 MP 6V motors | 10 | `stepper` | Unselected motor alternative | 0 | Two per pet, 10 fleet; source motor driver option, tracks still to fit; Owned 28BYJ48 must be load tested first; $22.03 premium not selected for purchasing |
 | DRV8833 dual H bridge | 5 | `uln2003` | Unselected motor alternative; guarded source profile exists | 0 | Reuse reportedly owned spare DRV8833 first and verify 3.3V logic, driver polarity, 5V/low-cell motor load and real current. Pololu premium carrier not an approved purchase |
@@ -68,7 +68,7 @@ This report deliberately distinguishes a source path from real compatibility. A 
 | 5V switching regulator | 5 | `cap_power` | Candidate, unselected power subsystem | 0 | One per pet, low cell current/thermal test; Low cell power input and thermal qualification missing |
 | Protected NTC 1S battery pack | 5 | `cap_power` | Needed physical subsystem, exact pack unselected | 0 | Five eventual, order only once fit and load measured |
 | Independent 5V dock adapter | 5 | `dock_fixture` | Needed physical subsystem, connector unselected | 1 | 5 eventual adapters; connector and protective circuit unselected |
-| Dock IR LED transistor/resistor driver channel | 10 | `dock_ir_emitter_channels` | Needed hardware subsystem, netlist unselected | 2 | 2 per dock, 10 total; current and switching validated on pilot |
+| Dock IR LED transistor/resistor driver channel | 10 | `dock_ir_emitter_channels` | Needed hardware subsystem, netlist unselected | 2 | 2 per dock, 10 total; current and switching require measured pilot validation |
 | Shared room controller | 1 | `room_controller` | Already counted in station role | 0 | Exactly one shared station not five |
 | True room CO2 sensor | 1 | `scd40` | Already counted in station role | 1 | Exactly one shared station |
 | Room gas/environment sensor | 1 | `bme688` | Already counted in station role | 1 | Exactly one station, raw gas not VOC ppm |
@@ -106,7 +106,7 @@ The existing [63-role source ownership map](full-63-role-source-ownership.json) 
 
 ## Verification receipts and next review
 
-The current script `code/scripts/procurement_release.py` refuses fleet release until source and physical evidence receipts are supplied. The new `code/tests/test_full_purchase_register_integrity.py` adds structural checks for all 14 supplement names, parent count, 42 plus 7 primary roles and unselected pilot amounts. The original source parsing was performed against the live GitHub content on 2026-11-16; subsequent role lineage corrections below remain source evidence only. Do not claim the host `pytest`, PlatformIO, ESP-IDF, physical charger, source fit or fleet trial passed merely because this table was generated.
+The current script `code/scripts/procurement_release.py` refuses fleet release until source and physical evidence receipts are supplied. The new `code/tests/test_full_purchase_register_integrity.py` adds structural checks for all 14 supplement names, parent count, 42 plus 7 primary roles and unselected pilot amounts. The original source parsing was performed against the live GitHub content on 2026-11-16; subsequent role lineage corrections above remain source evidence only. Do not claim the host `pytest`, PlatformIO, ESP-IDF, physical charger, source fit or fleet trial passed merely because this table was generated.
 
 ## 2026-11-16 price correction for one room thermal sensor
 
