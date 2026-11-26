@@ -1570,7 +1570,8 @@ class PetController:
             previous = state.last_nose_angle
             if previous is not None:
                 difference = abs((angle - previous + 2048) % 4096 - 2048)
-                if difference >= robot.nose_twist_threshold_counts:
+                # The calibrated threshold itself is inside the deadband.
+                if difference > robot.nose_twist_threshold_counts:
                     changes.append(SceneChange(
                         "nose_twist", "My magnetic nose dial was rotated", 1.0
                     ))

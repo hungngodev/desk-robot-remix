@@ -3318,6 +3318,11 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
         await pet._observe_aux(robot_id, 3, first)
         assert not any(m.kind in {"battery_low", "nose_twist", "squeeze", "nearby_object"}
                        for m in memory.recent(robot_id))
+        # Subthreshold jitter and exact-threshold changes are not dial turns,
+        # including both directions across the raw 12-bit wrap boundary.
+        for nose in (0, 4095, 0, 100, 600, 100, 4000, 404, 4000, 100):
+            await pet._observe_aux(robot_id, 3, report(5000, nose, 100, 40, fuel_seq=1))
+            assert not any(m.kind == "nose_twist" for m in memory.recent(robot_id))
         # Jaw FSR on ADS1115 channel 1 can be fully pressed while channel 0
         # remains at its unchanged belly baseline. This is NOT a human touch.
         jaw_only = report(5000, 100, 100, 40, fuel_seq=1)
