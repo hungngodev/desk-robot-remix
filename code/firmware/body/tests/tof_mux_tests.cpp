@@ -140,8 +140,60 @@ static void dropout_matrix_and_partial_mux_recovery() {
   fake_arduino_millis() = saved_clock;
 }
 
+// Consecutive same-address reads must follow the actual selected lane.
+static void fast_floor_lane_swap() {
+  const auto saved_clock = fake_arduino_millis();
+  for (unsigned failure = 0; failure < 4; ++failure) {
+    Wire = TwoWire{};
+    fake_i2c_lines() = FakeI2cLines{};
+    fake_arduino_millis() = 100;
+    Wire.tof_lane_mm[0] = 36;
+    Wire.tof_lane_mm[1] = 79;
+    desk_robot::TofBus bus;
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(calibration()));
+    CHECK(bus.begin(21, 22, -1));
+    const auto now = millis();
+    bus.poll(guard, now);
+    CHECK(Wire.ranges == 1 && bus.last_channel() == 0);
+    CHECK(guard.diagnostic(0, now).distance_mm == 36);
+    CHECK(!guard.diagnostic(1, now).present);
+    const auto samples = Wire.tof_samples;
+    const auto clears = Wire.tof_register_stop_transmissions;
+    const auto errors = bus.errors();
+    // Leave lane 0 connected; never simulate the new selection in the test.
+    Wire.range_mux_stuck = failure == 1;
+    Wire.range_mux_write_nack = failure == 2;
+    Wire.range_mux_read_nack = failure == 3;
+    bus.poll(guard, now); // no artificial settling delay between polls
+    CHECK(bus.last_channel() == 1);
+    CHECK(!Wire.unsafe_parallel_mux);
+    if (failure == 0) {
+      CHECK(Wire.ranges == 2 && bus.errors() == errors);
+      CHECK(Wire.tof_samples == samples + 1);
+      CHECK(Wire.tof_register_stop_transmissions == clears + 1);
+      CHECK(bus.new_optical_channel() == 1);
+      CHECK(guard.diagnostic(0, now).distance_mm == 36);
+      CHECK(guard.diagnostic(1, now).distance_mm == 79);
+    } else {
+      CHECK(Wire.ranges == (failure == 3 ? 2 : 1));
+      CHECK(bus.errors() == errors + 1);
+      CHECK(Wire.tof_samples == samples);
+      CHECK(Wire.tof_register_stop_transmissions == clears);
+      CHECK(bus.new_optical_channel() == 255);
+      CHECK(!bus.optical_diagnostic(0, now).valid);
+      CHECK(!bus.optical_diagnostic(1, now).valid);
+      CHECK(!guard.diagnostic(0, now).present);
+      CHECK(!guard.diagnostic(1, now).present);
+      CHECK(!guard.evaluate(now) && !guard.try_rearm(now));
+    }
+  }
+  fake_arduino_millis() = saved_clock;
+}
+
 int main() {
   try {
+    fast_floor_lane_swap();
     dropout_matrix_and_partial_mux_recovery();
     {
       // A later verified close must not erase a transient overlap,
