@@ -1326,7 +1326,9 @@ class PetController:
         seq = paw.get("seq")
         if (robot.paw_contact_interactions_qualified and threshold is not None
                 and paw["present"] and paw["valid"]
-                and paw["part_id"] == 0x15 and paw["age_ms"] <= 250
+                and paw["part_id"] == 0x15
+                and type(request_elapsed_ms) in (int, float)
+                and 0 <= request_elapsed_ms <= 250 - paw["age_ms"]
                 and type(seq) is int and seq > 0):
             advance = _sensor_counter_advance(seq, state.last_paw_seq)
             if advance == 0:
@@ -1372,10 +1374,10 @@ class PetController:
             or robot.ambient_humidity_change_centi is not None
         )
         if (robot.ambient_interactions_qualified and measured_change
-                and ambient["valid"] and type(ambient_seq) is int
-                and ambient_seq > 0
-                and type(ambient.get("age_ms")) is int
-                and 0 <= ambient["age_ms"] < 1000):
+                and _fresh_aux_acquisition(
+                    ambient, previous_seq=None, max_age_ms=1000,
+                    elapsed_ms=request_elapsed_ms,
+                )):
             current_ambient = (ambient["temp_centi"], ambient["rh_centi"])
             advance = _sensor_counter_advance(ambient_seq, state.last_ambient_seq)
             if advance == 0:
@@ -1421,9 +1423,10 @@ class PetController:
                 and robot.bmp280_pressure_change_pa is not None
                 and isinstance(bmp, dict) and bmp.get("present")
                 and bmp.get("valid") and bmp.get("chip_id") == 0x58
-                and type(bmp_seq) is int and 0 < bmp_seq <= 0xffffffff
-                and type(bmp.get("age_ms")) is int
-                and 0 <= bmp["age_ms"] < 2000):
+                and _fresh_aux_acquisition(
+                    bmp, previous_seq=None, max_age_ms=2000,
+                    elapsed_ms=request_elapsed_ms,
+                )):
             pressure = bmp["pressure_pa"]
             advance = _sensor_counter_advance(bmp_seq, state.last_bmp_seq)
             if advance == 0:
@@ -3214,20 +3217,17 @@ class PetController:
 
             def novel(
                 kind: str, reading: object, max_age_ms: int,
-                *, include_transport: bool = False,
             ) -> bool:
                 if boot is None:
                     return False
                 # The WROOM age is measured BEFORE its HTTP response.
                 # A queued request may be older by the time Ollama sees it.
-                budget_ms = max_age_ms - (transport_ms if include_transport else 0)
-                if budget_ms <= 0:
-                    return False
                 key = (robot_id, kind)
                 cursor = self._proactive_aux_cursors.get(key)
                 prior = cursor[1] if cursor is not None and cursor[0] == boot else None
                 return _fresh_aux_acquisition(
-                    reading, previous_seq=prior, max_age_ms=budget_ms,
+                    reading, previous_seq=prior, max_age_ms=max_age_ms,
+                    elapsed_ms=transport_ms,
                 )
 
             climate = result.get("climate")
@@ -3261,7 +3261,7 @@ class PetController:
                     "valid": power.get("fuel_valid"),
                     "seq": power.get("fuel_seq"),
                     "age_ms": power.get("fuel_age_ms"),
-                }, 500, include_transport=True,
+                }, 500,
             ):
                 if (type(power.get("soc_centi")) is int
                         and 0 <= power["soc_centi"] <= 10000
@@ -3294,7 +3294,7 @@ class PetController:
             dock = result.get("dock")
             if (isinstance(dock, dict)
                     and dock.get("present") is True
-                    and novel("dock", dock, 500, include_transport=True)
+                    and novel("dock", dock, 500)
                     and dock.get("charging_verified") is False
                     and all(type(dock.get(field)) is bool for field in (
                         "left_seated", "right_seated", "input_good",

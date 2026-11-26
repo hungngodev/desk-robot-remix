@@ -3585,6 +3585,13 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
         async def observe(seq, ir, **kwargs):
             await pet._observe_aux("robot-01", 7, report(seq, ir, **kwargs))
 
+        await observe(10, 1000)
+        await observe(11, 30000)
+        await pet._observe_aux(
+            "robot-01", 7, report(12, 33000, age=249), request_elapsed_ms=2,
+        )
+        assert state.last_paw_seq is None
+        assert not any(m.kind == "paw_contact" for m in memory.recent("robot-01"))
         await observe(1, 1000)
         await observe(2, 262143)  # raw ADC rail cannot establish contact
         assert state.last_paw_seq is None
@@ -3698,6 +3705,14 @@ async def test_sht41_ambient_change_requires_fresh_distinct_samples(fleet, tmp_p
         async def observe(seq, temp, rh, **kwargs):
             await pet._observe_aux("robot-01", 13, report(seq, temp, rh, **kwargs))
 
+        await observe(10, 2200, 5000)
+        await observe(11, 2440, 5000)
+        await pet._observe_aux(
+            "robot-01", 13, report(12, 2450, 5000, age=990),
+            request_elapsed_ms=10,
+        )
+        assert state.last_ambient_seq is None
+        assert not any(m.kind == "ambient_shift" for m in memory.recent("robot-01"))
         await observe(20, 2200, 5000)  # environmental baseline only
         await observe(21, 2440, 5000)
         await observe(21, 2440, 5000)  # replay cannot confirm a change
@@ -6512,6 +6527,13 @@ async def test_bmp280_air_pressure_events_require_distinct_measurements_and_opt_
             await pet._observe_aux("robot-01", 19, report(seq, pa))
         assert memory.count("robot-01") == 0
         robot.bmp280_interactions_qualified = True
+        await pet._observe_aux("robot-01", 19, report(10, 100000))
+        await pet._observe_aux("robot-01", 19, report(11, 100500))
+        await pet._observe_aux(
+            "robot-01", 19, report(12, 100600, age=1990), request_elapsed_ms=10,
+        )
+        assert state.last_bmp_seq is None
+        assert memory.count("robot-01") == 0
         await pet._observe_aux("robot-01", 19, report(4, 100000))
         await pet._observe_aux("robot-01", 19, report(5, 100500))
         await pet._observe_aux("robot-01", 19, report(5, 100500))
@@ -7470,6 +7492,53 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         value["bmp280"].pop("seq")
         with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
             await read()
+    finally:
+        await pet.close()
+
+
+async def test_proactive_ambient_transport_expiry_does_not_consume_sequence(
+    fleet, tmp_path, monkeypatch,
+):
+    from copy import deepcopy
+    from types import SimpleNamespace
+
+    import desk_robot.pet as pet_module
+
+    now = [100.0]
+    delay = [0.25]
+    sample = {
+        "robot_id": "robot-01",
+        "force": {"boot_id": 77},
+        "proximity": {"boot_id": 77},
+        "climate": {"valid": True, "seq": 8, "age_ms": 750,
+                    "temp_centi": 2315, "rh_centi": 4800},
+        "bmp280": {"valid": True, "present": True, "chip_id": 0x58,
+                   "seq": 8, "age_ms": 1750, "temp_centi": 2315,
+                   "pressure_pa": 101200},
+    }
+
+    class Head:
+        async def aux_status(self):
+            now[0] += delay[0]
+            return deepcopy(sample)
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    monkeypatch.setattr(
+        pet_module, "time", SimpleNamespace(monotonic=lambda: now[0]),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await pet._proactive_tool_receipt("robot-01", "aux_status")
+        delay[0] = 0.125
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert set(receipt["data"]) == {"sht41", "bmp280"}
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await pet._proactive_tool_receipt("robot-01", "aux_status")
     finally:
         await pet.close()
 
