@@ -6,7 +6,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
-from desk_robot.object_detector import DetectorFrame, detect_object_frame
+from desk_robot.object_detector import DetectorFrame, _frame_valid, detect_object_frame
 from desk_robot.object_targets import ObjectOwner, ObjectQuery, resolve_object_target
 from desk_robot.vision import Detection, YoloWorldVision
 from PIL import Image
@@ -557,3 +557,27 @@ async def test_lower_confidence_exact_duplicate_box_can_coalesce():
     assert receipt.evidence is not None and receipt.evidence.confidence == 0.96
     assert receipt.box == box
     assert not receipt.arrived and not receipt.may_execute
+
+
+@pytest.mark.parametrize("age_us, expected", [
+    (39_999, None),
+    (40_000, None),
+    (40_001, "stale_or_unmapped_frame"),
+])
+def test_detector_frame_capture_freshness_boundary(age_us, expected):
+    query, owner, frame = fixtures()
+    assert _frame_valid(
+        frame, query, owner, now_us=frame.captured_us + age_us, fresh_us=40_000,
+    ) == expected
+
+
+@pytest.mark.parametrize("changed", ["frame", "owner"])
+def test_detector_map_epoch_fence_independent_of_other_identities(changed):
+    query, owner, frame = fixtures()
+    if changed == "frame":
+        frame = replace(frame, epoch=query.epoch - 1)
+    else:
+        owner = replace(owner, epoch=query.epoch - 1)
+    assert _frame_valid(
+        frame, query, owner, now_us=1_000_000, fresh_us=250_000,
+    ) == "camera_or_map_changed"
