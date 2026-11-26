@@ -71,7 +71,9 @@ async def test_native_visual_question_huge_confidence_fails_closed_without_crash
     from PIL import Image
 
     jpeg = BytesIO()
-    Image.new("RGB", (16, 16), (100, 100, 100)).save(jpeg, "JPEG")
+    image = Image.new("RGB", (16, 16), (100, 100, 100))
+    image.paste((220, 220, 220), (8, 0, 16, 16))
+    image.save(jpeg, "JPEG")
     valid_frame = jpeg.getvalue()
 
     class Response:

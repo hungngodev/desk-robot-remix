@@ -1831,7 +1831,7 @@ async def test_local_vlm_speaks_from_visual_evidence_and_not_confidence_guess(an
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         model = OllamaScene(client, url="http://local:11434", model="local-vlm")
-        assert await model.answer("What is there?", [image()]) == expected
+        assert await model.answer("What is there?", [image(square=True)]) == expected
 
 
 @pytest.mark.parametrize("kind", ["oversized", "fake_header"])
@@ -1890,7 +1890,7 @@ async def test_vlm_rejects_invalid_or_unbounded_multimodal_result(out):
     )) as client:
         model = OllamaScene(client, url="http://local:11434", model="local-vlm")
         with pytest.raises(ValueError):
-            await model.answer("Tell me what you see", [image()])
+            await model.answer("Tell me what you see", [image(square=True)])
 
 
 async def test_new_real_human_utterance_cancels_old_vlm_image_answer():
