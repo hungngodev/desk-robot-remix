@@ -440,7 +440,7 @@ def render(plan: dict, body: str, head: str) -> str:
         "Verify actual board address straps before power-up")
     row("AT42QT1010 OUT", f"WROOM GPIO{bus['body_gpio']['head_touch']}",
         "3.3V active-HIGH capacitive input; external bias required on GPIO34 through GPIO39")
-    row("3.3V external pullup node + NC bumper switch series -> GND",
+    row("3.3V external pullup node + two NC bumper switches in series -> GND",
         f"WROOM GPIO{bus['body_gpio']['bumper_nc_series']}",
         "3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39")
     row("Optional reed switch to GND (with external 3.3V pullup)", "MCP23017 GPB0",
@@ -536,6 +536,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "Generated from docs/hardware/full-feature-plan.json and the actual",
         "BodyPins.h and head/sense/config.h symbols. Regenerate after any pin edit.",
         "Signal-only list. Never infer a power source from a logic voltage.",
+        "Cable cut lengths, AWG/current ratings and connector cavity pinouts: HOLD.",
+        "Firmware GPIO numbers are not JST cavity numbers. No connector family,",
+        "contact rating or wire gauge is approved by this signal allocation.",
         "",
         "**Motor variants are mutually exclusive:** `esp32_full` uses ULN2003 steppers;",
         "`esp32_dc_full` uses DRV8833 DC motors. Never connect both motor drivers.",
@@ -567,7 +570,13 @@ def render(plan: dict, body: str, head: str) -> str:
         "* Reed/PIR now have slow MCP23017 GPIOB input source, freeing",
         "  GPIO36/39 for dual IR. Real timing, optical baffles, RTC/ADC erratum",
         "  filtering and final homing remain entirely unqualified.",
-        "* Breakout VCC and I2C pullups, connector pin order and cable gauge.",
+        "* Breakout VCC and I2C pullups remain unqualified.",
+        "* Measure each routed cable length on fitted hardware, including connector",
+        "  exit, bend radius, full joint travel, service slack and strain relief.",
+        "* Select wire AWG and exact connector/contact part numbers from measured",
+        "  continuous/peak current, voltage drop, temperature and bundle derating.",
+        "  Confirm mating-face orientation, cavity count, polarity and continuity.",
+        "  A JST-style housing or wire color alone proves none of these.",
         "* All eight VL53L0X carriers: identify PCB revision and verify VIN",
         "  plus upstream/downstream SDA/SCL HIGH voltages with motors OFF.",
         "  Do NOT energize any ToF lane until 5V WROOM exposure is excluded.",

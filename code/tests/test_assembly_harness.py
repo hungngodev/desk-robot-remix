@@ -44,7 +44,8 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert "| WROOM GPIO19 | MG90S jaw signal |" in page
     assert "| XIAO GPIO4 | MAX98357A BCLK |" in page
     assert "| AT42QT1010 OUT | WROOM GPIO34 |" in page
-    assert "| 3.3V external pullup node + NC bumper switch series -> GND | WROOM GPIO35 |" in page
+    assert "| 3.3V external pullup node + two NC bumper switches in series -> GND |" in page
+    assert "WROOM GPIO35 | 3.3V passive NC input (HIGH on open/fault" in page
     assert "NC bumper series OUT" not in page
     assert page.count("Range TCA9548A 0x70 CH") == 8
     assert page.count("Accessory TCA9548A 0x71 CH") == 8
@@ -64,6 +65,11 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert page.count("SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden") == 8
     assert "All eight VL53L0X carriers: identify PCB revision" in page
     assert "Do NOT energize any ToF lane until 5V WROOM exposure is excluded" in page
+    assert "Cable cut lengths, AWG/current ratings and connector cavity pinouts: HOLD." in page
+    assert "Firmware GPIO numbers are not JST cavity numbers." in page
+    assert "continuous/peak current, voltage drop, temperature and bundle derating." in page
+    assert "exit, bend radius, full joint travel, service slack and strain relief." in page
+    assert "Confirm mating-face orientation, cavity count, polarity and continuity." in page
     assert "Assembly readiness: NO" in page
     assert "Do NOT wire yet" in page
     assert "NEVER directly tie robot boost 5V to laptop USB VBUS" in page
