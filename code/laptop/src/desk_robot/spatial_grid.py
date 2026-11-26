@@ -279,6 +279,8 @@ class SpatialGrid:
 
     def inherit_clock_reference(self, previous: SpatialGrid | None) -> None:
         """Preserve WROOM clock offsets when replacing a grid within the same boot."""
+        if previous is not None and previous.robot_id != self.robot_id:
+            raise GridEvidenceError("Grid clock reference robot identity mismatch")
         if previous is not None and previous.body_boot == self.body_boot:
             self._clock_reference.update(previous._clock_reference)
 

@@ -389,3 +389,22 @@ def test_later_clock_reference_marks_partial_observation_stale(kind, lane, initi
     assert g.state(1, 1, now_us=1_000_010) == "stale"
     assert g.state(2, 1, now_us=1_000_010) == "unknown"
     assert g.snapshot(now_us=1_000_010).support[5] == "stale"
+
+
+def test_grid_clock_inheritance_is_robot_local():
+    a = SpatialGrid("robot-01", 7, "odom-a", "tag-a", "cal-a", 4, 3)
+    b = SpatialGrid("robot-02", 7, "odom-b", "tag-b", "cal-b", 4, 3)
+    a._clock_reference[4] = (100_000, 1_000_000)
+    b._clock_reference[4] = (600_000, 1_000_000)
+    with pytest.raises(GridEvidenceError, match="robot identity"):
+        b.inherit_clock_reference(a)
+    assert b._clock_reference == {4: (600_000, 1_000_000)}
+    assert a._clock_reference == {4: (100_000, 1_000_000)}
+    replacement = SpatialGrid("robot-01", 7, "odom-new", "tag-new", "cal-new", 4, 3)
+    replacement.inherit_clock_reference(a)
+    assert replacement._clock_reference == a._clock_reference
+    replacement._clock_reference[4] = (200_000, 1_100_000)
+    assert a._clock_reference == {4: (100_000, 1_000_000)}
+    rebooted = SpatialGrid("robot-01", 8, "odom-new", "tag-new", "cal-new", 4, 3)
+    rebooted.inherit_clock_reference(a)
+    assert rebooted._clock_reference == {}
