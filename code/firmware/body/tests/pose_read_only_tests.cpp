@@ -499,6 +499,44 @@ void verify_qualified_pose_is_never_implicit_navigation() {
         body.state().right == 0);
 }
 
+// Use the SAME safety time for every read: a normal tick may revoke an
+// expired permit, but fresh telemetry must never renew it or consume ticks.
+void verify_active_telemetry(desk_robot::BodyControl& body,
+                             desk_robot::LineReceiver& receiver) {
+  constexpr std::uint32_t now = 475;
+  const auto permit = body.drive_remaining(now);
+  const auto watchdog = body.watchdog_remaining(now);
+  check(permit > 0 && watchdog > 0);
+  const auto left = body.wheel_angle_capture(false);
+  const auto right = body.wheel_angle_capture(true);
+  const auto pair = body.wheel_pair_receipt();
+  const auto pose = body.wheel_pose_state();
+  const auto wire = request(body, receiver, "pose\r\n", now, 475000);
+  check(wire.find("\"quality\":\"unavailable\"") != std::string::npos);
+  for (int poll = 0; poll < 32; ++poll) {
+    const auto aux = request(body, receiver, "aux\r\n", now, 0);
+    check(aux.find("\"seq\":[0,6,6]") != std::string::npos);
+    check(body.state().armed && body.state().left == 20 && body.state().right == 20);
+    check(body.drive_remaining(now) == permit && body.watchdog_remaining(now) == watchdog);
+    const auto& l = body.wheel_angle_capture(false);
+    const auto& r = body.wheel_angle_capture(true);
+    check(l.continuous() && r.continuous());
+    check(l.angular_counts() == left.angular_counts() &&
+          r.angular_counts() == right.angular_counts());
+    check(l.last_delta() == left.last_delta() && r.last_delta() == right.last_delta());
+    check(l.segment() == left.segment() && r.segment() == right.segment());
+    const auto& current = body.wheel_pair_receipt();
+    check(current.valid && current.pair_seq == pair.pair_seq &&
+          current.segment == pair.segment && current.left_seq == pair.left_seq &&
+          current.right_seq == pair.right_seq);
+    const auto& p = body.wheel_pose_state();
+    check(p.quality == pose.quality && p.origin == pose.origin &&
+          p.sample_seq == pose.sample_seq && p.sample_ms == pose.sample_ms &&
+          p.x_mm == pose.x_mm && p.y_mm == pose.y_mm && p.yaw_mrad == pose.yaw_mrad &&
+          p.xy_error_mm == pose.xy_error_mm && p.yaw_error_mrad == pose.yaw_error_mrad);
+  }
+}
+
 void verify_commanded_motion_requires_measured_travel(bool lose_encoder) {
   desk_robot::BodyControl body;
   desk_robot::LineReceiver receiver;
@@ -582,6 +620,8 @@ void verify_commanded_motion_requires_measured_travel(bool lose_encoder) {
         body.wheel_pose_state().yaw_mrad == 0);
   check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
 
+  verify_active_telemetry(body, receiver);
+
   if (lose_encoder) {
     // A missing wheel during an active command is NOT zero measured travel,
     // and the previous signed displacement cannot be extrapolated from PWM.
@@ -595,7 +635,7 @@ void verify_commanded_motion_requires_measured_travel(bool lose_encoder) {
           !body.wheel_angle_capture(true).continuous());
     const auto wire = request(body, receiver, "pose\r\n", 478, 478000);
     check(wire ==
-          "{\"v\":1,\"body_boot\":602,\"origin\":0,\"seq\":1,"
+          "{\"v\":1,\"body_boot\":602,\"origin\":0,\"seq\":2,"
           "\"sample_us\":478000,\"x_mm\":0,\"y_mm\":0,"
           "\"yaw_mrad\":0,\"quality\":\"unavailable\"}");
     // Restoring validity on the same cached conversion cannot restore pose.
@@ -611,6 +651,11 @@ void verify_commanded_motion_requires_measured_travel(bool lose_encoder) {
   imu.at_ms = 480;
   body.set_imu(imu);
   check(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  check(request(body, receiver, "pose\r\n", 481, 481000).find(
+      "\"quality\":\"unavailable\"") != std::string::npos);
+  check(request(body, receiver, "aux\r\n", 481, 0).find(
+      "\"wheel_travel_qualified\":false") != std::string::npos);
+  check(body.drive_remaining(481) == 0 && body.watchdog_remaining(481) == 0);
   check(request(body, receiver, "arm\r\n", 481, 481000) ==
         "ERR arm imu_low_g_latched");
   check(body.wheel_pose_state().origin == 0);

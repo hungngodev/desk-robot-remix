@@ -361,6 +361,26 @@ void microsecond_ramp_accumulates_without_rounding() {
   }
 }
 
+// Polling diagnostics must not alter the subsequent motor phase/ramp trace.
+void telemetry_getters_preserve_drive_trace() {
+  StepperDrive polled;
+  StepperDrive reference;
+  const StepperDrive& telemetry = polled;
+  const std::uint32_t origin = 0xffff0000U;
+  for (std::uint32_t i = 0; i < 2400; ++i) {
+    const auto now = origin + i * 1000U;
+    const int requested = i < 800 ? 40 : -40;
+    const bool enabled = i < 1600 || i >= 1800;
+    const auto expected = reference.update(now, requested, enabled);
+    CHECK(polled.update(now, requested, enabled) == expected);
+    const int rate = reference.rate_milli_steps_per_second();
+    for (int read = 0; read < 32; ++read) {
+      CHECK(telemetry.mask() == expected);
+      CHECK(telemetry.rate_milli_steps_per_second() == rate);
+    }
+  }
+}
+
 void clock_rollover_matches_normal_clock() {
   StepperDrive normal;
   StepperDrive wrapped;
@@ -393,6 +413,7 @@ int main(int argc, char** argv) {
       {"rate_ceiling_during_ramp_and_reversal", rate_ceiling_during_ramp_and_reversal},
       {"microsecond_ramp_accumulates_without_rounding",
        microsecond_ramp_accumulates_without_rounding},
+      {"telemetry_getters_preserve_drive_trace", telemetry_getters_preserve_drive_trace},
       {"clock_rollover_matches_normal_clock", clock_rollover_matches_normal_clock}};
   int ran = 0;
   for (const auto& test : tests) {
