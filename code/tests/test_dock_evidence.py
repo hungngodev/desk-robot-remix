@@ -865,3 +865,42 @@ async def test_pgood_alone_never_confirms_pack_charging(monkeypatch, seated, raw
         assert report[flag] is False
     assert report.get("charged", False) is False
     assert head.commands == []
+
+
+@pytest.mark.parametrize("cell_mv", [4200, 3300])
+async def test_full_gauge_taper_and_chg_deassertion_never_verify_completion(
+    monkeypatch, cell_mv,
+):
+    """Even fresh full SOC, tapered current and inactive CHG are not charge proof."""
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    windows = ((120, 60, 30), (20, 10, 0))
+    samples = fresh_samples(6)
+    currents = [ma for window in windows for ma in window]
+    for index, (sample, ma) in enumerate(zip(samples, currents, strict=True), 1):
+        sample["dock"]["charge_indicated"] = index <= 3
+        sample["power"].update(
+            cell_mv=cell_mv, soc_centi=10000, fuel_valid=True,
+            fuel_seq=index, fuel_age_ms=0, monitor_valid=True,
+            shunt_uv=ma * 5, pack_ma=ma, pack_valid=True,
+            pack_seq=index, pack_age_ms=0,
+        )
+    head = FakeHead(samples)
+    for state, direction, window in zip(
+        ("charger_reports_active", "input_present_not_charging"),
+        ("into_pack_unqualified", "indeterminate"), windows, strict=True,
+    ):
+        report = await observe_dock_evidence(head, "robot-01")
+        assert report["state"] == state
+        assert report["stable_three_samples"] is True
+        assert report["raw_pack_samples_fresh"] is True
+        assert report["raw_pack_ma"] == list(window)
+        assert report["raw_pack_direction"] == direction
+        for flag in ("battery_current_measured", "charger_electrically_qualified",
+                     "charging_verified", "charging_authorized", "motor_authorized"):
+            assert report[flag] is False
+        assert report.get("charging_complete", False) is False
+        assert report.get("battery_healthy", False) is False
+    assert head.commands == []
