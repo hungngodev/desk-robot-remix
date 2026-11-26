@@ -3295,13 +3295,18 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
     state.enabled = True
     state.generation = 3
 
+    nose_seq = 0
+
     def report(soc, nose, pressure, nearby, *, fuel_seq):
+        nonlocal nose_seq
+        nose_seq += 1
         return {
             "robot_id": robot_id,
             "pulse": {"present": False, "valid": False, "part_id": 0,
                       "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
             "angles": {"raw": [nose, 0, 0], "present_mask": 1,
-                       "valid_mask": 1, "magnet": [32, 0, 0]},
+                       "valid_mask": 1, "magnet": [32, 0, 0],
+                       "seq": [nose_seq, 0, 0], "age_ms": [10, 0, 0], "boot_id": 3},
             "force": {"adc": [pressure, 0], "jaw_seq": 10, "valid": True, "calibrated": False, "boot_id": 3},
             "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": True},
             "power": {"cell_mv": 3700, "soc_centi": soc, "bus_mv": 5100,
@@ -3323,6 +3328,11 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
         for nose in (0, 4095, 0, 100, 600, 100, 4000, 404, 4000, 100):
             await pet._observe_aux(robot_id, 3, report(5000, nose, 100, 40, fuel_seq=1))
             assert not any(m.kind == "nose_twist" for m in memory.recent(robot_id))
+        replay = report(5000, 1800, 100, 40, fuel_seq=1)
+        replay["angles"]["seq"][0] = state.nose_dial.last_seq
+        await pet._observe_aux(robot_id, 3, replay)
+        assert state.nose_dial.last_angle == 100
+        assert not any(m.kind == "nose_twist" for m in memory.recent(robot_id))
         # Jaw FSR on ADS1115 channel 1 can be fully pressed while channel 0
         # remains at its unchanged belly baseline. This is NOT a human touch.
         jaw_only = report(5000, 100, 100, 40, fuel_seq=1)

@@ -56,6 +56,52 @@ def _aux_boot_epoch(data: dict[str, Any]) -> int | None:
     return None
 
 
+class NoseDialGate:
+    """Interpret only fresh, calibrated nose samples from one WROOM boot."""
+
+    def __init__(self) -> None:
+        self.last_angle: int | None = None
+        self.last_seq: int | None = None
+
+    def invalidate(self) -> None:
+        # A read failure breaks angle continuity, not the anti-replay fence.
+        self.last_angle = None
+
+    def reset(self) -> None:
+        self.invalidate()
+        self.last_seq = None
+
+    def observe(
+        self, angles: dict[str, Any], *, boot_id: int | None,
+        threshold: int | None, request_elapsed_ms: float,
+    ) -> bool:
+        seqs, ages = angles.get("seq"), angles.get("age_ms")
+        # Legacy packets remain raw diagnostics; they cannot generate turns.
+        if (threshold is None or boot_id is None
+                or type(angles.get("boot_id")) is not int or angles["boot_id"] != boot_id
+                or not _array(seqs, 3, lambda n: is_uint(n, 0xffffffff))
+                or not _array(ages, 3, lambda n: is_uint(n, 0xffffffff))):
+            self.invalidate()
+            return False
+        reading = {
+            "valid": bool(angles["valid_mask"] & 1), "seq": seqs[0], "age_ms": ages[0],
+        }
+        if (not _fresh_aux_acquisition(reading, previous_seq=None, max_age_ms=350)
+                or type(request_elapsed_ms) not in (int, float)
+                or not 0 <= request_elapsed_ms < 350
+                or ages[0] + request_elapsed_ms >= 350):
+            self.invalidate()
+            return False
+        if not _fresh_aux_acquisition(reading, previous_seq=self.last_seq, max_age_ms=350):
+            return False
+        previous = self.last_angle
+        self.last_angle, self.last_seq = angles["raw"][0], seqs[0]
+        # The calibrated threshold itself is inside the deadband.
+        return previous is not None and (
+            abs((self.last_angle - previous + 2048) % 4096 - 2048) > threshold
+        )
+
+
 def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("robot_id") != robot_id:
         raise ValueError("Aux sensor identity mismatch")

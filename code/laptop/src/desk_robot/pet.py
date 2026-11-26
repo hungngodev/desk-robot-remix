@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Awaitable, Callable, Literal, Protocol, TypedDict
 
-from .aux import _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
+from .aux import NoseDialGate, _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
@@ -232,7 +232,7 @@ class PetState:
     last_fuel_seq: int | None = None
     low_fuel_streak: int = 0
     recovered_fuel_streak: int = 0
-    last_nose_angle: int | None = None
+    nose_dial: NoseDialGate = field(default_factory=NoseDialGate, repr=False)
     last_force_squeeze: bool | None = None
     last_belly_seq: int | None = None
     last_near_hand: bool | None = None
@@ -563,7 +563,7 @@ class PetController:
         state.dock_charge_indicated = None
         state.session_habituation.reset()
         state.camera_habituation.reset()
-        state.last_nose_angle = None
+        state.nose_dial.reset()
         state.last_force_squeeze = None
         state.last_belly_seq = None
         state.last_near_hand = None
@@ -1220,7 +1220,7 @@ class PetController:
                 state.dock_contact_present = None
                 state.dock_input_good = None
                 state.dock_charge_indicated = None
-                state.last_nose_angle = None
+                state.nose_dial.invalidate()
                 state.last_force_squeeze = None
                 state.last_near_hand = None
                 state.last_gesture_events = None
@@ -1280,7 +1280,7 @@ class PetController:
                 state.last_force_squeeze = None
                 state.last_belly_seq = None
                 state.last_near_hand = None
-                state.last_nose_angle = None
+                state.nose_dial.reset()
         elif state.last_aux_boot_id is not None:
             # Once authenticated epoch evidence exists, never downgrade to
             # legacy epochless packets that could replay the older boot.
@@ -1564,26 +1564,20 @@ class PetController:
             state.low_fuel_streak = 0
             state.recovered_fuel_streak = 0
 
-        angles = data["angles"]
-        if robot.nose_twist_threshold_counts is not None and angles["valid_mask"] & 1:
-            angle = angles["raw"][0]
-            previous = state.last_nose_angle
-            if previous is not None:
-                difference = abs((angle - previous + 2048) % 4096 - 2048)
-                # The calibrated threshold itself is inside the deadband.
-                if difference > robot.nose_twist_threshold_counts:
-                    changes.append(SceneChange(
-                        "nose_twist", "My magnetic nose dial was rotated", 1.0
-                    ))
-            state.last_nose_angle = angle
-        else:
-            state.last_nose_angle = None
+        aux_boot = _aux_boot_epoch(data)
+        if state.nose_dial.observe(
+            data["angles"], boot_id=aux_boot,
+            threshold=robot.nose_twist_threshold_counts,
+            request_elapsed_ms=request_elapsed_ms,
+        ):
+            changes.append(SceneChange(
+                "nose_twist", "My magnetic nose dial was rotated", 1.0
+            ))
 
         force = data["force"]
         belly_valid = force.get("belly_valid", force["valid"])
         belly_seq = force.get("belly_seq")
         belly_age = force.get("belly_age_ms")
-        aux_boot = _aux_boot_epoch(data)
         belly_fresh = (
             belly_age is None
             or (type(belly_age) is int and type(request_elapsed_ms) in (int, float)
