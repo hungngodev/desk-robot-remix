@@ -295,9 +295,9 @@ async def test_jaw_cli_refuses_unusable_grasp_geometry_before_sampling(
 @pytest.mark.parametrize("sign", [1, -1])
 def test_representative_contact_must_fit_below_conservative_stop(sign):
     samples = {
-        "free": [(100, i + 1) for i in range(8)],
-        "contact": [(100 + sign * 2000, i + 9) for i in range(8)],
-        "upper": [(100 + sign * 2150, i + 17) for i in range(8)],
+        "free": [(5000, i + 1) for i in range(8)],
+        "contact": [(5000 + sign * 2000, i + 9) for i in range(8)],
+        "upper": [(5000 + sign * 2150, i + 17) for i in range(8)],
     }
     # The 80% ceiling is 1720, below the observed 2000 contact delta.
     with pytest.raises(ValueError, match="Representative contact"):
