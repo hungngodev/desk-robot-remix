@@ -190,6 +190,11 @@ class MemoryStore:
         # identifiers must not silently share one physical SQLite filename.
         if not valid_unique_robot_ids(robot_ids):
             raise ValueError("Duplicate robot memory identities are not allowed")
+        self._protect_memory_root()
+        for robot in sorted(self.robot_ids):
+            self._initialize_database(robot)
+
+    def _protect_memory_root(self) -> None:
         # An ancestor alias bypasses a check of the final directory alone.
         # Refuse it BEFORE mkdir can create private records in another tree.
         validate_private_directory_ancestry(self.root)
@@ -205,27 +210,35 @@ class MemoryStore:
             raise PermissionError("Cannot protect private robot memory root") from exc
         if self.root.stat().st_mode & 0o077:
             raise PermissionError("Robot memory root is accessible to other users")
-        for robot in sorted(self.robot_ids):
-            with self._connect(robot, initializing=True) as db:
-                # Serialize schema inspection, DDL, triggers and FTS rebuild.
-                # Otherwise competing initializers can both attempt ALTER TABLE.
-                db.execute("BEGIN IMMEDIATE")
-                # A deny-only safety budget, separate from recallable memories.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS dock_retry_budget (
+
+    def _initialize_database(self, robot: str) -> None:
+        with self._connect(robot, initializing=True) as db:
+            # Serialize schema inspection, DDL, triggers and FTS rebuild.
+            # Otherwise competing initializers can both attempt ALTER TABLE.
+            db.execute("BEGIN IMMEDIATE")
+            self._initialize_episode_tables(db, robot)
+            self._initialize_provenance_tables(db)
+            self._initialize_deletion_fence(db)
+            self._initialize_mutation_tables(db)
+            self._initialize_search_index(db)
+
+    def _initialize_episode_tables(self, db: sqlite3.Connection, robot: str) -> None:
+        # A deny-only safety budget, separate from recallable memories.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS dock_retry_budget (
                          singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                          attempted INTEGER NOT NULL CHECK(attempted IN (0,1)),
                          boot_id INTEGER NOT NULL,
                          fuel_seq INTEGER NOT NULL
                        )"""
-                )
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS dock_retry_retired_boots (
+        )
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS dock_retry_retired_boots (
                          boot_id INTEGER PRIMARY KEY
                        )"""
-                )
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS memories (
+        )
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS memories (
                          event_id TEXT PRIMARY KEY,
                          source_robot TEXT NOT NULL,
                          witnessed INTEGER NOT NULL CHECK(witnessed IN (0,1)),
@@ -235,16 +248,19 @@ class MemoryStore:
                          confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
                          relay_token TEXT
                        )"""
-                )
-                self._bind_database_identity(db, robot)
-                # Older private databases lack this nullable internal receipt.
-                if "relay_token" not in {
-                    row[1] for row in db.execute("PRAGMA table_info(memories)")
-                }:
-                    db.execute("ALTER TABLE memories ADD COLUMN relay_token TEXT")
-                # One private sidecar per robot, no JPEG or PCM stored.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS camera_provenance (
+        )
+        self._bind_database_identity(db, robot)
+        # Older private databases lack this nullable internal receipt.
+        if "relay_token" not in {
+            row[1] for row in db.execute("PRAGMA table_info(memories)")
+        }:
+            db.execute("ALTER TABLE memories ADD COLUMN relay_token TEXT")
+
+    @staticmethod
+    def _initialize_provenance_tables(db: sqlite3.Connection) -> None:
+        # One private sidecar per robot, no JPEG or PCM stored.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS camera_provenance (
                          event_id TEXT PRIMARY KEY,
                          mac_received_at REAL NOT NULL,
                          interpreted_at REAL NOT NULL,
@@ -252,11 +268,11 @@ class MemoryStore:
                          device_frame INTEGER,
                          device_complete_us TEXT
                        )"""
-                )
-                # Spatial metadata shares this pet's existing private DB and
-                # episode lifecycle. Never store a raw JPEG or voice sample.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS spatial_observations (
+        )
+        # Spatial metadata shares this pet's existing private DB and
+        # episode lifecycle. Never store a raw JPEG or voice sample.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS spatial_observations (
                          event_id TEXT PRIMARY KEY,
                          object_key TEXT NOT NULL,
                          observed_at REAL NOT NULL,
@@ -276,126 +292,142 @@ class MemoryStore:
                          anchor_id TEXT,
                          UNIQUE(object_key,camera_boot,camera_seq,camera_complete_us)
                        )"""
-                )
-                db.execute(
-                    """CREATE INDEX IF NOT EXISTS spatial_object_latest
+        )
+        db.execute(
+            """CREATE INDEX IF NOT EXISTS spatial_object_latest
                        ON spatial_observations(object_key,observed_at DESC,event_id DESC)"""
-                )
-                # The legacy-named replay fence contains only the event ID,
-                # never private episode text. Corrections also fence replay
-                # after ordinary retention eventually removes the edited row.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
+        )
+
+    @staticmethod
+    def _initialize_deletion_fence(db: sqlite3.Connection) -> None:
+        # The legacy-named replay fence contains only the event ID,
+        # never private episode text. Corrections also fence replay
+        # after ordinary retention eventually removes the edited row.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
                          event_id TEXT PRIMARY KEY
                        )"""
-                )
-                # Saturation cannot evict a tombstone: that would allow
-                # delayed canceled audio or camera callbacks to resurrect an
-                # explicitly deleted memory. Persist one per-pet write seal.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS deletion_fence_guard (
+        )
+        # Saturation cannot evict a tombstone: that would allow
+        # delayed canceled audio or camera callbacks to resurrect an
+        # explicitly deleted memory. Persist one per-pet write seal.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS deletion_fence_guard (
                          singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                          writes_sealed INTEGER NOT NULL
                              CHECK(writes_sealed IN (0,1))
                        )"""
-                )
-                db.execute(
-                    "INSERT OR IGNORE INTO deletion_fence_guard "
-                    "(singleton,writes_sealed) VALUES (1,0)"
-                )
-                # Legacy databases may already contain more deletions than
-                # the current budget. Their next episode write must NOT get
-                # an accidental new lease just because this schema is new.
-                db.execute(
-                    """UPDATE deletion_fence_guard SET writes_sealed=1
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO deletion_fence_guard "
+            "(singleton,writes_sealed) VALUES (1,0)"
+        )
+        # Legacy databases may already contain more deletions than
+        # the current budget. Their next episode write must NOT get
+        # an accidental new lease just because this schema is new.
+        db.execute(
+            """UPDATE deletion_fence_guard SET writes_sealed=1
                        WHERE singleton=1 AND
                          (SELECT COUNT(*) FROM deleted_episode_ids) >= ?""",
-                    (_MAX_DELETED_EPISODE_IDS,),
-                )
-                # Operator-curated core identity/preferences are distinct
-                # from automatic sensor episodes. Like Letta core memory,
-                # a tiny stable block survives the 250-event rolling buffer.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS core_facts (
+            (_MAX_DELETED_EPISODE_IDS,),
+        )
+
+    @staticmethod
+    def _initialize_mutation_tables(db: sqlite3.Connection) -> None:
+        # Operator-curated core identity/preferences are distinct
+        # from automatic sensor episodes. Like Letta core memory,
+        # a tiny stable block survives the 250-event rolling buffer.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS core_facts (
                          slot TEXT PRIMARY KEY,
                          value TEXT NOT NULL,
                          updated_at REAL NOT NULL
                        )"""
-                )
-                # Durable request-order tombstones remain after a deletion.
-                # Neither the slot token nor its revision stores private text.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS core_fact_mutations (
+        )
+        # Durable request-order tombstones remain after a deletion.
+        # Neither the slot token nor its revision stores private text.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS core_fact_mutations (
                          slot TEXT PRIMARY KEY,
                          generation INTEGER NOT NULL CHECK(generation > 0)
                        )"""
-                )
-                # Request ordering persists across async workers and Mac
-                # restarts. Only bounded event IDs, never private text, live
-                # here; an older correction cannot outlive a newer deletion.
-                db.execute(
-                    """CREATE TABLE IF NOT EXISTS episode_mutations (
+        )
+        # Request ordering persists across async workers and Mac
+        # restarts. Only bounded event IDs, never private text, live
+        # here; an older correction cannot outlive a newer deletion.
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS episode_mutations (
                          event_id TEXT PRIMARY KEY,
                          generation INTEGER NOT NULL CHECK(generation > 0)
                        )"""
-                )
-                # SQLite FTS5 is built in and zero-dependency. An external
-                # content index avoids storing a second copy of text and
-                # preserves the existing per-pet provenance source of truth.
-                db.execute(
-                    """CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+        )
+
+    def _initialize_search_index(self, db: sqlite3.Connection) -> None:
+        # SQLite FTS5 is built in and zero-dependency. An external
+        # content index avoids storing a second copy of text and
+        # preserves the existing per-pet provenance source of truth.
+        db.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
                        USING fts5(summary, kind, content='memories',
                                   content_rowid='rowid',
                                   tokenize='porter unicode61')"""
-                )
-                # executescript implicitly commits pending transactions.
-                # Execute each complete trigger within the same migration lease.
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS spatial_observations_delete
+        )
+        self._initialize_provenance_triggers(db)
+        self._initialize_search_triggers(db)
+        # At most 250 rows per robot. Rebuild once per store start
+        # so an interrupted migration cannot leave a present but
+        # incomplete index, without touching original episode rows.
+        db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+
+    @staticmethod
+    def _initialize_provenance_triggers(db: sqlite3.Connection) -> None:
+        # executescript implicitly commits pending transactions.
+        # Execute each complete trigger within the same migration lease.
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS spatial_observations_delete
                        AFTER DELETE ON memories BEGIN
                           DELETE FROM spatial_observations WHERE event_id=old.event_id;
                        END;"""
-                )
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS spatial_observations_correction
+        )
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS spatial_observations_correction
                        AFTER UPDATE OF summary ON memories
                        WHEN new.summary <> old.summary BEGIN
                           DELETE FROM spatial_observations WHERE event_id=old.event_id;
                        END;"""
-                )
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
+        )
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
                        AFTER DELETE ON memories BEGIN
                          DELETE FROM camera_provenance WHERE event_id=old.event_id;
                        END;"""
-                )
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS memories_fts_insert
+        )
+
+    @staticmethod
+    def _initialize_search_triggers(db: sqlite3.Connection) -> None:
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS memories_fts_insert
                        AFTER INSERT ON memories BEGIN
                          INSERT INTO memories_fts(rowid,summary,kind)
                          VALUES (new.rowid,new.summary,new.kind);
                        END;"""
-                )
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS memories_fts_delete
+        )
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS memories_fts_delete
                        AFTER DELETE ON memories BEGIN
                          INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
                          VALUES ('delete',old.rowid,old.summary,old.kind);
                        END;"""
-                )
-                db.execute(
-                    """CREATE TRIGGER IF NOT EXISTS memories_fts_update
+        )
+        db.execute(
+            """CREATE TRIGGER IF NOT EXISTS memories_fts_update
                        AFTER UPDATE ON memories BEGIN
                          INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
                          VALUES ('delete',old.rowid,old.summary,old.kind);
                          INSERT INTO memories_fts(rowid,summary,kind)
                          VALUES (new.rowid,new.summary,new.kind);
                        END;"""
-                )
-                # At most 250 rows per robot. Rebuild once per store start
-                # so an interrupted migration cannot leave a present but
-                # incomplete index, without touching original episode rows.
-                db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
+        )
 
     @staticmethod
     def _bind_database_identity(db: sqlite3.Connection, robot_id: str) -> None:

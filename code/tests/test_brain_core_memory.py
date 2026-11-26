@@ -552,3 +552,41 @@ def test_sqlite_existing_wal_reader_retains_committed_snapshot(tmp_path):
         assert reader.execute("SELECT value FROM core_facts").fetchone() == ("chess",)
     with store._connect("pet1") as db:
         assert db.execute("SELECT value FROM core_facts").fetchone() == ("checkers",)
+
+
+def test_initialization_keeps_legacy_write_seal_private_and_durable(tmp_path, monkeypatch):
+    import sqlite3
+    from contextlib import closing
+
+    import desk_robot.memory as memory_module
+
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 2)
+    path = tmp_path / "pet1.sqlite3"
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("CREATE TABLE deleted_episode_ids (event_id TEXT PRIMARY KEY)")
+        db.executemany("INSERT INTO deleted_episode_ids VALUES (?)", [("one",), ("two",)])
+
+    for _ in range(2):
+        store = MemoryStore(tmp_path, ["pet1", "pet2"])
+        with store._connect("pet1") as db:
+            assert db.execute("SELECT writes_sealed FROM deletion_fence_guard").fetchone() == (1,)
+            assert db.execute("SELECT COUNT(*) FROM deleted_episode_ids").fetchone() == (2,)
+        with store._connect("pet2") as db:
+            assert db.execute("SELECT writes_sealed FROM deletion_fence_guard").fetchone() == (0,)
+
+
+def test_initialization_preserves_identity_rejection_without_partial_schema(tmp_path):
+    import sqlite3
+    from contextlib import closing
+
+    path = tmp_path / "pet1.sqlite3"
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("CREATE TABLE memory_identity (singleton INTEGER PRIMARY KEY, robot_id TEXT)")
+        db.execute("INSERT INTO memory_identity VALUES (1, 'pet2')")
+    with pytest.raises(ValueError, match="^Private memory database identity mismatch$"):
+        MemoryStore(tmp_path, ["pet1"])
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() == [
+            ("memory_identity",),
+        ]
+        assert db.execute("SELECT robot_id FROM memory_identity").fetchone() == ("pet2",)
