@@ -337,8 +337,83 @@ static void check_sht_crc_provenance() {
     active = nullptr;
   }
 }
+
+static void check_address_scoped_wire_faults() {
+  TwoWire wire;
+  wire.next_transfer_nack_address = 0x70;
+  CHECK(wire.requestFrom(0x71, 1) == 1);
+  CHECK(wire.next_transfer_nack_address == 0x70);
+  CHECK(wire.requestFrom(0x70, 1) == 0);
+  CHECK(wire.available() == 0 && wire.read() == -1);
+  CHECK(wire.next_transfer_nack_address == -1);
+  CHECK(wire.requestFrom(0x70, 1) == 1);
+
+  wire.extras = 1;
+  wire.cap_main_control = 0x81;
+  wire.next_short_write_address = 0x28;
+  wire.next_short_write_after = 1;
+  wire.beginTransmission(0x28);
+  CHECK(wire.write(0x00) == 1);
+  CHECK(wire.write(0x80) == 0 && wire.write(0x80) == 0);
+  CHECK(wire.endTransmission(true) == 0); // Accepted prefix may still ACK.
+  CHECK(wire.cap_main_control == 0x81 && wire.cap_interrupt_clears == 0);
+  CHECK(wire.next_short_write_address == -1);
+  wire.beginTransmission(0x28);
+  CHECK(wire.write(0x00) == 1 && wire.write(0x80) == 1);
+  CHECK(wire.endTransmission(true) == 0 && wire.cap_interrupt_clears == 1);
+}
+
+// A failed CAP1188 interrupt clear or read must not publish a false release.
+static void check_cap_transport_faults() {
+  for (bool preferred : {false, true}) {
+    for (unsigned fault = 0; fault < 5; ++fault) {
+      TwoWire wire;
+      wire.cap_uses_0x29 = preferred;
+      const int address = preferred ? 0x29 : 0x28;
+      desk_robot::ExpansionTouch touch;
+      CHECK(touch.begin(wire));
+      std::uint8_t zones = 0;
+      CHECK(touch.poll(100, zones) && zones == 0xA5);
+      wire.cap_touch_bits = 0;
+      wire.cap_main_control = 0x81;
+      const auto clears = wire.cap_interrupt_clears;
+      const auto start = fake_arduino_millis();
+      switch (fault) {
+        case 0:
+          wire.next_short_write_address = address;
+          wire.next_short_write_after = 1;
+          break;
+        case 1: wire.next_transfer_nack_address = address; break;
+        case 2: wire.next_read_timeout_address = address; break;
+        case 3: wire.next_stop_timeout_address = address; break;
+        case 4: wire.next_read_nack_address = 0x70; break;
+      }
+      CHECK(!touch.poll(180, zones));
+      CHECK(!touch.verified() && zones == 0xA5);
+      CHECK(wire.cap_interrupt_clears == clears);
+      CHECK(wire.cap_main_control == 0x81);
+      CHECK(wire.next_short_write_address == -1);
+      CHECK(wire.next_transfer_nack_address == -1);
+      CHECK(wire.next_read_timeout_address == -1);
+      CHECK(wire.next_stop_timeout_address == -1);
+      CHECK(wire.next_read_nack_address == -1);
+      CHECK(fake_arduino_millis() - start ==
+            ((fault == 2 || fault == 3) ? wire.timeout_ms : 0U));
+      CHECK(!wire.repeated_start_pending);
+      CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+      for (unsigned step = 0; step < 7; ++step)
+        CHECK(!touch.poll(430 + step * 250, zones) && zones == 0xA5);
+      CHECK(touch.verified());
+      CHECK(touch.poll(2010, zones) && zones == 0U);
+      CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    }
+  }
+}
+
 int main() {
   try {
+    check_address_scoped_wire_faults();
+    check_cap_transport_faults();
     check_sht_crc_provenance();
     check_mux_write_boundary();
     check_empty_accessory_mux();

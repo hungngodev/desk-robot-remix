@@ -162,7 +162,17 @@ class TwoWire {
   // Arduino-ESP32 maps ESP_FAIL (address or data NACK) to status 2.
   // Inject before device side effects; real peripherals may accept a prefix.
   int next_transfer_nack_address = -1;
+  // Read-phase NACK independent of an earlier successful mux/control write.
+  int next_read_nack_address = -1;
+  // Simulate an exhausted Wire TX buffer after N accepted bytes.
+  // Rejection stays active until the next beginTransmission, but the
+  // accepted prefix can still reach the device when the driver sends STOP.
+  int next_short_write_address = -1;
+  std::size_t next_short_write_after = 0;
+  bool short_write_active = false;
   bool repeated_start_pending = false;
+  // ESP-IDF v4.4.7 also reports arbitration loss as I2C_STATUS_TIMEOUT.
+  // Model the bounded Wire-visible failure, not physical arbitration timing.
   int next_stop_timeout_address = -1;
   int next_read_timeout_address = -1;
   // One-shot elapsed time for a successful ToF result transfer.
@@ -178,10 +188,17 @@ class TwoWire {
       ++imu_probe_attempts;
     current_address = addr;
     outbound.clear();
+    short_write_active = false;
     // Arduino-ESP32 clears an abandoned same-task repeated START here.
     repeated_start_pending = false;
   }
   std::size_t write(std::uint8_t v) {
+    if (current_address == next_short_write_address &&
+        outbound.size() == next_short_write_after) {
+      next_short_write_address = -1;
+      short_write_active = true;
+    }
+    if (short_write_active) return 0;
     if (fail_tof_register_write && current_address == 0x29 &&
         ranges != 0 && extras == 0) {
       ++rejected_tof_register_writes;
@@ -383,6 +400,14 @@ class TwoWire {
     if (addr == next_read_timeout_address) {
       next_read_timeout_address = -1;
       fake_arduino_millis() += timeout_ms;
+      return 0;
+    }
+    if (addr == next_read_nack_address) {
+      next_read_nack_address = -1;
+      return 0;
+    }
+    if (!deferred && addr == next_transfer_nack_address) {
+      next_transfer_nack_address = -1;
       return 0;
     }
     if (deferred) {
