@@ -463,7 +463,8 @@ static void check_bmp280_zero_divisor() {
   words[0] = 1; words[6] = 0;
   CHECK(!desk_robot::bmp280_trim(words, decoded));
   words[6] = 1;
-  CHECK(!desk_robot::bmp280_trim(words, decoded));
+  CHECK(desk_robot::bmp280_trim(words, decoded));
+  CHECK(decoded.t1 == 1 && decoded.p1 == 1 && decoded.t2 == 0);
   // Nonzero P1 is insufficient: these coefficients produce fine=-920576,
   // a=-524288, then a pressure divisor of exactly zero.
   d = {};
@@ -496,12 +497,10 @@ static void check_bmp280_trim_registers() {
   check_preserved();
   CHECK(!desk_robot::bmp280_trim(nullptr, decoded));
   check_preserved();
-  for (unsigned i = 0; i < 12; ++i) {
-    for (const auto rail : {0U, 255U}) {
-      words[2 * i] = words[2 * i + 1] = static_cast<std::uint8_t>(rail);
-      CHECK(!desk_robot::bmp280_trim(words, decoded));
-      check_preserved();
-    }
+  for (const auto i : {0U, 3U}) {
+    words[2 * i] = words[2 * i + 1] = 0;
+    CHECK(!desk_robot::bmp280_trim(words, decoded));
+    check_preserved();
     words[2 * i] = static_cast<std::uint8_t>(values[i]);
     words[2 * i + 1] = static_cast<std::uint8_t>(values[i] >> 8);
   }
@@ -518,6 +517,8 @@ int main() {
     check_register_precision();
     check_bmp280_register_rails();
     check_bmp280_mixed_coefficient_rails();
+    check_bmp280_signed_trim_words();
+    check_bmp280_invalid_blocks();
     check_bmp280_boundaries();
     check_bmp280_zero_divisor();
     check_bmp280_trim_registers();

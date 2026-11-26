@@ -22,13 +22,15 @@ inline std::int16_t bmp_s16(const std::uint8_t* v) {
 }
 inline bool bmp280_trim(const std::uint8_t* b, Bmp280Trim& out) {
   if (!b) return false;
-  // Conservative project NVM policy, not a Bosch guarantee: reject erased
-  // or zero 16-bit words before modifying the previously accepted trim.
-  // Individual zero bytes and other negative signed coefficients are valid.
-  for (unsigned i = 0; i < 24; i += 2) {
-    const auto word = bmp_u16(b + i);
-    if (word == 0U || word == 0xffffU) return false;
+  // DS001 rev 1.26 table 17: zero and -1 are legal signed encodings.
+  // Reject zero unsigned anchors (existing compensation policy) and an
+  // entirely erased block, not individual 0xffff words.
+  if (!bmp_u16(b) || !bmp_u16(b + 6)) return false;
+  bool erased = true;
+  for (unsigned i = 0; i < 24; ++i) {
+    if (b[i] != 0xffU) erased = false;
   }
+  if (erased) return false;
   out.t1 = bmp_u16(b);
   out.t2 = bmp_s16(b + 2);
   out.t3 = bmp_s16(b + 4);
