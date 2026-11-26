@@ -2188,3 +2188,103 @@ async def test_reconnect_preserves_same_turn_but_fences_missed_turn(
     )
     assert starts == (["p"] if new_turn else [])
     assert calls.count("group_stop") == (2 if new_turn else 1)
+
+
+@pytest.mark.parametrize("lock_name", ["session_lock", "speaker_lock"])
+@pytest.mark.parametrize("with_caller_permission", [False, True])
+async def test_p1_barge_in_invalidates_proactive_waiting_for_audio_lock(
+    settings, lock_name, with_caller_permission,
+):
+    """An old optional remark cannot cross STOP even with a permissive caller."""
+    robot = settings.robot("robot-01")
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+
+    class ObservedLock(asyncio.Lock):
+        def __init__(self):
+            super().__init__()
+            self.waiting = asyncio.Event()
+
+        async def acquire(self):
+            if self.locked():
+                self.waiting.set()
+            return await super().acquire()
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            settings.robot(robot_id)
+
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    lock = ObservedLock()
+    setattr(conversation, lock_name, lock)
+    queued = None
+    try:
+        async with lock:
+            queued = asyncio.create_task(conversation.say_proactive(
+                robot, "Stale optional line",
+                permission_check=(lambda: True) if with_caller_permission else None,
+            ))
+            await asyncio.wait_for(lock.waiting.wait(), timeout=1)
+            assert not queued.done()
+            await asyncio.wait_for(
+                runtime._on_voice_interrupt(robot.id, "speech_start"), timeout=1,
+            )
+            assert conversation.stop_generation == 1
+            assert not speaker.spoken
+        assert await asyncio.wait_for(queued, timeout=1) is False
+        assert not speaker.spoken
+        await runtime._on_voice_interrupt(robot.id, "speech_end")
+        assert await conversation.say_proactive(robot, "Fresh optional line")
+        assert speaker.spoken == [(robot.id, "Fresh optional line")]
+    finally:
+        if queued is not None and not queued.done():
+            queued.cancel()
+            await asyncio.gather(queued, return_exceptions=True)
+
+
+async def test_p1_barge_in_drops_late_peer_reply(settings):
+    """Even a model returning after cancellation cannot relay another peer turn."""
+    ids = ["robot-01", "robot-02"]
+    speaker = SimulatedSpeaker()
+
+    class LatePeerChat:
+        def __init__(self):
+            self.second_turn = asyncio.Event()
+            self.calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            if self.calls == 1:
+                return "I saw the candy."
+            assert any("I saw the candy." in item["content"] for item in history)
+            self.second_turn.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                return "Obsolete peer response."
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            settings.robot(robot_id)
+
+    chat = LatePeerChat()
+    conversation = Conversation(settings, chat, speaker)
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    group = asyncio.create_task(conversation.run(
+        ids, "Talk about the candy", 2,
+        origin="autonomous_social", permission_check=lambda: True,
+    ))
+    try:
+        await asyncio.wait_for(chat.second_turn.wait(), timeout=1)
+        assert speaker.spoken == [(ids[0], "I saw the candy.")]
+        await asyncio.wait_for(
+            runtime._on_voice_interrupt(ids[0], "speech_start"), timeout=1,
+        )
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await asyncio.wait_for(group, timeout=1)
+        assert conversation.active is None
+        assert speaker.spoken == [(ids[0], "I saw the candy.")]
+    finally:
+        if not group.done():
+            group.cancel()
+        await asyncio.gather(group, return_exceptions=True)

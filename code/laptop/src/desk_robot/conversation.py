@@ -1472,10 +1472,13 @@ class Conversation:
         if type(deliberate) is not bool:
             raise ValueError("Deliberate interaction flag must be boolean")
         caller_permission = permission_check
+        # A STOP retires optional speech admitted before the speaker lease wait.
+        stop_generation = self.stop_generation
 
         def permitted() -> bool:
             return (
-                not quiet_hours_active(self.settings.pet_quiet_hours)
+                self.stop_generation == stop_generation
+                and not quiet_hours_active(self.settings.pet_quiet_hours)
                 and (caller_permission is None or caller_permission())
             )
 
