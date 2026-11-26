@@ -817,3 +817,48 @@ def test_voice_recall_rejects_peer_consent_revoked_during_sqlite_read(
         )
         assert result.status_code == 403
         assert "Peer silver key secret" not in result.text
+
+
+def test_duplicate_recall_terms_do_not_change_fts_matches_or_scores():
+    from desk_robot.memory import _fts_query
+
+    with sqlite3.connect(":memory:") as db:
+        db.execute("CREATE VIRTUAL TABLE notes USING fts5(summary, tokenize='porter unicode61')")
+        db.executemany(
+            "INSERT INTO notes(summary) VALUES (?)",
+            [("silver key",), ("silver spoon",), ("key ring",), ("notebook",)] * 62
+            + [("silver key",), ("notebook",)],
+        )
+
+        def matches(query):
+            return db.execute(
+                "SELECT rowid, bm25(notes) FROM notes WHERE notes MATCH ? ORDER BY rowid",
+                (_fts_query(query),),
+            ).fetchall()
+
+        expected = matches("silver key")
+        assert len(expected) == 187
+        for query in ("silver key silver key", "SILVER silver KEY key"):
+            assert matches(query) == expected
+        for query in ("what is there", "Do you remember?", "???"):
+            assert _fts_query(query) == ""
+
+
+def test_full_recall_candidate_ranking_is_stable_across_row_order():
+    from desk_robot.memory import _rank_search_rows
+
+    now = 1_700_000_000.0
+    rows = [
+        (f"note{i:03}", "robot-01", 1, "object", "silver key", now - 60, 0.8, -1e-6)
+        for i in range(248)
+    ]
+    rows.extend([
+        ("note248", "robot-02", 0, "object", "silver key", now - 60, 0.8, -1e-6),
+        ("note249", "robot-01", 1, "object", "silver key", now - 86400, 0.1, -0.25),
+    ])
+    expected = ["note249", *(f"note{i:03}" for i in range(247, 236, -1))]
+    for candidates in (rows, rows[::-1], rows[::2] + rows[1::2]):
+        for limit in (1, 6, 12):
+            result = _rank_search_rows("robot-01", candidates, now=now, limit=limit)
+            assert [item.event_id for item in result] == expected[:limit]
+    assert _rank_search_rows("robot-01", [], now=now, limit=12) == []

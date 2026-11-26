@@ -2308,3 +2308,43 @@ async def test_proactive_quoted_evidence_across_untrusted_sources(settings, kind
     assert evidence["historical_context"] == context.recent
     assert evidence["operator_curated_preferences"] == context.core
     assert evidence["interaction_cues"] == context.interaction
+
+
+def test_full_memory_budget_preserves_topical_recall_despite_duplicate_records(monkeypatch):
+    from desk_robot import brain_context
+
+    now = 1_700_000_000.0
+    monkeypatch.setattr(brain_context, "time", SimpleNamespace(time=lambda: now))
+    records = [
+        Memory(
+            "robot-01", f"episode{i:03}", "robot-01", True, "object",
+            f"item number {i:03} " + "x" * 200, now - 300 + i, 0.9,
+        )
+        for i in range(250)
+    ]
+    facts = [
+        CoreFact("robot-01", f"pref{i:03}", f"value{i:03} " + "y" * 150, now - 300 + i)
+        for i in range(250)
+    ]
+    topical = records[0].event_id
+    expected_recent = brain_context._recent_memory_context(records, topical)
+    expected_core = brain_context._core_memory_context(facts)
+    duplicate_records = [*records, records[0], *records[-6:]]
+    duplicate_facts = [*facts, *facts[-6:]]
+    for recent, core in (
+        (duplicate_records, duplicate_facts),
+        (duplicate_records[::-1], duplicate_facts[::-1]),
+    ):
+        assert brain_context._recent_memory_context(recent, topical) == expected_recent
+        assert brain_context._core_memory_context(core) == expected_core
+    assert expected_recent.count("item number 000") == 1
+    assert expected_recent.count("item number 249") == 1
+    assert "item number 001" not in expected_recent
+    assert expected_core.count("pref249: value249") == 1
+    assert "pref000: value000" not in expected_core
+    assert len(expected_recent) <= 600
+    assert len(expected_core) <= 500
+    assert expected_recent.count("My camera model suggested") <= 6
+    assert len(expected_core.split("; ")) <= 6
+    assert brain_context._recent_memory_context([], None) == ""
+    assert brain_context._core_memory_context([]) == ""
