@@ -2152,6 +2152,7 @@ def test_sense_pcm_window_native_cpp_regression():
         exe = Path(directory) / "sense_pcm_window_test"
         subprocess.run(
             [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             *test_overlay.native_cpp_sanitizer_flags(),
              "-I", str(HEAD / "sense"),
              str(HEAD / "tests/sense_pcm_window_test.cc"),
              "-o", str(exe)],
