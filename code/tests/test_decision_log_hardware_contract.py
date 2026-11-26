@@ -1,5 +1,6 @@
 """Keep active architecture decisions aligned with source, not physical acceptance."""
 from pathlib import Path
+from runpy import run_path
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -50,3 +51,38 @@ def test_dc_coast_is_not_braking_or_qualified_cutoff():
     assert "LOW/LOW coast" in row
     assert "not active braking or proof of physical stopping" in row
     assert "cutoff and loaded stop remain unqualified" in row
+
+
+def test_procurement_decision_preserves_budget_and_owned_exception():
+    assert decision("| Procurement policy ") == (
+        "| Procurement policy (current) | No new Adafruit hardware purchases. "
+        "Reported owned hardware may be reused only after qualification; "
+        "driver references are not purchases. The $50 first-unit delivered cap "
+        "includes prior spending, shipping, tax, its dock and the shared station. |"
+    )
+    policy = run_path(str(ROOT / "code/scripts/procurement_policy.py"))
+    blocked = policy["adafruit_new_hardware"]
+    assert blocked({"brand": "Adafruit"}, 1) is True
+    assert blocked({"brand": "Adafruit"}, 0) is False
+    assert blocked({"brand": "Generic"}, 1) is False
+    assert "PROTOTYPE_CAP_CENTS = 5000" in read("code/scripts/landed_cost.py").splitlines()
+
+
+def test_voice_decision_preserves_priority_and_acoustic_gate():
+    assert decision("| Voice priority ") == (
+        "| Voice priority (current) | Xiaozhi and the XIAO ESP32S3 Sense retain "
+        "one physical microphone/speaker path. P0 physical fault > P1 human VAD > "
+        "P2 current tool completion > P3 optional initiative. A2 requires 19/20 "
+        "audible stops within 500 ms; physical qualification remains HOLD. |"
+    )
+    source = " ".join(read("docs/source-map.md").split())
+    assert "P0 physical fault > P1 human VAD > P2 current tool completion > P3" in source
+    pins = read("code/firmware/head/sense/config.h").splitlines()
+    for pin in (
+        "AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42",
+        "AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41",
+        "AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_4",
+        "AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_7",
+        "AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8",
+    ):
+        assert f"#define {pin}" in pins
