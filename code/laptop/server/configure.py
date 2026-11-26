@@ -43,7 +43,7 @@ def enable_streaming_voice(config: dict, env: dict[str, str]) -> dict:
         "sample_rate": 16000,
         "disfluency_removal_enabled": False,
         "semantic_punctuation_enabled": False,
-        "max_sentence_silence": 200,
+        "max_sentence_silence": 800,
         "multi_threshold_mode_enabled": False,
         "punctuation_prediction_enabled": True,
         "inverse_text_normalization_enabled": True,

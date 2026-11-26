@@ -17,6 +17,14 @@ selected_module:
   TTS: CustomTTS
   Memory: nomem
   Intent: function_call
+# Silence endpointing is independent of speech-onset/barge-in detection.
+VAD:
+  SileroVAD:
+    type: silero
+    threshold: 0.5
+    threshold_low: 0.3
+    model_dir: models/snakers4_silero-vad
+    min_silence_duration_ms: 800
 LLM:
   OllamaLLM:
     type: ollama
