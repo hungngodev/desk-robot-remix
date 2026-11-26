@@ -145,3 +145,112 @@ def test_runtime_only_ci_imports_exact_source_inventory(tmp_path, fault):
         assert "extra=['desk_robot.stale']" in result.stderr
     else:
         assert "broken import" in result.stderr
+
+
+# These standalone commands explicitly use an extra, not the wheel's base runtime.
+_SCRIPT_EXTRAS = {
+    "calibrate_dock_camera.py": ("vision", "opencv-python"),
+    "generate_dock_tag.py": ("vision", "opencv-python"),
+    "serial_bench.py": ("room", "pyserial"),
+    "omni_duplex_smoke.py": ("dev", "aiohttp"),
+}
+
+# Blender supplies its own interpreter. Xiaozhi supplies core/plugins_func and
+# opuslib_next (pinned upstream requirements.txt); install_overlay.py generates
+# desk_robot_omni_wire. audioop is part of the server's Python 3.11 runtime.
+_EXTERNAL_MODULES = {
+    "scripts/render_product_concept.py": {"bpy", "mathutils"},
+    "laptop/server/overlay/desk_robot_bridge.py": {"core", "plugins_func"},
+    "laptop/server/overlay/desk_robot_native_omni.py": {
+        "audioop", "desk_robot_omni_wire", "opuslib_next", "plugins_func",
+    },
+    "laptop/server/overlay/desk_robot_tools.py": {"desk_robot_omni_wire", "plugins_func"},
+}
+
+
+def _surface_imports(source, *, path, local, project):
+    required = _names(project["dependencies"])
+    extras = project["optional-dependencies"]
+    if path.startswith("scripts/"):
+        extra = _SCRIPT_EXTRAS.get(path.removeprefix("scripts/"))
+        if extra:
+            group, distribution = extra
+            required |= _names(extras[group]) & {distribution}
+    elif path in {
+        "laptop/server/overlay/desk_robot_bridge.py",
+        "laptop/server/overlay/desk_robot_native_omni.py",
+    }:
+        # The pinned server provides aiohttp; host overlay tests need the dev extra.
+        required |= _names(extras["dev"]) & {"aiohttp"}
+    return _imports(
+        source,
+        local=local | {"desk_robot"} | _EXTERNAL_MODULES.get(path, set()),
+        required=required,
+        optional=set(),
+    )
+
+
+def test_script_and_overlay_imports_match_dependency_owners():
+    code = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((code / "pyproject.toml").read_text())["project"]
+    errors = []
+    for root in (code / "scripts", code / "laptop/server/overlay"):
+        paths = sorted(root.rglob("*.py"))
+        assert paths, f"No Python sources under {root}"
+        for path in paths:
+            relative = path.relative_to(code).as_posix()
+            local = {sibling.stem for sibling in path.parent.glob("*.py")}
+            errors.extend(
+                f"{relative}:{error}"
+                for error in _surface_imports(
+                    path.read_text(), path=relative, local=local, project=project
+                )
+            )
+    assert not errors, "Undeclared script or overlay imports:\n" + "\n".join(errors)
+
+
+@pytest.mark.parametrize(
+    ("path", "source", "expected"),
+    [
+        ("scripts/serial_bench.py", "import serial", []),
+        ("scripts/generate_dock_tag.py", "import cv2", []),
+        ("scripts/omni_duplex_smoke.py", "import aiohttp", []),
+        ("scripts/render_product_concept.py", "import bpy, mathutils", []),
+        ("scripts/render_product_concept.py", "import pytest", ["1: pytest"]),
+        ("scripts/other.py", "import bpy, serial", ["1: bpy", "1: serial"]),
+        ("scripts/other.py", "def run():\n    import aiohttp", ["2: aiohttp"]),
+        ("scripts/other.py", "import landed_cost, httpx", []),
+        ("laptop/server/overlay/desk_robot_bridge.py", "import aiohttp", []),
+        ("laptop/server/overlay/desk_robot_native_omni.py", "import opuslib_next", []),
+        ("laptop/server/overlay/desk_robot_tools.py", "import opuslib_next", ["1: opuslib_next"]),
+        ("laptop/server/overlay/new.py", "import pytest, cv2", ["1: pytest", "1: cv2"]),
+    ],
+)
+def test_surface_dependency_policy_is_scoped(path, source, expected):
+    project = {
+        "dependencies": ["httpx>=0.27"],
+        "optional-dependencies": {
+            "vision": ["opencv-python", "ultralytics"],
+            "room": ["pyserial"],
+            "dev": ["aiohttp", "pytest"],
+        },
+    }
+    assert _surface_imports(
+        source, path=path, local={"landed_cost"}, project=project
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    ("path", "group", "module"),
+    [
+        ("scripts/generate_dock_tag.py", "vision", "cv2"),
+        ("scripts/serial_bench.py", "room", "serial"),
+        ("scripts/omni_duplex_smoke.py", "dev", "aiohttp"),
+        ("laptop/server/overlay/desk_robot_bridge.py", "dev", "aiohttp"),
+    ],
+)
+def test_surface_dependency_policy_rejects_removed_extra(path, group, module):
+    project = {"dependencies": [], "optional-dependencies": {group: []}}
+    assert _surface_imports(
+        f"import {module}", path=path, local=set(), project=project
+    ) == [f"1: {module}"]
