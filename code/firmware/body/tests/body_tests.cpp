@@ -141,6 +141,35 @@ void drive_duration() {
   CHECK(body.state().left == 0);
 }
 
+void overlapping_drive_replaces_pending_pulse() {
+  for (const std::uint32_t start : {0U, std::numeric_limits<std::uint32_t>::max() - 49U}) {
+    BodyControl body;
+    CHECK(send(body, "arm", start) == "OK arm");
+    for (const std::uint32_t offset : {0U, 25U, 50U, 75U}) {
+      CHECK(send(body, "drive 20 20 250", start + offset) ==
+            "OK drive left=20 right=20 ms=250");
+      CHECK(body.drive_remaining(start + offset) == 250);
+    }
+    CHECK(send(body, "keepalive", start + 175U) == "OK keepalive");
+    body.tick(start + 324U);
+    CHECK(body.state().left == 20 && body.state().right == 20);
+    CHECK(body.drive_remaining(start + 324U) == 1);
+    body.tick(start + 325U);
+    CHECK(body.state().armed);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(body.drive_remaining(start + 325U) == 0);
+
+    CHECK(send(body, "drive 20 20 250", start + 330U) ==
+          "OK drive left=20 right=20 ms=250");
+    CHECK(send(body, "drive 10 10 1", start + 380U) ==
+          "OK drive left=10 right=10 ms=1");
+    CHECK(body.drive_remaining(start + 380U) == 1);
+    body.tick(start + 381U);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(body.drive_remaining(start + 381U) == 0);
+  }
+}
+
 void keepalive_does_not_extend_drive() {
   BodyControl body;
   send(body, "arm", 0);
@@ -999,6 +1028,7 @@ int main(int argc, char** argv) {
        optional_inputs_preserve_raw_stop_and_event_history},
       {"disarmed_boot", disarmed_boot}, {"arm_clears_old_motion", arm_clears_old_motion},
       {"drive_limits", drive_limits}, {"drive_duration", drive_duration},
+      {"overlapping_drive_replaces_pending_pulse", overlapping_drive_replaces_pending_pulse},
       {"keepalive_does_not_extend_drive", keepalive_does_not_extend_drive},
       {"invalid_does_not_renew", invalid_does_not_renew},
       {"rejected_grip_does_not_renew_watchdog", rejected_grip_does_not_renew_watchdog},

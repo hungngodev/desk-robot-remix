@@ -108,3 +108,36 @@ async def test_simulator_keepalive_extends_watchdog_without_extending_pulse():
         assert status["armed"]
         assert status["motor"] == {"m0": 0, "m1": 0}
         assert status["drive_ms"] == 0
+
+
+async def test_overlapping_drive_replaces_pending_pulse():
+    head = SimulatedHead("robot-01")
+    with patch("desk_robot.simulator.time.monotonic", return_value=1.0) as clock:
+        await head.command("arm")
+        for now in (1.0, 1.025, 1.050, 1.075):
+            clock.return_value = now
+            await head.command("drive 20 20 250")
+            assert (await head.status())["drive_ms"] == 250
+        clock.return_value = 1.175
+        await head.command("keepalive")
+        clock.return_value = 1.324
+        assert (await head.status())["drive_ms"] == 1
+        clock.return_value = 1.325
+        status = await head.status()
+        assert status["armed"]
+        assert status["motor"] == {"m0": 0, "m1": 0}
+        assert status["drive_ms"] == 0
+
+
+async def test_shorter_overlapping_drive_replaces_longer_pulse():
+    head = SimulatedHead("robot-01")
+    with patch("desk_robot.simulator.time.monotonic", return_value=1.0) as clock:
+        await head.command("arm")
+        await head.command("drive 20 20 250")
+        clock.return_value = 1.050
+        await head.command("drive 10 10 1")
+        assert (await head.status())["drive_ms"] == 1
+        clock.return_value = 1.051
+        status = await head.status()
+        assert status["motor"] == {"m0": 0, "m1": 0}
+        assert status["drive_ms"] == 0
