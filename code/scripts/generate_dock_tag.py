@@ -95,13 +95,15 @@ def read_dock_geometry(path: Path = SCAD) -> dict:
         "tag_black_side_mm", "tag_white_margin_each_mm",
         "tag_paper_slack_each_mm",
     ):
-        matches = re.findall(
-            rf"^{re.escape(name)}\s*=\s*(\d+(?:\.\d+)?)\s*;",
-            source, flags=re.M,
-        )
-        if len(matches) != 1:
+        # Count every assignment before parsing its value. An expression or
+        # indented override must not hide behind an earlier numeric literal.
+        assignments = list(re.finditer(rf"\b{re.escape(name)}\s*=(?!=)", source))
+        if len(assignments) != 1:
             raise ValueError("Dock marker dimension missing or ambiguous: " + name)
-        values[name] = float(matches[0])
+        literal = re.match(r"\s*(\d+(?:\.\d+)?)\s*;", source[assignments[0].end():])
+        if literal is None:
+            raise ValueError("Dock marker dimension must be a numeric literal: " + name)
+        values[name] = float(literal[1])
     black = values["tag_black_side_mm"]
     margin = values["tag_white_margin_each_mm"]
     slack = values["tag_paper_slack_each_mm"]
