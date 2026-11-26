@@ -11,7 +11,7 @@ The hardware and experience scope is **unchanged**: one fully featured body firs
 
 **Software source done this review:** required trigger labels, nonblocking sensor JPEG requests, rapid VAD restart protection, source-truthful proactive remarks, stale model deadline, explicitly consented two-pet dialogue with existing exclusive Xiaozhi session, peer quiet/motion-state cancellation, source consent and generation proof, original source attribution, and cross-layer static wiring invariants. **Historical CI context:** Tests added during the November 12 review faced runner failures before recorded test steps at that time. That is not a statement about current CI. For the current PR #17, inspect the [live five-job host verification workflow](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml) at the **exact PR #17 commit SHA** and check each job's success, failure, cancellation, skip or queue status and logs. Do not infer the current result from an older run. Passing software checks do not qualify physical acoustic performance, loaded motion, battery safety or charging; those require [separate physical trial evidence](records/verification.md). The previous committed sensor and firmware drivers are likewise not new hardware qualification.
 
-**Required before calling this an assembly-only product:** restore actual CI and fix real logged code defects; complete and dimensional-check one licensed Fusion/STL assembly for body, gripper, camera/head and docking cradle; finalize and independently current/thermal-test protected 1S pack, regulator and isolated charge contact path; qualify the implemented read-only two-channel NEC RMT reception against physical GPIO36/39 and implement a measured bearing and final contact approach without displacing PIR/reed and WROOM safety GPIO; physically test all sensor bus/carrier timing and XIAO J3 speaker pin isolation; calibrate jaw force and 8/10 key and candy pickup/placement; measure live XIAO Opus/echo cancellation/video and five-pet speaker-floor and latency. The source cannot substitute imaginary measurements; these remain real gates rather than optional extras.
+**Required before calling this an assembly-only product:** pass every required exact-commit CI job and fix real logged code defects; complete and dimensional-check one licensed Fusion/STL assembly for body, gripper, camera/head and docking cradle; finalize and independently current/thermal-test protected 1S pack, regulator and isolated charge contact path; qualify the implemented read-only two-channel NEC RMT reception against physical GPIO36/39 and implement a measured bearing and final contact approach without displacing PIR/reed and WROOM safety GPIO; physically test all sensor bus/carrier timing and XIAO J3 speaker pin isolation; calibrate jaw force and 8/10 key and candy pickup/placement; measure live XIAO Opus/echo cancellation/video and five-pet speaker-floor and latency. The source cannot substitute imaginary measurements; these remain real gates rather than optional extras.
 
 ## Build order
 
@@ -69,7 +69,21 @@ claim that the current PR head compiles or passes. Check the [five-job Host
 verification workflow](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml)
 for the exact PR #17 head SHA, and inspect the run conclusion, executed steps,
 job logs and tests for that same commit. Older green runs do not qualify newer
-commits, and an executed failing test is not a pre-step runner failure. The stepper
+commits, and an executed failing test is not a pre-step runner failure.
+
+**Complete software gate:** all five jobs must succeed on the same reviewed
+commit: Mac conversation and memory regression; Python and head host tests
+(including lint, generated procurement ledger, pinned upstream fixtures,
+OpenCV/CAD and playbook receipt checks); body C++ host tests with sanitizers
+(including room station host tests); WROOM PlatformIO builds (including the
+Feather room station and five dock beacon builds); and Sense ESP-IDF builds
+(including default and private opt-in PCM compiler coverage). Missing, skipped,
+failed, cancelled or pending required jobs are not a complete gate. Inspect
+actual executed steps; a partial test run is not a substitute.
+The local `code/scripts/verify_system.py --suite all` receipt is complementary,
+not equivalent to every CI-only check. Require `source_suite_pass` and
+`same_commit_clean_checkout` for a successful local receipt, and preserve
+physical, assembly, charging and procurement HOLD regardless of either result. The stepper
 design is intended to refuse arming without fresh required sensors and calibration,
 but the real bench stop margin remains unmeasured. Physical fit, power, speech
 interruption, pickup and fleet play are still open.
@@ -106,9 +120,9 @@ This plan rejects the pattern "make a cheap talking robot first, then replace ev
 | 6. Full proactive conversation | Utility activity owner, vision grounded unsolicited speech, suppression/cooldown, quiet/preemption, five-feed dedup | Proactivity is first-class behavior, not a greeting timer or later optional UI |
 | 7. Full local robot personality | Deterministic eyes/emotes, sensory reactions, identity/mood/rest, gestures/voice and long-term context | No second personality engine or LLM low-level timing |
 | 8. Supervised pet motion, pickup and docking | Operator's ongoing pet session, safe motion arbitration, real key/candy task and supervised terminal dock approach, alignment, seat, departure and recovery trials | No blind roam or model arm; docking uses the same independent WROOM stop, clearance, power and contact interlocks |
-| 9. Complete first robot and first dock qualification | A1–A12 plus power, acoustic, observation, memory, gripper, edge, dock seat/contact alignment, protected 1S charging, measured net cell current, safe departure and recovery evidence | **Only after the first assigned dock and robot pass their separate bench and integrated physical gates** label robot one accepted; no simulated charge or purchase release |
+| 9. Complete first robot and first dock qualification | A1–A6 and A8–A12 physical gates, Guide 60 spatial acceptance, A7 single-unit/host multi-session evidence only, plus power, acoustic, observation, memory, gripper, edge, dock seat/contact alignment, protected 1S charging, measured net cell current, safe departure and recovery evidence | **Only after the first assigned dock and robot pass their separate bench and integrated physical gates** label robot one accepted; no simulated charge or purchase release |
 | 10. Four additional robots and docks | Reuse the first qualified robot and dock core, unit-specific calibrations/secrets/health and separate acceptance for each of the five assigned docks | Same pins/software/case and per-robot feature set; no watered-down followers or unqualified docking copies |
-| 11. Social fleet and shared room station acceptance | Five cameras, five independently qualified docks, one approved shared station, private memories, live speech ownership, independent identities and simultaneous perception | One speaker and initially one moving robot; preserve station consent, per-pet docking and no false synchronized self-interruption |
+| 11. Social fleet and shared room station acceptance | Physical A7 with five separately identified robots, five cameras, five independently qualified docks, one approved shared station, private memories, live speech ownership, independent identities and simultaneous perception | One speaker and initially one moving robot; preserve station consent, per-pet docking and no false synchronized self-interruption |
 | 12. Electable research expansions | Nonessential advanced games, alternate experimental docking methods and swappable pre-provisioned accessories pass separate tests | The first dock, five dock fleet target, supervised docking/navigation and protected charging are **already mandatory at stages 2–11**, never optional profiles |
 
 ## Stage 0: freeze the *full* product, not an MVP
@@ -190,7 +204,7 @@ Deliverables:
 
 ## Stage 7: full local pet expressions and physical interactions
 
-1. Select one licensed 128×64 face engine. Existing stock Xiaozhi UI is an initial diagnostic renderer, **not an accepted final idle character animation**. Evaluate RoboEyes GPL3 or MIT alternative before final code merge; preserve display driver/UI ownership in one task. Test blink/gaze expressions while TTS/network is busy.
+1. Preserve the selected MIT Stackchan HSM and original eye animator/display within Xiaozhi's existing OLED owner. GPLv3 RoboEyes was not imported and must not be introduced. Source integration is **not physical A1 acceptance**; retain one display driver/UI owner. Test blink/gaze expressions while TTS/network is busy.
 2. Add head touch tap/hold through owned AT42QT1010, qualified MPU6050 (GY521 compatible WHO_AM_I 0x68 on 3.3V WROOM path; BerryIMU superseded and retained only as spare) handling/tilt/shake, audio event classifier only after true AEC, optional LED status language and optional knock/FSR/magnetic accessories. Touching a moving pet pauses motion immediately through body policy.
 3. Make mood a character state, never misreport emotion as physical temperature, health or battery. Quiet/rest mode and sleep remain visible without talking.
 4. Preserve research feature toggles for optional costumes, magnetic identity, heartbeat, breath fog, gesture, temperature and room environment. Their hardware remains individually qualified with an authenticated event source rather than electrically piled onto the first head.
@@ -245,7 +259,7 @@ This is the actionable engineering map behind [linear stages](PLAN.md). **No cod
 | --- | --- | --- |
 | `code/firmware/body/lib/StepperDrive/{StepperDrive.h,StepperDrive.cpp}` | Tested nonblocking 28BYJ phase generation, bounded speed, injected clock; add calibration/profile data after loaded measurements | Replace with a blocking tutorial sketch, change max pulse or add independent robot motion authority without tests |
 | `code/firmware/body/lib/CliffGuard/` | Fault-latched policy with validity/freshness; feed real calibrated sensor frames and test recovery | Rewrite to permit blind sensor-degraded reverse or LLM-initiated rearm |
-| `code/firmware/body/src/main.cpp`, `include/BodyPins.h` | Hardware adapter, five-sensor status, touch/IMU and reporting, physical output init, watchdog | Borrow wrong GPIO41/42 Sense PDM pins or use motor pins for optional sensors |
+| `code/firmware/body/src/main.cpp`, `include/BodyPins.h` | Hardware adapter, eight VL53L0X status channels (five critical, three read-only), touch/IMU and reporting, physical output init, watchdog | Borrow wrong GPIO41/42 Sense PDM pins or use motor pins for optional sensors |
 | `code/firmware/head/sense/config.h`, `desk_robot_sense.cc` | Existing compiled XIAO Sense pin map, camera, OLED, audio, UART and authenticated bridge | Port a completely different S3 board's pin layout or disable audio input while speaking |
 | `code/firmware/head/install_overlay.py` | Keep pinned Xiaozhi build, exact Sense board augmentation, use reversible narrow AEC/audio feature install | Vendoring incompatible full forks or casually editing original `upstream` tree |
 | `code/laptop/src/desk_robot/live_turns.py` | Offline frame pacing, connection/turn epochs, obsolete audio rejection, opt-in observation; attach actual device and provider transport | Treat offline queue clearing as real I2S/DMA audible cancellation |
@@ -262,7 +276,7 @@ This is the actionable engineering map behind [linear stages](PLAN.md). **No cod
 | `code/firmware/body/lib/BodyEvents/` | Fixed typed reporting to head for floor fault, touch, IMU, low supply, servo state, completed actions. No model or network in the safety path | Local stop before head event delivery, stale event ID, duplicate input, invalid field payload |
 | `code/firmware/head/sense/audio_reference_adapter.*` | Real PDM microphone + reference from currently played I2S PCM, align/resample into Xiaozhi ESP-IDF AFE; reuse RIO algorithms/tests with actual GPIO pins and audio task synchronization | Ring reset races, double-talk, playback tail, 90ms only candidate, no echo gate muting user speech |
 | `code/firmware/head/sense/playback_flush.*` | Explicit flush/stop generation, decoder plus DMA output zeroing/clearing, acknowledgement of acoustic stop | Old TTS cannot continue or resume after user speech, quiet, network reconnect or change of robot |
-| `code/firmware/head/sense/face_adapter.*` | One licensed 128×64 eyes renderer feeding `idle/listening/thinking/speaking/curious/sleepy/blocked/offline`; compare RoboEyes vs MIT source | Offline blinking, display timing and concurrent live audio camera UART; license and head shell fit |
+| `code/firmware/head/sense/face_adapter.*` | One licensed 128×64 eyes renderer feeding `idle/listening/thinking/speaking/curious/sleepy/blocked/offline`; preserve the selected MIT Stackchan HSM and original renderer; no GPLv3 import | Offline blinking, display timing and concurrent live audio camera UART; license and head shell fit |
 | `code/laptop/src/desk_robot/perception.py` | Typed event source using Google robotics `camera_poller.py`, frame difference/stability, actual Sense capture timestamp, YOLO World or chosen local VLM; event-gated image calls | Real scene change, person/hand/key/candy labels, stale/false image, camera self-motion and duplicate events |
 | `code/laptop/src/desk_robot/events.py` | Event schema v1 includes robot/source, capture and receipt clocks, confidence, scene fingerprint, epoch, privacy, witness vs told_about; one dispatcher for camera/touch/sound/safety/peer | Producer spoofing, out-of-order event, reconnect, TTL, duplicate ID, cross-robot misrouting |
 | `code/laptop/src/desk_robot/memory.py` | Per-ID durable private records, append-only history/SQLite where selected, single writer, direct witness provenance, preferences, social and cooldown state; exclude raw recordings by default | Atomic writes, restart/corruption, privacy/retention, two concurrent memories not cross-contaminating |
@@ -304,7 +318,7 @@ Record real resource loads for existing Xiaozhi server + Ollama + Kokoro + local
 ## Code and source-license policy
 
 * Never alter ignored original upstream clones or the preserved `docs/cad/originals/` files in place. Record pinned SHA and notice, place small remix patch in a distinct adapter and give source-specific attribution.
-* RoboEyes is GPL3; a combined firmware distribution must respect that choice. The original SMARS ancestor and forklift are NC-SA CAD, while Cozmars/Sparky/Tiny Engineer have separate terms. Their license is not inherited from the MIT app just because we linked the file.
+* RoboEyes is GPL3 and is not selected or imported; preserve the existing MIT Stackchan HSM and original renderer. The original SMARS ancestor and forklift are NC-SA CAD, while Cozmars/Sparky/Tiny Engineer have separate terms. Their license is not inherited from the MIT app just because we linked the file.
 * New optical drivers prefer official ST ULD and licensed vendor examples, but every I2C operation must report actual status/quality rather than accepting stale values on errors.
 * When replacing an existing source module, write a controlled comparison, allow independent rollback *at source selection time*, choose once before final integration. Avoid manufacturing the wrong hardware and later silently switching to a second system.
 
