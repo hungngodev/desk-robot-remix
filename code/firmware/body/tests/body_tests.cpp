@@ -41,6 +41,16 @@ std::vector<std::string> frame(BodyControl& body, LineReceiver& receiver,
   return replies;
 }
 
+// The production Arduino toolchain uses C++11 constexpr rules.
+static_assert(desk_robot::range_sample_accepts(true, 0U, 0xffffffffU),
+              "wrap advances by one");
+static_assert(!desk_robot::range_sample_accepts(true, 0x80000000U, 0U),
+              "half range is ambiguous");
+static_assert(desk_robot::range_sample_expired(true, true, 200U, 0U),
+              "critical expiry at 200 ms");
+static_assert(!desk_robot::range_sample_expired(true, false, 350U, 0U),
+              "side freshness includes 350 ms");
+
 void range_sample_clock_boundaries() {
   using desk_robot::range_sample_accepts;
   using desk_robot::range_sample_expired;
