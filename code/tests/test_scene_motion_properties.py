@@ -2,7 +2,6 @@
 from itertools import product
 
 import pytest
-
 from desk_robot.scene_motion import change_fraction, consistent_change_mask, scene_change_mask
 
 

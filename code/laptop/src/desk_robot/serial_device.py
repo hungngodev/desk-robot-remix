@@ -4,7 +4,6 @@ import os
 import re
 import stat
 
-
 _DEVICE_PATH = re.compile(r"/dev/(?:cu\.[A-Za-z0-9._-]+|tty\.[A-Za-z0-9._-]+|tty(?:USB|ACM)[0-9]+)")
 
 

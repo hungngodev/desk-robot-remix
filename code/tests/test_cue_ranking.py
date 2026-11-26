@@ -3,7 +3,6 @@ from copy import deepcopy
 from itertools import permutations
 
 import pytest
-
 from desk_robot.cue_ranking import rank_cues
 
 DIRECT = frozenset({"touch_tap"})
