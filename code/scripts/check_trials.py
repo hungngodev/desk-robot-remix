@@ -255,6 +255,7 @@ if __name__ == "__main__":
     p.add_argument("--require-pass", action="store_true")
     p.add_argument("--require-manifest", action="store_true")
     args = p.parse_args()
+    canonical = args.file.resolve() == p.get_default("file").resolve()
     raw_bytes = args.file.read_bytes()
     csv_digest = hashlib.sha256(raw_bytes).hexdigest()
     manifest_data = (
@@ -264,7 +265,7 @@ if __name__ == "__main__":
     if args.require_manifest and manifest_data is None:
         raise ValueError("Qualified A5 evidence requires --run-manifest")
     with args.file.open(newline="", encoding="utf-8") as stream:
-        reader = csv.DictReader(stream)
+        reader = csv.DictReader(stream, strict=True)
         headers = reader.fieldnames
         # DictReader silently overwrites earlier values for repeated names.
         # Contradictory assisted/configuration fields must never pass A5.
@@ -276,10 +277,18 @@ if __name__ == "__main__":
         if any(None in row or any(value is None for value in row.values())
                for row in rows):
             raise ValueError("A5 physical trial CSV row length differs from header")
+        if canonical or manifest_data is not None:
+            from physical_trial_ledger import validate_physical_rows
+
+            validate_physical_rows(headers, rows)
         result = summarize(
             rows, args.robot,
             run_manifest=manifest_data, csv_sha256=csv_digest,
         )
+    if canonical:
+        if result["placeholder_identities"]:
+            raise ValueError("Canonical physical trial contains placeholder identities")
+        result["physical_trial_count"] = sum(row["robot_id"] == args.robot for row in rows)
     print(json.dumps(result, indent=2))
     if args.require_pass and not result["physical_acceptance_pass"]:
         p.exit(1, "Physical trial target has not been met.\n")

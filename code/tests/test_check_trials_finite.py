@@ -489,6 +489,7 @@ def test_a5_cli_validates_run_manifest_and_rejects_stale_or_placeholder_provenan
         row["calibration"] = "jaw-profile-rev3"
         row["assembly_id"] = "pet1-revC"
         row["object_description"] = "brass house key" if row["category"] == "key" else "mint candy"
+        row["notes"] = "Recorded lift and placement"
     csv_path = tmp_path / "real-shape.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))

@@ -717,8 +717,13 @@ def main() -> int:
     args = parser.parse_args()
     try:
         ledger = parse_ledger(args.ledger.read_text(encoding="utf-8"))
+        if args.ledger.resolve() == LEDGER.resolve():
+            from check_trials import summarize
+            from physical_trial_ledger import validate_canonical_ledger
+
+            validate_canonical_ledger(ROOT, summarize)
         errors = audit(ledger)
-    except (OSError, ValueError, TypeError, KeyError) as exc:
+    except (OSError, ValueError, TypeError, KeyError, csv.Error) as exc:
         print(f"INCOMPLETE: invalid playbook ledger: {exc}", file=sys.stderr)
         return 1
     for error in errors:
