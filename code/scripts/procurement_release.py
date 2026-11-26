@@ -1238,7 +1238,12 @@ def first_robot_pilot_samples(report: dict) -> dict:
                           else "EXCLUDED_MOTOR_ALTERNATIVE")
         elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
             action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
-        elif "no_new_adafruit_hardware" in part["missing_part_evidence"]:
+        elif "no_new_adafruit_hardware" in part["missing_part_evidence"] or (
+            source is not None and _ad_fruit_new_hardware({
+                "name": source[0], "vendor": source[1], "sku": source[2],
+                "product_url": source[3], "brand": PILOT_IDENTIFIED_BRANDS.get(ident),
+            }, remaining)
+        ):
             action = "HOLD_UNAPPROVED_NEW_HARDWARE"
         elif "unapproved_selected_sensor_identity" in part["missing_part_evidence"]:
             action = "HOLD_CHANGED_PART_IDENTITY"
