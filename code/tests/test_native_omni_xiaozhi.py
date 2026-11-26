@@ -9793,11 +9793,20 @@ async def test_native_five_buffered_camera_streams_yield_to_mic(native):
         await asyncio.gather(*workers, mic, return_exceptions=True)
 
 
-@pytest.mark.parametrize("send_seconds", [0.015, 0.060, 0.090])
+@pytest.mark.parametrize(
+    "send_delays, expected_offsets",
+    [
+        ((0.015,) * 3, (0.0, 0.060, 0.120)),
+        ((0.060,) * 3, (0.0, 0.060, 0.120)),
+        ((0.090,) * 3, (0.0, 0.090, 0.180)),
+        ((0.015, 0.180, 0.005, 0.005, 0.090, 0.005, 0.005),
+         (0.0, 0.060, 0.240, 0.300, 0.360, 0.450, 0.510)),
+    ],
+)
 async def test_native_opus_pacing_includes_socket_send_time(
-    native, monkeypatch, send_seconds,
+    native, monkeypatch, send_delays, expected_offsets,
 ):
-    """Native Opus uses the same frame interval, without a catch-up backlog."""
+    """A stall must not create catch-up debt for subsequent fast packets."""
     module, bridge = native
     conn, _ = connection()
     bridge.connections[conn.device_id] = conn
@@ -9807,11 +9816,13 @@ async def test_native_opus_pacing_includes_socket_send_time(
     )
     clock = [100.0]
     starts = []
+    delays = iter(send_delays)
+    real_time = time.time
 
     class Socket:
         async def send(self, packet):
             starts.append(clock[0])
-            clock[0] += send_seconds
+            clock[0] += next(delays)
 
     async def fake_sleep(seconds):
         assert seconds >= 0
@@ -9819,14 +9830,13 @@ async def test_native_opus_pacing_includes_socket_send_time(
 
     conn.websocket = Socket()
     monkeypatch.setattr(
-        module, "time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time),
+        module, "time", SimpleNamespace(monotonic=lambda: clock[0], time=real_time),
     )
     monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
-    for packet in (b"a", b"b", b"c"):
-        assert await session._send_device_opus(packet, session._generation)
-    interval = max(0.060, send_seconds)
-    assert starts == pytest.approx([100.0, 100.0 + interval, 100.0 + 2 * interval])
-    assert session.head_packets == 3
+    for index in range(len(send_delays)):
+        assert await session._send_device_opus(bytes([index]), session._generation)
+    assert starts == pytest.approx([100.0 + offset for offset in expected_offsets], abs=1e-8)
+    assert session.head_packets == len(send_delays)
 
 
 @pytest.mark.parametrize("route", ["pickup", "stop", "plan-readonly", "", None, [], {}])
