@@ -1519,6 +1519,64 @@ static void real_dock_power_good_and_two_seat_switches_force_body_disarm() {
 }
 
 
+static void optional_accessories_cannot_clear_dock_or_cliff_interlocks() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 100);
+    desk_robot::BodyControl body(profile, &guard);
+    body.require_dock_monitor(true);
+    desk_robot::AccessoryReadings readings{};
+    auto& dock = readings.dock;
+    dock.present = dock.valid = true;
+    dock.sample_seq = 1;
+    dock.at_ms = 100;
+    body.set_accessories(readings, 100);
+    CHECK(send(body, "rearm", 100, true) == "OK rearm");
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "drive 20 20 200", 101).find("OK drive") == 0);
+
+    dock.left_seated = true;
+    dock.sample_seq = 2;
+    dock.at_ms = 102;
+    body.set_accessories(readings, 102);
+    CHECK(!body.state().armed);
+    guard.sample(3, 500, true, 103);
+    body.tick(103);
+    fresh(guard, 104);  // Healthy range samples do not clear a cliff latch.
+
+    for (std::uint32_t now = 104; now < 108; ++now) {
+      // Optional sensor updates with the same genuine dock acquisition.
+      readings.proximity.present = readings.proximity.valid = (now % 2 == 0);
+      readings.proximity.raw = 90;
+      readings.proximity.at_ms = now;
+      body.set_accessories(readings, now);
+      body.set_cap(now % 2 == 0, 0);
+      CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+      CHECK(!body.state().armed);
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(send(body, "arm", now) == "ERR arm dock_power_connected");
+      CHECK(send(body, "rearm", now, true) == "ERR rearm dock_power_connected");
+    }
+
+    // Only a new fully unseated GPIOA read releases the contact interlock;
+    // it must not simultaneously release the independent cliff latch.
+    dock.left_seated = false;
+    dock.sample_seq = 3;
+    dock.at_ms = 108;
+    body.set_accessories(readings, 108);
+    CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+    CHECK(!body.state().armed);
+    CHECK(send(body, "arm", 108) == "ERR arm safety_interlock");
+    CHECK(send(body, "rearm", 108) == "ERR rearm local_only");
+    CHECK(send(body, "rearm", 108, true) == "OK rearm");
+    CHECK(!body.state().armed);
+    CHECK(send(body, "arm", 108) == "OK arm");
+    CHECK(body.state().left == 0 && body.state().right == 0);
+  }
+}
+
 static void dock_removal_needs_new_fresh_real_gpio_sample() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);
@@ -4151,6 +4209,7 @@ int main() {
     status_readiness_matches_local_arm_interlocks();
     std::cout << "PASS guarded DC uses same real cliff and USB recovery policy\n";
     real_dock_power_good_and_two_seat_switches_force_body_disarm();
+    optional_accessories_cannot_clear_dock_or_cliff_interlocks();
     dock_removal_needs_new_fresh_real_gpio_sample();
     dock_removal_accepts_genuine_uint32_wrap();
     dock_charge_indication_alone_cannot_release_motion();
