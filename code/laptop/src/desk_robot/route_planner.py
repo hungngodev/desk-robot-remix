@@ -216,23 +216,35 @@ def plan_route(
             return "deadline_or_map_expired"
         return None
 
-    @lru_cache(maxsize=8192)
-    def clear(x: int, y: int, clearance_mm: int) -> bool:
-        # A cell is unsafe if the *square* touches the inflated disk. Off-map
-        # is unknown support, including at edges/corners.
+    @lru_cache(maxsize=2)
+    def clearance_rows(clearance_mm: int) -> tuple[tuple[int, int], ...]:
+        # Disk/square intersections form contiguous, symmetric spans per row.
+        # Compute the geometry once per radius, not once per visited cell.
         reach = math.ceil(clearance_mm / grid.cell_mm + 0.5)
+        rows = []
         for dy in range(-reach, reach + 1):
-            for dx in range(-reach, reach + 1):
+            for dx in range(reach, -1, -1):
                 distance = math.hypot(
-                    max(0, abs(dx) - 0.5) * grid.cell_mm,
+                    max(0, dx - 0.5) * grid.cell_mm,
                     max(0, abs(dy) - 0.5) * grid.cell_mm,
                 )
-                if distance > clearance_mm:
-                    continue
-                cx, cy = x + dx, y + dy
-                if (not 0 <= cx < grid.width or not 0 <= cy < grid.height
-                        or grid.support[cy * grid.width + cx] != SAFE):
-                    return False
+                if distance <= clearance_mm:
+                    rows.append((dy, dx))
+                    break
+        return tuple(rows)
+
+    @lru_cache(maxsize=8192)
+    def clear(x: int, y: int, clearance_mm: int) -> bool:
+        # Every touched square must be safe, including tangencies. Off-map
+        # remains unknown support. Count contiguous row spans in the tuple.
+        for dy, dx in clearance_rows(clearance_mm):
+            cy = y + dy
+            if not 0 <= cy < grid.height or x - dx < 0 or x + dx >= grid.width:
+                return False
+            start = cy * grid.width + x - dx
+            length = 2 * dx + 1
+            if grid.support[start:start + length].count(SAFE) != length:
+                return False
         return True
 
     expired = live()
