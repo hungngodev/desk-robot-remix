@@ -7,6 +7,7 @@ import time
 from typing import Callable
 
 from .dock_process import DetectorPool, DockDetectorBusy
+from .dock_timing import DOCK_OBSERVATION_MAX_AGE_S, dock_age_is_fresh
 from .dock_vision import DockCameraCalibration, DockPose, assess_dock
 from .operations import bounded_head_reply as _bounded_head_reply
 
@@ -130,7 +131,8 @@ def unpack_dock_frame(observation) -> tuple[bytes, float]:
         # Python accepts arbitrarily large integers; math.isfinite(int)
         # itself raises OverflowError before our diagnostic HOLD can run.
         raise ValueError("Invalid or stale dock camera receipt") from exc
-    if not math.isfinite(received_at) or not 0 <= now - received_at <= 0.20:
+    if (not math.isfinite(received_at)
+            or not dock_age_is_fresh(now - received_at, DOCK_OBSERVATION_MAX_AGE_S)):
         raise ValueError("Invalid or stale dock camera receipt")
     if len(observation) == 4:
         identity, generation = observation[2:]
@@ -157,7 +159,7 @@ async def verify_selected_dock_frame(head, observation) -> None:
         # not a new timeout that would extend stale camera evidence.
 
         _, received_at = unpack_dock_frame(observation)
-        remaining = 0.20 - (time.monotonic() - received_at)
+        remaining = DOCK_OBSERVATION_MAX_AGE_S - (time.monotonic() - received_at)
         if remaining <= 0:
             raise ValueError("Invalid or stale dock camera receipt")
         verdict = await _bounded_head_reply(
@@ -254,7 +256,7 @@ async def observe_actual_dock(
             robot.id, reason="Dock camera live sensor identity unavailable",
             source="camera_identity_unavailable",
         )
-    remaining = 0.20 - (time.monotonic() - received_at)
+    remaining = DOCK_OBSERVATION_MAX_AGE_S - (time.monotonic() - received_at)
     if remaining <= 0:
         return _hold(
             robot.id, reason="Dock camera receipt expired before identity check",
@@ -282,7 +284,7 @@ async def observe_actual_dock(
             source="camera_identity_mismatch",
         )
     # Identity may be slow; never refresh the original JPEG receipt clock.
-    if time.monotonic() - received_at > 0.20:
+    if time.monotonic() - received_at > DOCK_OBSERVATION_MAX_AGE_S:
         return _hold(
             robot.id, reason="Dock camera receipt expired during identity check",
             source="head_snapshot_invalid",
