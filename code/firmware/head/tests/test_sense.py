@@ -1971,6 +1971,31 @@ int main() {
     assert(guarded.front() == -1 && guarded.back() == -1);
     assert(wrapped.ReadReferenceLocked(guarded.data() + 1, 160, 30000));
     assert(wrapped.reference_integrity_failed_);
+    // Tight reads must survive multiple physical wraps. A lag of ring-1
+    // is still valid; ring and larger lags must never publish stale PCM.
+    SenseReferenceCodec chase;
+    chase.reference_.fill(4321);
+    for (uint64_t i = 1; i <= 400; ++i) {
+        chase.write_index_ = i * out.size();
+        assert(chase.ReadReferenceLocked(out.data(), out.size(), i * 10000));
+        assert(std::all_of(out.begin(), out.end(), [](auto v) { return v == 4321; }));
+    }
+    chase.write_index_ += ring - 1;
+    assert(chase.ReadReferenceLocked(out.data(), out.size(), 4010000));
+    assert(chase.reference_overwrite_reads_ == 0);
+    assert(!chase.reference_integrity_failed_);
+    for (uint64_t lag : {ring, ring + 1, 3 * ring + 17}) {
+        chase.write_index_ += lag;
+        out.fill(-1);
+        assert(!chase.ReadReferenceLocked(out.data(), out.size(), 4020000));
+        assert(std::all_of(out.begin(), out.end(), [](auto v) { return v == 0; }));
+        chase.write_index_ += out.size();
+        assert(chase.ReadReferenceLocked(out.data(), out.size(), 4030000));
+        assert(std::all_of(out.begin(), out.end(), [](auto v) { return v == 4321; }));
+    }
+    assert(chase.reference_overwrite_reads_ == 3);
+    assert(chase.reference_integrity_failed_);
+    assert(chase.missing_reference_reads_ == 0);
     // A startup underflow is allowed briefly, not indefinitely.
     SenseReferenceCodec underflow;
     for (int i = 0; i < 31; ++i)
