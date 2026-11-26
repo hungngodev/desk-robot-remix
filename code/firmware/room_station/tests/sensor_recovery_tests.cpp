@@ -27,6 +27,48 @@ struct FakeStopWire {
   int endTransmission() { ++ends; return result; }
 };
 
+// Exercise the production schedule with each I2C role as the sole fault.
+// Healthy conversions continue even while the fault temporarily ACKs a probe.
+static void test_isolated_retry(desk_robot_room::SensorRecoverySchedule::Sensor fault) {
+  using Recovery = desk_robot_room::SensorRecoverySchedule;
+  Recovery schedule;
+  bool active[Recovery::kCount] = {true, true, true};
+  active[fault] = false;
+  const auto tick = [&](uint32_t now) {
+    const int selected = schedule.next(now, active);
+    for (unsigned i = 0; i < Recovery::kCount; ++i) {
+      if (i != fault) schedule.record_success(static_cast<Recovery::Sensor>(i));
+    }
+    return selected;
+  };
+
+  uint32_t time = 0xfffff000U;
+  assert(tick(time) == fault);
+  for (uint32_t interval : {5000U, 10000U, 20000U, 40000U, 60000U,
+                            60000U, 60000U}) {
+    // Started/pending is not a completed conversion. A subsequent fault
+    // retains the retry history, including across millis() rollover.
+    active[fault] = true;
+    assert(tick(time + 1U) == -1);
+    active[fault] = false;
+    assert(tick(time + interval - 1U) == -1);
+    active[fault] = true;
+    assert(tick(time + interval) == -1);
+    active[fault] = false;
+    time += interval;
+    assert(tick(time) == fault);
+  }
+
+  // Only a completed sample from this sensor clears its own history.
+  active[fault] = true;
+  schedule.record_success(fault);
+  assert(tick(time + 1U) == -1);
+  active[fault] = false;
+  assert(tick(time + 2U) == fault);
+  assert(tick(time + 5001U) == -1);
+  assert(tick(time + 5002U) == fault);
+}
+
 int main() {
   // A partial write can still receive an ACK. Only a complete stop command
   // may start the settle interval. End the transaction on every error path.
@@ -94,21 +136,10 @@ int main() {
   assert(tick(20103) == Recovery::kBme);
   assert(devices[1].fresh_frames == 1);
 
-  // An ACK without a complete conversion must not reset the backoff.
-  Recovery bounded;
-  bool only_scd_missing[] = {false, true, true};
-  uint32_t time = 0xfffff000U;
-  assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
-  for (uint32_t interval : {5000U, 10000U, 20000U, 40000U, 60000U,
-                            60000U, 60000U}) {
-    assert(bounded.next(time + interval - 1U, only_scd_missing) == -1);
-    time += interval;
-    assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
+  // Every I2C role must obey the same independent bounded schedule.
+  for (unsigned i = 0; i < Recovery::kCount; ++i) {
+    test_isolated_retry(static_cast<Recovery::Sensor>(i));
   }
-  bounded.record_success(Recovery::kScd);
-  assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
-  assert(bounded.next(time + 4999U, only_scd_missing) == -1);
-  assert(bounded.next(time + 5000U, only_scd_missing) == Recovery::kScd);
 
   // SCD40's stop/start settle interval must be elapsed, not a sleep.
   assert(!desk_robot_room::scd_stop_settled(1499U, 1000U));
