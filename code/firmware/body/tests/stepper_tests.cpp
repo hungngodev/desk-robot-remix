@@ -266,6 +266,32 @@ void fractional_period_rounds_up() {
   }
 }
 
+void rate_ceiling_during_ramp_and_reversal() {
+  for (int sign : {1, -1}) {
+    StepperDrive drive;
+    std::uint32_t now = std::numeric_limits<std::uint32_t>::max() - 500000U;
+    auto previous = drive.update(now, sign * 40, true);
+    auto last_edge = now;
+    int changes = 0;
+    for (int i = 0; i < 10000; ++i) {
+      now += i % 17 == 0 ? 37000U : 137U;
+      const int direction = (i / 2000) % 2 ? -sign : sign;
+      const int requested = direction > 0 ? std::numeric_limits<int>::max()
+                                          : std::numeric_limits<int>::min();
+      const auto mask = drive.update(now, requested, true);
+      const auto rate = drive.rate_milli_steps_per_second();
+      CHECK(rate >= -160000 && rate <= 160000);
+      if (mask != previous) {
+        CHECK(now - last_edge >= 6250U);
+        last_edge = now;
+        previous = mask;
+        ++changes;
+      }
+    }
+    CHECK(changes > 100);
+  }
+}
+
 void clock_rollover_matches_normal_clock() {
   StepperDrive normal;
   StepperDrive wrapped;
@@ -294,6 +320,7 @@ int main(int argc, char** argv) {
        irregular_cadence_reversal_preserves_phase_order},
       {"steady_rate_phase_spacing", steady_rate_phase_spacing},
       {"fractional_period_rounds_up", fractional_period_rounds_up},
+      {"rate_ceiling_during_ramp_and_reversal", rate_ceiling_during_ramp_and_reversal},
       {"clock_rollover_matches_normal_clock", clock_rollover_matches_normal_clock}};
   int ran = 0;
   for (const auto& test : tests) {
