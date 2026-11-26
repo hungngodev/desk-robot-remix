@@ -5,10 +5,14 @@ part = "battery_boost_tray";
 fit_xy = 0.4;
 m3_clearance = 3.4;
 
-// Provisional protected LPHD7430085 pack BODY is 86 mm long before leads.
-// The outer power package, connector and safe lead bend are still UNMEASURED.
+// Published protected LPHD7430085 body: 86 x 30 x 7.4 mm before leads.
+// https://www.lipoly-battery.com/high-rate-discharge-lipoly-battery-lphd7430085-5a-3-7v-2000mah-7-4wh/
+// Quoted connector is Molex 43645-0300, NOT JST-PH. The complete power
+// package, connector exit and safe lead bend are still UNMEASURED.
 // This gauge only excludes undersized layouts, not a full power enclosure.
 candidate_pack_body_l_mm = 86;
+candidate_pack_body_w_mm = 30;
+candidate_pack_body_h_mm = 7.4;
 power_l = 86;
 power_w = 35;
 power_h = 14;
@@ -40,6 +44,8 @@ module battery_boost_tray() {
     assert(power_l > 25 && power_l < 150);
     assert(power_l >= candidate_pack_body_l_mm,
            "Battery tray shorter than selected candidate pack body");
+    assert(power_w >= candidate_pack_body_w_mm && power_h >= candidate_pack_body_h_mm,
+           "Battery tray narrower or shallower than selected candidate pack body");
     assert(power_w > 12 && power_w < 100);
     assert(power_h > 4 && power_h < 60);
     assert(fit_xy >= 0.2 && wall >= 2 && base >= 2,
@@ -64,7 +70,7 @@ module battery_boost_tray() {
             translate([l, w-tray_tab_offset_mm-tray_tab_w_mm, 0])
                 cube([tray_tab_l_mm, tray_tab_w_mm, base]);
         }
-        // Lift-out / cable slots in the rear and side walls.
+        // Lift-out / cable slots only; NOT qualified connector passage or strain relief.
         translate([l/2-5,-1,base+2]) cube([10,wall+2, h]);
         translate([-1,w/2-4,base+3]) cube([wall+2,8,h]);
         translate([-tray_tab_l_mm/2,tray_tab_offset_mm+tray_tab_w_mm/2,base/2])

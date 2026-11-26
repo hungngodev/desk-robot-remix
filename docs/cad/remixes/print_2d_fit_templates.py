@@ -69,6 +69,8 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
         raise ValueError("Invalid dock paper/pocket dimensions")
     power = data["power"]
     candidate_length = scad_mm(power, "candidate_pack_body_l_mm")
+    candidate_width = scad_mm(power, "candidate_pack_body_w_mm")
+    candidate_height = scad_mm(power, "candidate_pack_body_h_mm")
     pack_l = scad_mm(power, "power_l")
     pack_w = scad_mm(power, "power_w")
     pack_h = scad_mm(power, "power_h")
@@ -82,6 +84,8 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
         raise ValueError("Power tray clearance, wall or floor below printable minimum")
     if pack_l < candidate_length:
         raise ValueError("Power tray shorter than candidate protected pack body")
+    if pack_w < candidate_width or pack_h < candidate_height:
+        raise ValueError("Power tray narrower or shallower than candidate protected pack body")
     tray_l = pack_l + 2 * (fit_xy + wall)
     tray_w = pack_w + 2 * (fit_xy + wall)
     tab_l = scad_mm(power, "tray_tab_l_mm")
@@ -239,7 +243,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _rect(x+tray_l, y+tray_w-tab_offset-tab_w, tab_l, tab_w, dash=True)
             + _rect(x + (tray_l - pack_l) / 2,
                     y + (tray_w - pack_w) / 2, pack_l, pack_w)
-            + _text(20, 169, f"Pack body only: {_num(pack_l)} x {_num(pack_w)} mm")
+            + _text(20, 169, f"Nominal body envelope: {_num(pack_l)} x {_num(pack_w)} mm")
             + _text(20, 176, f"Nominal tray body: {_num(tray_l)} x {_num(tray_w)} mm (dashed)")
             + _text(20, 183, f"Overall span including tabs: {_num(full_l)} x {_num(tray_w)} mm")
             + _text(20, 190, "EXCLUDES leads, NTC, PCM overhang, charger, boost and fuses.")

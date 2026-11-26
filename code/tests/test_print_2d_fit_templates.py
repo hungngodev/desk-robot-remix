@@ -41,6 +41,7 @@ def setup_sources(tmp_path):
             "tag_recess_depth_mm=0.8;\ntag_bottom_z_mm=16;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
+            "candidate_pack_body_w_mm = 30;\ncandidate_pack_body_h_mm = 7.4;\n"
             "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
             "base = 2.8;\ntray_strap_slot_w = 3.2;\n"
             "m3_clearance = 3.4;\n"
@@ -387,17 +388,32 @@ def test_a4_power_tray_rejects_missing_height(tmp_path):
     assert not output.exists()
 
 
+@pytest.mark.parametrize(("old", "new"), [
+    ("power_w = 35;", "power_w = 29.9;"),
+    ("power_h = 14;", "power_h = 7.3;"),
+])
+def test_a4_power_tray_rejects_undersized_body_axes(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="narrower or shallower than candidate protected pack"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
 def test_a4_power_tray_inside_envelope_remains_provisional(tmp_path):
     source = load()
     setup_sources(tmp_path)
     scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
     scad.write_text(
-        scad.read_text().replace("power_w = 35;", "power_w = 12.1;")
-        .replace("power_h = 14;", "power_h = 4.1;"),
+        scad.read_text().replace("power_w = 35;", "power_w = 30;")
+        .replace("power_h = 14;", "power_h = 7.4;"),
         encoding="utf-8",
     )
     manifest = source.export(tmp_path, tmp_path / "paper")
-    assert manifest["source_dimensions_mm"]["power"][1] == 12.1
+    assert manifest["source_dimensions_mm"]["power"][1] == 30
     assert manifest["provisional_only"] is True
     assert manifest["actual_fit_verified"] is False
 
