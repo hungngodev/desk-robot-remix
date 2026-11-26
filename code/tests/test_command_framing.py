@@ -1,7 +1,12 @@
 """Exercise the hardware wire contract without opening a transport."""
 
 import pytest
-from desk_robot.command_framing import command_ack_matches, expected_ack, validate_command
+from desk_robot.command_framing import (
+    command_ack_matches,
+    drive_duration_ms,
+    expected_ack,
+    validate_command,
+)
 
 
 @pytest.mark.parametrize(
@@ -50,3 +55,18 @@ def test_invalid_commands_never_produce_ack(command):
 )
 def test_unmatched_terminal_ack_is_never_accepted(receipt):
     assert not command_ack_matches(receipt, "r1", "OK halt")
+
+
+@pytest.mark.parametrize(
+    ("command", "duration"),
+    [("drive -40 40", 250), ("drive 40 -40 1", 1), ("drive 0 0 250", 250)],
+)
+def test_drive_duration_matches_ack(command, duration):
+    assert drive_duration_ms(command) == duration
+    assert expected_ack(command).endswith(f" ms={duration}")
+
+
+@pytest.mark.parametrize("command", ["halt", "lift 60", "drive 0 0 251"])
+def test_drive_duration_rejects_other_operations_and_invalid_pulses(command):
+    with pytest.raises(ValueError):
+        drive_duration_ms(command)

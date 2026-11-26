@@ -9,6 +9,12 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
+from .command_framing import (
+    command_ack_matches,
+    drive_duration_ms,
+    expected_ack,
+    validate_command,
+)
 from .config import Settings
 from .dock_ir import validate_ir
 from .dock_runtime import (
@@ -28,7 +34,7 @@ from .operations import (
     dispatch_job_command,
     require_active_operation,
 )
-from .transport import Head, HeadError, drive_duration_ms, expected_ack, validate_command
+from .transport import Head, HeadError
 from .vision import Detection, Vision, image_size
 
 
@@ -43,12 +49,7 @@ async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
         head.command("halt"), seconds=1.0,
         timeout_message="WROOM STOP transport acknowledgement unconfirmed",
     )
-    if (
-        not isinstance(receipt, dict)
-        or receipt.get("ok") is not True
-        or receipt.get("robot_id") != robot_id
-        or receipt.get("reply") != expected_ack("halt")
-    ):
+    if not command_ack_matches(receipt, robot_id, expected_ack("halt")):
         raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched")
     return receipt
 
@@ -1755,9 +1756,8 @@ class Coordinator:
             last_live_frame_at = max(last_live_frame_at, time.monotonic())
 
         def require_ack(reply: object, command: str) -> None:
-            if (type(reply) is not dict or reply.get("ok") is not True
-                    or reply.get("robot_id") != job.robot_id
-                    or reply.get("reply") != expected_ack(command)):
+            if (type(reply) is not dict
+                    or not command_ack_matches(reply, job.robot_id, expected_ack(command))):
                 raise OperationError(f"Unmatched pickup command ACK: {command}")
 
         async def send_command(command: str) -> None:

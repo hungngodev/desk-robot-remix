@@ -7,22 +7,19 @@ from typing import Protocol
 
 import httpx
 
+from . import command_framing
 from .aux import validate_aux
-from .command_framing import (
-    MAX_DRIVE_DURATION_MS as MAX_DRIVE_DURATION_MS,
-)
-from .command_framing import (
-    command_ack_matches,
-    expected_ack,
-)
-from .command_framing import (
-    drive_duration_ms as drive_duration_ms,
-    validate_command as validate_command,
-)
 from .config import RobotConfig, secret
 from .dock_ir import validate_ir
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
 from .tof_optics import validate_optics
+
+# Retain the established transport imports for existing callers.
+MAX_DRIVE_DURATION_MS = command_framing.MAX_DRIVE_DURATION_MS
+command_ack_matches = command_framing.command_ack_matches
+drive_duration_ms = command_framing.drive_duration_ms
+expected_ack = command_framing.expected_ack
+validate_command = command_framing.validate_command
 
 # HTTPX timeouts are per I/O phase, not a whole finite response deadline.
 _REQUEST_DEADLINE_SECONDS = 3.0
@@ -32,6 +29,7 @@ BODY_STATUS_PROTOCOL = 2
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
 # Bound time without a complete JPEG, not merely time without network bytes.
 _MJPEG_FRAME_TIMEOUT_SECONDS = 3.0
+
 
 class HeadError(RuntimeError):
     """A failed request may already have actuated: never automatically retry it."""
