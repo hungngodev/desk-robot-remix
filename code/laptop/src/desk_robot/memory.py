@@ -469,6 +469,9 @@ class MemoryStore:
                 raise PermissionError(
                     "Robot memory database is accessible to other users"
                 )
+            # Preserve the existing journal mode. Do not implicitly activate WAL:
+            # its reset race requires a patched SQLite runtime (see sqlite.org/wal.html),
+            # and switching mode requires a separate privacy and deployment decision.
             db.execute("PRAGMA busy_timeout=3000")
             # SQLite ordinarily leaves deleted row bytes in free pages.
             # Restore secure_delete on every connection, including legacy

@@ -413,3 +413,142 @@ def test_corrupt_core_value_cannot_shadow_valid_preference(bad):
     good = CoreFact("pet1", "nickname", "valid", time.time() - 10)
     corrupt = replace(good, updated_at=time.time(), value=bad)
     assert compose_brain_context([], [corrupt, good], []).core == "nickname: valid"
+
+
+def _seed_legacy_sqlite_memory(path):
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("""CREATE TABLE memories (
+            event_id TEXT PRIMARY KEY, source_robot TEXT NOT NULL,
+            witnessed INTEGER NOT NULL CHECK(witnessed IN (0,1)),
+            kind TEXT NOT NULL, summary TEXT NOT NULL, observed_at REAL NOT NULL,
+            confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+        )""")
+        db.execute(
+            "INSERT INTO memories VALUES (?,?,?,?,?,?,?)",
+            ("legacy", "pet1", 1, "key", "silver key", 1.0, 1.0),
+        )
+    path.chmod(0o600)
+
+
+def test_sqlite_concurrent_initializers_migrate_legacy_once(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    _seed_legacy_sqlite_memory(tmp_path / "pet1.sqlite3")
+    ready = Barrier(2)
+
+    def open_store():
+        ready.wait(timeout=10)
+        return MemoryStore(tmp_path, ["pet1"])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = (pool.submit(open_store) for _ in range(2))
+        stores = [first.result(timeout=10), second.result(timeout=10)]
+
+    for store in stores:
+        with store._connect("pet1") as db:
+            columns = [row[1] for row in db.execute("PRAGMA table_info(memories)")]
+            assert columns.count("relay_token") == 1
+            assert db.execute("SELECT robot_id FROM memory_identity").fetchone() == ("pet1",)
+            assert db.execute(
+                "SELECT summary FROM memories_fts WHERE memories_fts MATCH 'silver'"
+            ).fetchall() == [("silver key",)]
+            assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_sqlite_failed_fts_migration_rolls_back_schema(tmp_path):
+    import sqlite3
+    from contextlib import closing
+
+    path = tmp_path / "pet1.sqlite3"
+    _seed_legacy_sqlite_memory(path)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("CREATE TABLE memories_fts (unrelated TEXT)")
+    with pytest.raises(sqlite3.OperationalError):
+        MemoryStore(tmp_path, ["pet1"])
+    with closing(sqlite3.connect(path)) as db, db:
+        assert "relay_token" not in {
+            row[1] for row in db.execute("PRAGMA table_info(memories)")
+        }
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE name='memory_identity'"
+        ).fetchone() is None
+        assert db.execute("SELECT summary FROM memories").fetchone() == ("silver key",)
+        db.execute("DROP TABLE memories_fts")
+    store = MemoryStore(tmp_path, ["pet1"])
+    with store._connect("pet1") as db:
+        assert db.execute(
+            "SELECT summary FROM memories_fts WHERE memories_fts MATCH 'silver'"
+        ).fetchall() == [("silver key",)]
+
+
+def test_sqlite_writer_timeout_preserves_committed_reads_and_peer(tmp_path):
+    import sqlite3
+    import time
+
+    store = MemoryStore(tmp_path, ["pet1", "pet2"])
+    with store._connect("pet1") as owner:
+        owner.execute("BEGIN IMMEDIATE")
+        owner.execute("INSERT INTO core_facts VALUES ('game','chess',1)")
+        with store._connect("pet1") as reader:
+            assert reader.execute("PRAGMA busy_timeout").fetchone() == (3000,)
+            assert reader.execute("PRAGMA secure_delete").fetchone() == (1,)
+            assert reader.execute("SELECT value FROM core_facts").fetchall() == []
+        with store._connect("pet2") as peer:
+            peer.execute("INSERT INTO core_facts VALUES ('game','puzzles',1)")
+        start = time.monotonic()
+        with pytest.raises(sqlite3.OperationalError) as error:
+            with store._connect("pet1") as contender:
+                contender.execute("BEGIN IMMEDIATE")
+        assert error.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        assert 2.8 <= time.monotonic() - start < 10
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            contender.execute("SELECT 1")
+    with store._connect("pet1") as db:
+        assert db.execute("SELECT value FROM core_facts").fetchall() == [("chess",)]
+        db.execute("UPDATE core_facts SET value='checkers'")
+    with store._connect("pet2") as db:
+        assert db.execute("SELECT value FROM core_facts").fetchall() == [("puzzles",)]
+
+
+def test_sqlite_reader_blocks_rollback_commit_without_partial_write(tmp_path):
+    import sqlite3
+
+    store = MemoryStore(tmp_path, ["pet1"])
+    with store._connect("pet1") as reader:
+        assert reader.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT value FROM core_facts").fetchall() == []
+        with pytest.raises(sqlite3.OperationalError) as error:
+            with store._connect("pet1") as writer:
+                writer.execute("PRAGMA busy_timeout=50")
+                writer.execute("BEGIN IMMEDIATE")
+                writer.execute("INSERT INTO core_facts VALUES ('game','chess',1)")
+        assert error.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            writer.execute("SELECT 1")
+    with store._connect("pet1") as db:
+        assert db.execute("SELECT value FROM core_facts").fetchall() == []
+        db.execute("INSERT INTO core_facts VALUES ('game','checkers',1)")
+
+
+def test_sqlite_existing_wal_reader_retains_committed_snapshot(tmp_path):
+    store = MemoryStore(tmp_path, ["pet1"])
+    # Exercise an externally configured WAL database, not automatic WAL activation.
+    with store._connect("pet1") as db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        db.execute("INSERT INTO core_facts VALUES ('game','chess',1)")
+    store = MemoryStore(tmp_path, ["pet1"])
+    with store._connect("pet1") as reader:
+        assert reader.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT value FROM core_facts").fetchone() == ("chess",)
+        with store._connect("pet1") as writer:
+            writer.execute("BEGIN IMMEDIATE")
+            writer.execute("UPDATE core_facts SET value='checkers'")
+        assert reader.execute("SELECT value FROM core_facts").fetchone() == ("chess",)
+    with store._connect("pet1") as db:
+        assert db.execute("SELECT value FROM core_facts").fetchone() == ("checkers",)
