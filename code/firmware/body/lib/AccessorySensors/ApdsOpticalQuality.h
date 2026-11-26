@@ -37,6 +37,10 @@ constexpr ApdsRgbcQuality apds_rgbc_quality(
   return apds_detail::quality_with_limit(status, apds_rgbc_ceiling(atime),
                                         clear, red, green, blue);
 }
+// STATUS bit 1 signals an unread completed proximity conversion.
+constexpr bool apds_proximity_ready(std::uint8_t status) {
+  return (status & 0x02U) != 0U;
+}
 constexpr bool apds_proximity_saturated(std::uint8_t raw) {
   return raw == 0xffU;
 }

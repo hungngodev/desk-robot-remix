@@ -309,7 +309,7 @@ void AccessorySensors::gesture_fifo(std::uint32_t now_ms) {
   if (direction != 0) {
     p.gesture_direction = direction;
     ++p.gesture_events;
-    p.at_ms = now_ms;
+    // A decoded gesture is not a new PDATA conversion.
   }
   if (action != GestureDecoder::PollAction::Read) return;
   std::uint8_t available = 0;
@@ -335,21 +335,28 @@ void AccessorySensors::gesture_fifo(std::uint32_t now_ms) {
 void AccessorySensors::gesture_proximity(std::uint32_t now_ms) {
   auto& p = data_.proximity;
   if (p.present) {
-    std::uint8_t raw = 0;
-    p.valid = read(0x39, 0x9C, &raw, 1);
-    if (p.valid) {
-      p.raw = raw;
-      // Full-scale proximity cannot resolve distance or establish a new event.
-      if (p.saturated()) {
-        p.valid = false;
+    std::uint8_t status = 0, raw = 0;
+    p.valid = false;
+    // APDS9960 STATUS.PVALID is cleared by reading PDATA. An ACK alone
+    // does not establish a new proximity conversion (AV02-4191EN).
+    if (!read(0x39, 0x93, &status, 1)) {
+      gesture_.invalidate();
+    } else if (apds_proximity_ready(status)) {
+      if (!read(0x39, 0x9C, &raw, 1)) {
         gesture_.invalidate();
       } else {
-        p.at_ms = now_ms;
-        gesture_fifo(now_ms);
+        p.raw = raw;
+        // Full-scale proximity cannot resolve distance or establish a new event.
+        if (p.saturated()) {
+          gesture_.invalidate();
+        } else {
+          p.valid = true;
+          p.at_ms = now_ms;
+        }
       }
-    } else {
-      gesture_.invalidate();
     }
+    // The gesture engine has its own GVALID and FIFO, even when PVALID is low.
+    gesture_fifo(now_ms);
   }
   angle(0, now_ms);
 }

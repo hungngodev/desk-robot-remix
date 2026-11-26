@@ -70,6 +70,11 @@ constexpr bool exposure_matrix(unsigned atime) {
        expect_quality(1, static_cast<std::uint8_t>(atime), 0, 0, 0, 65535, false, true) &&
        exposure_matrix(atime + 1U));
 }
+constexpr bool proximity_status_matrix(unsigned status) {
+  return status == 256U ||
+      (desk_robot::apds_proximity_ready(static_cast<std::uint8_t>(status)) ==
+          ((status & 2U) != 0U) && proximity_status_matrix(status + 1U));
+}
 constexpr bool proximity_matrix(unsigned raw) {
   return raw == 256U ||
       (desk_robot::apds_proximity_saturated(static_cast<std::uint8_t>(raw)) == (raw == 255U) &&
@@ -79,4 +84,6 @@ constexpr bool proximity_matrix(unsigned raw) {
 
 static_assert(apds_test::status_matrix(0), "ALS flags must remain independent of other status bits");
 static_assert(apds_test::exposure_matrix(0), "All exposure/channel saturation boundaries must hold");
+static_assert(apds_test::proximity_status_matrix(0),
+              "Only PVALID establishes proximity conversion readiness");
 static_assert(apds_test::proximity_matrix(0), "Only the proximity byte rail is digitally saturated");

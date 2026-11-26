@@ -35,6 +35,13 @@ class TwoWire {
   // Normal fake cadence has a new conversion each poll; fault injection
   // holds CVRF low while the previous data registers remain readable.
   bool ina226_conversion_ready = true;
+  // Default polls model a completed conversion; manual mode exposes the
+  // real read-to-clear PVALID behavior and a still-readable cached PDATA.
+  bool apds_auto_ready = true;
+  std::uint8_t apds_status = 0x02, apds_pdata = 42, apds_gesture_status = 0;
+  int fail_apds_read_register = -1;
+  unsigned apds_pdata_reads = 0;
+  std::vector<std::uint8_t> apds_gesture_fifo;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
   bool fail_pulse_register_write = false;
@@ -423,6 +430,7 @@ class TwoWire {
           applyTransmission() != 0) return 0;
     }
     if (!connected(addr)) return 0;
+    if (addr == 0x39 && register_address == fail_apds_read_register) return 0;
     if (addr == 0x48 && extras == 4 &&
         register_address == fail_ads_read_register) {
       ++rejected_ads_reads;
@@ -603,7 +611,23 @@ class TwoWire {
       pulse_fifo_read_pointer =
           static_cast<std::uint8_t>((pulse_fifo_read_pointer + count / 6) & 31U);
     } else if (addr == 0x39 && register_address == 0x92) inbound = {0xAB};
-    else if (addr == 0x39 && register_address == 0x9C) inbound = {42};
+    else if (addr == 0x39 && register_address == 0x93) {
+      if (apds_auto_ready) apds_status |= 0x02U;
+      inbound = {apds_status};
+    } else if (addr == 0x39 && register_address == 0x9C) {
+      ++apds_pdata_reads;
+      inbound = {apds_pdata};
+      apds_status &= 0xFDU;
+    } else if (addr == 0x39 && register_address == 0xAF)
+      inbound = {apds_gesture_status};
+    else if (addr == 0x39 && register_address == 0xAE)
+      inbound = {static_cast<std::uint8_t>(apds_gesture_fifo.size() / 4U)};
+    else if (addr == 0x39 && register_address == 0xFC &&
+             count <= apds_gesture_fifo.size()) {
+      inbound.assign(apds_gesture_fifo.begin(), apds_gesture_fifo.begin() + count);
+      apds_gesture_fifo.erase(apds_gesture_fifo.begin(),
+                              apds_gesture_fifo.begin() + count);
+    }
     else if (addr == 0x36 && extras != 16 && register_address == 0x0B)
       inbound = {0x20};
     else if (addr == 0x36 && extras != 16 && register_address == 0x0C)

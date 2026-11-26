@@ -1257,6 +1257,66 @@ int main() {
     }
     CHECK(read.proximity.present && read.proximity.valid);
     CHECK(read.proximity.raw == 42);
+    // PDATA remains readable after consumption; do not renew its evidence
+    // without PVALID. Gesture FIFO completion is independently observable.
+    {
+      TwoWire optical_wire;
+      optical_wire.apds_auto_ready = false;
+      optical_wire.apds_status = 0x01; // AVALID alone is not PVALID
+      desk_robot::AccessorySensors optical;
+      CHECK(optical.begin(optical_wire));
+      std::uint32_t now = 12;
+      const auto poll_cycle = [&]() {
+        for (unsigned lane = 0; lane < 7; ++lane, now += 12)
+          CHECK(optical.poll(now));
+      };
+      const auto& prox = optical.readings().proximity;
+      poll_cycle();
+      CHECK(prox.present && !prox.valid && prox.at_ms == 0U);
+      CHECK(optical_wire.apds_pdata_reads == 0U);
+      optical_wire.apds_status = 0x02;
+      poll_cycle();
+      CHECK(prox.valid && prox.raw == 42U && prox.at_ms > 0U);
+      CHECK(optical_wire.apds_pdata_reads == 1U);
+      CHECK((optical_wire.apds_status & 0x02U) == 0U);
+      const auto first_at = prox.at_ms;
+      optical_wire.apds_pdata = 77;
+      poll_cycle();
+      CHECK(!prox.valid && prox.raw == 42U && prox.at_ms == first_at);
+      CHECK(optical_wire.apds_pdata_reads == 1U);
+
+      // A full, directional gesture can arrive with no new proximity ADC
+      // sample. GVALID falling closes the three-record FIFO session.
+      optical_wire.apds_gesture_status = 1;
+      optical_wire.apds_gesture_fifo = {80, 20, 50, 50, 50, 50, 50, 50,
+                                       20, 80, 50, 50};
+      poll_cycle();
+      CHECK(optical_wire.apds_gesture_fifo.empty());
+      CHECK(prox.gesture_events == 0U);
+      optical_wire.apds_gesture_status = 0;
+      poll_cycle();
+      CHECK(prox.gesture_events == 1U && prox.gesture_direction == 1U);
+      CHECK(!prox.valid && prox.raw == 42U && prox.at_ms == first_at);
+      CHECK(optical_wire.apds_pdata_reads == 1U);
+
+      optical_wire.apds_status = 0x02;
+      for (const int reg : {0x93, 0x9C}) {
+        optical_wire.fail_apds_read_register = reg;
+        poll_cycle();
+        CHECK(!prox.valid && prox.raw == 42U && prox.at_ms == first_at);
+        CHECK(optical_wire.apds_pdata_reads == 1U);
+      }
+      optical_wire.fail_apds_read_register = -1;
+      poll_cycle();
+      CHECK(prox.valid && prox.raw == 77U && prox.at_ms > first_at);
+      CHECK(optical_wire.apds_pdata_reads == 2U);
+      const auto recovered_at = prox.at_ms;
+      optical_wire.apds_status = 0x02;
+      optical_wire.apds_pdata = 255;
+      poll_cycle();
+      CHECK(!prox.valid && prox.saturated() && prox.at_ms == recovered_at);
+      CHECK(!optical_wire.unsafe_parallel_mux);
+    }
     CHECK(read.climate.present && read.climate.valid);
     CHECK(read.climate.temp_centi > 0);
     CHECK(read.climate.humidity_centi > 0);
