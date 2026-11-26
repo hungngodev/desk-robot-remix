@@ -129,7 +129,10 @@ key, candy, object, hand-wave, petting or NFC event, rotates eligible partners,
 uses the existing exclusive speaker lease, and limits the exchange to two turns.
 The listening pet is told explicitly which peer witnessed the event and must
 not pretend it saw that scene. A separate cooldown suppresses repetitive
-invitations. Default consent stays false; see
+invitations: both the configured invitation start interval and the normal
+speech cooldown plus 20 seconds after the latest fleet speech transmission
+must elapse. A transmission is not verified audible playback. Default consent
+stays false; see
 [the authoritative multimedia and social contract](multimodal-voice-video-orchestration.md).
 
 ### Optional daily quiet hours
