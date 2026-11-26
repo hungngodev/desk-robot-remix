@@ -781,3 +781,51 @@ async def test_ina226_signed_boundaries_and_mixed_dock_direction(
     assert not result["charging_verified"] and not result["charging_authorized"]
     assert not result["motor_authorized"]
     assert head.commands == []
+
+
+@pytest.mark.parametrize("seated", [False, True])
+async def test_positive_current_burst_then_zero_crossings_never_verify_charge(
+    monkeypatch, seated,
+):
+    import desk_robot.dock_evidence as evidence
+
+    clock = [100.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: clock[0])
+
+    async def advance(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", advance)
+    windows = ((120, 120, 120), (21, 0, -21), (20, -20, 20))
+    samples = fresh_samples(9)
+    for index, (sample, ma) in enumerate(
+        zip(samples, (ma for window in windows for ma in window), strict=True), 1,
+    ):
+        sample["dock"].update(
+            left_seated=seated, right_seated=seated,
+            input_good=seated, charge_indicated=seated,
+        )
+        sample["power"].update(
+            shunt_uv=ma * 5, pack_ma=ma, pack_valid=True,
+            pack_seq=index, pack_age_ms=0, monitor_valid=True,
+        )
+    head = FakeHead(samples)
+    for expected, window in zip(
+        ("into_pack_unqualified", "indeterminate", "indeterminate"),
+        windows, strict=True,
+    ):
+        start = clock[0]
+        report = await observe_dock_evidence(head, "robot-01")
+        assert clock[0] - start == pytest.approx(0.6)
+        assert report["state"] == ("charger_reports_active" if seated else "not_seated")
+        assert report["stable_three_samples"] is True
+        assert report["raw_pack_samples_fresh"] is True
+        assert report["raw_pack_ma"] == list(window)
+        assert report["raw_pack_direction"] == expected
+        assert report["charger_indicator_net_discharge_conflict"] is False
+        assert report["battery_current_measured"] is False
+        assert report["charging_verified"] is False
+        assert report["charging_authorized"] is False
+        assert report["motor_authorized"] is False
+        assert report.get("charging", False) is False
+    assert head.commands == []
