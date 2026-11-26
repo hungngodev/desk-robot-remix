@@ -98,6 +98,8 @@ def verified_xiaozhi_fleet_tts_config(path: Path, devices: dict[str, str]) -> No
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=ROOT / "config/local.toml")
+    p.add_argument("--secrets", type=Path,
+                   help="Private credentials file (default: local.env beside --config)")
     args = p.parse_args()
     try:
         with args.config.open("rb") as source:
@@ -105,7 +107,10 @@ def main() -> None:
     except (OSError, UnicodeError, tomllib.TOMLDecodeError):
         p.error("Cannot read fleet configuration; check the path and UTF-8 TOML syntax")
     try:
-        credentials = read_private_env(ROOT / "config/local.env")
+        secrets_path = args.secrets
+        if secrets_path is None:
+            secrets_path = args.config.resolve().with_name("local.env")
+        credentials = read_private_env(secrets_path)
         mapping, voices = fleet_device_and_voice_maps(config["robots"])
         for key, value in credentials.items():
             os.environ.setdefault(key, value)
