@@ -2809,20 +2809,31 @@ int main() {
     auto* popup = display.BatteryPopup();
     auto* layer = screen.children.at(screen.children[0] == popup ? 1 : 0);
     assert(layer->x == 48 && layer->y == 16 && layer->w == 32 && layer->h == 48);
+    assert(layer->children.size() == 3);
     auto* pupil = layer->children.at(0)->children.at(0);
-    assert(layer->hidden);
+    auto* mouth = layer->children.at(2);
+    assert(layer->hidden && mouth->hidden);
     display.ShowEyes({true, false, -127, 127});
-    assert(!layer->hidden && pupil->x == 1 && pupil->y == 8);
+    assert(!layer->hidden && pupil->x == 1 && pupil->y == 8 && mouth->hidden);
+    for (uint8_t height : {1, 3, 5, 7, 255}) {
+        display.ShowEyes({true, false, 0, 0, 14, height});
+        assert(!layer->hidden && !mouth->hidden);
+        assert(mouth->w == 10 && mouth->h == std::min<int>(height, 12));
+        assert(mouth->x >= 0 && mouth->x + mouth->w <= layer->w);
+        assert(mouth->y >= 31 && mouth->y + mouth->h <= layer->h);
+    }
     upstream->SetChatMessage("assistant", "first\nline");
     assert(layer->hidden && display.subtitle_text == "first line");
-    display.ShowEyes({true, false, 3, 0});
+    display.ShowEyes({true, false, 3, 0, 14, 7});
     assert(layer->hidden);
     upstream->RemoveChatMessage("assistant", "old");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->RemoveChatMessage("assistant", "first\nline");
     display.ShowEyes({true, false, 3, 0});
-    assert(!layer->hidden && pupil->x == 7);
+    assert(!layer->hidden && pupil->x == 7 && mouth->hidden);
+    display.ShowEyes({true, false, 0, 0, 14, 7});
+    assert(!mouth->hidden);
     assert(upstream->SetEmotion("happy"));
     upstream->SetStatus("Speaking");
     upstream->ShowNotification("Earlier notification");
@@ -2897,7 +2908,9 @@ int main() {
     assert(!layer->hidden && !popup->hidden);
     assert(screen.children.back() == popup);
     assert(layer->radius == 0);
-    for (auto* eye : layer->children) {
+    assert(mouth->radius == LV_RADIUS_CIRCLE);
+    for (int i = 0; i < 2; ++i) {
+        auto* eye = layer->children.at(i);
         assert(eye->radius == LV_RADIUS_CIRCLE);
         assert(eye->children.at(0)->radius == LV_RADIUS_CIRCLE);
     }
@@ -2920,7 +2933,9 @@ int main() {
             for (bool closed : {false, true}) {
                 display.ShowEyes({true, closed, static_cast<int8_t>(x), static_cast<int8_t>(y)});
                 assert(screen.children.back() == popup);
-                for (auto* eye : layer->children) {
+                assert(mouth->hidden);
+                for (int i = 0; i < 2; ++i) {
+                    auto* eye = layer->children.at(i);
                     assert(eye->x >= 0 && eye->x + eye->w <= layer->w);
                     assert(eye->y >= 0 && eye->y + eye->h <= layer->h);
                     auto* dot = eye->children.at(0);
@@ -2946,7 +2961,7 @@ int main() {
     });
     std::thread face_writer([&] {
         for (int i = 0; i < 10000; ++i)
-            display.ShowEyes({true, false, 3, 3});
+            display.ShowEyes({true, false, 3, 3, 14, 7});
         assert(lock_depth == 0);
     });
     upstream_writer.join();
