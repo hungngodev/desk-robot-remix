@@ -60,8 +60,13 @@ discounts of every earlier paid order without double-counting received stock.
 The USD 50.00 cap minus the known USD 13.67 payment leaves at most USD 36.33
 for all further landed costs, including freight and tax. This is a ceiling,
 not a verified remaining allowance: other prior payments may reduce it.
+The baseline comes from [prior-paid-ledger.json](prior-paid-ledger.json).
+For each seller, record explicit `shipping_usd`, `tax_usd`, `duties_usd`
+and `discount_usd`, including verified zeros; missing charges are not zero.
 Run `cd code && uv run --no-sync python scripts/check_budget.py` for the
 canonical historical sample comparison; an unknown landed total stays HOLD.
+A historical sample subtotal above the cap before fees is a hypothetical
+overage, not incurred spending or a verified minimum shortfall for a full cart.
 
 In the private operator evidence JSON, `costs.paid_orders_complete` must be
 `true` only after review of the whole payment history. Its
