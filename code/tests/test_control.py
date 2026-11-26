@@ -1021,10 +1021,9 @@ async def test_motion_camera_validation_runs_outside_event_loop(settings, monkey
     import threading
     from io import BytesIO
 
-    from PIL import Image
-
     from desk_robot import vision
     from desk_robot.calibration import Calibration
+    from PIL import Image
 
     owner = threading.get_ident()
     decoder_threads = []
