@@ -2154,7 +2154,7 @@ class MultimodalOrchestrator:
             generation=generation,
         )
 
-    async def look(self, robot_id: str, question: str) -> dict:
+    def _validate_look(self, robot_id: str, question: str) -> int | None:
         self.hub._check(robot_id)
         if (not self.settings.voice_vision_tools_enabled
                 or not self.settings.vision_model):
@@ -2181,6 +2181,9 @@ class MultimodalOrchestrator:
             for peer in self.hub.robots
         ):
             raise RuntimeError("Another human turn owns the fleet visual floor")
+        return camera_consent_generation
+
+    def _claim_look(self, robot_id: str) -> tuple:
         metrics = self._metrics[robot_id]
         metrics["visual_questions"] += 1
         turn = self._turn_epoch[robot_id]
@@ -2210,6 +2213,210 @@ class MultimodalOrchestrator:
             previous.cancel()
         if current is not None:
             self._look_tasks[robot_id] = current
+        return metrics, turn, question_epoch, current, reserved, end
+
+    async def _select_look_frames(
+        self, robot_id: str, question: str, current_turn: Callable[[], bool],
+    ) -> list[CameraEvidence]:
+        self._sync_camera_boot(robot_id)
+        last = self.hub.frames[robot_id]
+        if (not last
+                or time.monotonic() - last[-1].received_at > 0.6
+                or last[-1].received_at < self._voice_turn_at[robot_id]):
+            # A recent pre-VAD idle frame is NOT evidence captured during
+            # the current spoken visual question. Still retain earlier
+            # frames for before/after questions when a new one arrives.
+            await self.capture(robot_id, source="voice_question")
+        if not current_turn():
+            raise RuntimeError("Visual question superseded by new human speech")
+        self._sync_camera_boot(robot_id)
+        chosen = self.hub.selected(robot_id, question, time.monotonic())
+        if not chosen:
+            raise RuntimeError("No fresh authenticated camera images available")
+        return chosen
+
+    @staticmethod
+    def _look_frames_fresh(chosen: list[CameraEvidence], now: float) -> bool:
+        return all(
+            _frame_is_fresh(frame.received_at, now, _VISUAL_FRAME_MAX_AGE_S)
+            for frame in chosen
+        )
+
+    def _queued_look_budget(
+        self, robot_id: str, chosen: list[CameraEvidence],
+        current_turn: Callable[[], bool], camera_consent_generation: int | None,
+        camera_generation: int,
+    ) -> tuple[float, float]:
+        # Higher-priority user turns can arrive while waiting for a
+        # busy five-robot VLM. Never evaluate a stale older question.
+        if not current_turn():
+            raise RuntimeError("Visual question superseded while queued")
+        # The grant can change while the fleet inference lock is held
+        # by another pet. Never dispatch old-grant JPEGs to the model.
+        if not self._camera_grant_valid(robot_id, camera_consent_generation):
+            raise RuntimeError("Camera consent revoked while queued")
+        self._sync_camera_boot(robot_id)
+        if camera_generation != self.hub._generation[robot_id]:
+            raise RuntimeError("Camera evidence invalidated while queued")
+        # Local 4B+ vision inference can be much slower than the
+        # source exposure. Do not let a 45 second provider request
+        # claim a scene is still current or delay new user turns.
+        model_started = time.monotonic()
+        # Both images of a temporal comparison must still be fresh.
+        if not self._look_frames_fresh(chosen, model_started):
+            raise RuntimeError("Camera observation expired while queued")
+        # The oldest selected image limits the whole inference budget.
+        # A provider timeout is not permission to describe expired JPEGs.
+        remaining = min(
+            self._vision_timeout_s,
+            min(frame.received_at + _VISUAL_FRAME_MAX_AGE_S for frame in chosen)
+            - model_started,
+        )
+        if remaining <= 0:
+            raise RuntimeError("Camera observation expired while queued")
+        return model_started, remaining
+
+    def _look_answer_admissible(
+        self, robot_id: str, chosen: list[CameraEvidence],
+        current_turn: Callable[[], bool], camera_consent_generation: int | None,
+        camera_generation: int,
+    ) -> bool:
+        self._sync_camera_boot(robot_id)
+        now = time.monotonic()
+        return (
+            current_turn()
+            and self._camera_grant_valid(robot_id, camera_consent_generation)
+            and camera_generation == self.hub._generation[robot_id]
+            and self._look_frames_fresh(chosen, now)
+        )
+
+    async def _infer_look_answer(
+        self, robot_id: str, question: str, chosen: list[CameraEvidence],
+        current_turn: Callable[[], bool], camera_consent_generation: int | None,
+        camera_generation: int, model_started: float, remaining: float, metrics: dict,
+    ) -> str:
+        try:
+            # Late provider results must not retain the common inference lock.
+            def admit_answer() -> bool:
+                return self._look_answer_admissible(
+                    robot_id, chosen, current_turn, camera_consent_generation,
+                    camera_generation,
+                )
+
+            images = [frame.jpeg for frame in chosen]
+            # The real adapter decodes off-thread. Recheck the exact
+            # request grant at its final model submission boundary.
+            def request():
+                if isinstance(self.scene, OllamaScene):
+                    return self.scene.answer(question, images, admit=admit_answer)
+                return self.scene.answer(question, images)
+
+            model_task = self._model_admission.start(request)
+            answer = await _bounded_head_reply(
+                model_task,
+                seconds=remaining,
+                timeout_message="Live visual analysis timed out",
+            )
+            metrics["model_latency_last_ms"] = round(
+                (time.monotonic() - model_started) * 1000
+            )
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "Live visual analysis timed out; do not describe old scene"
+            ) from exc
+        except (httpx.HTTPError, OSError) as exc:
+            if not admit_answer():
+                raise RuntimeError(
+                    "Visual question or camera evidence invalidated"
+                ) from exc
+            self.hub.remember_tool(
+                robot_id, "visual_look", "observation_unavailable", time.monotonic()
+            )
+            raise RuntimeError(
+                "observation_unavailable: local vision provider failed"
+            ) from exc
+        return answer
+
+    def _validate_look_completion(
+        self, robot_id: str, chosen: list[CameraEvidence],
+        current_turn: Callable[[], bool], camera_consent_generation: int | None,
+        camera_generation: int,
+    ) -> float:
+        if not current_turn():
+            raise RuntimeError("Visual answer superseded by new speech")
+        # Revoking consent during inference must not publish private evidence.
+        if (not self.settings.voice_vision_tools_enabled
+                or (camera_consent_generation is not None
+                    and getattr(self.settings, "camera_consent_generation", None)
+                    != camera_consent_generation)):
+            raise RuntimeError("Camera consent revoked during visual analysis")
+        self._sync_camera_boot(robot_id)
+        if camera_generation != self.hub._generation[robot_id]:
+            raise RuntimeError("Camera evidence invalidated during visual analysis")
+        completed_at = time.monotonic()
+        if not self._look_frames_fresh(chosen, completed_at):
+            raise RuntimeError("Camera observation expired during visual analysis")
+        return completed_at
+
+    def _publish_look(
+        self, robot_id: str, answer: str, chosen: list[CameraEvidence],
+        completed_at: float, metrics: dict,
+    ) -> dict:
+        metrics["visual_answers"] += 1
+        # The read-only answer is bound to the exact accepted question
+        # epoch and real Mac JPEG. It is a short-lived interpretation,
+        # never a second camera/VLM agent or evidence of motion success.
+        self.hub.remember_tool(
+            robot_id, "visual_look",
+            "observation_unavailable" if answer == "I can't tell from my camera right now."
+            else answer, completed_at,
+        )
+        return {
+            "robot_id": robot_id,
+            "answer": answer,
+            "frames_used": len(chosen),
+            "latest_frame_age_ms": round(
+                1000 * (completed_at - chosen[-1].received_at)
+            ),
+            "model": self.settings.vision_model,
+            "source": "authenticated_xiao_camera_and_local_vlm",
+            "recent_sensor_events": self.hub.recent_events(
+                robot_id, time.monotonic()
+            ),
+            "image_capture_exposure_verified": False,
+            "physical_multimodal_latency_verified": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    async def _run_look(
+        self, robot_id: str, question: str, current_turn: Callable[[], bool],
+        camera_consent_generation: int | None, metrics: dict,
+    ) -> dict:
+        chosen = await self._select_look_frames(robot_id, question, current_turn)
+        # Camera-only loss preserves the human turn but invalidates its frames.
+        camera_generation = self.hub._generation[robot_id]
+        queue_remaining = (
+            min(frame.received_at for frame in chosen) + _VISUAL_FRAME_MAX_AGE_S
+            - time.monotonic()
+        )
+        async with vision_lock_until(self.inference_lock, queue_remaining):
+            model_started, remaining = self._queued_look_budget(
+                robot_id, chosen, current_turn, camera_consent_generation,
+                camera_generation,
+            )
+            answer = await self._infer_look_answer(
+                robot_id, question, chosen, current_turn, camera_consent_generation,
+                camera_generation, model_started, remaining, metrics,
+            )
+        completed_at = self._validate_look_completion(
+            robot_id, chosen, current_turn, camera_consent_generation, camera_generation,
+        )
+        return self._publish_look(robot_id, answer, chosen, completed_at, metrics)
+
+    async def look(self, robot_id: str, question: str) -> dict:
+        camera_consent_generation = self._validate_look(robot_id, question)
+        metrics, turn, question_epoch, current, reserved, end = self._claim_look(robot_id)
 
         def current_turn() -> bool:
             return (not self._closed
@@ -2217,152 +2424,9 @@ class MultimodalOrchestrator:
                     and self._question_epoch[robot_id] == question_epoch)
 
         try:
-            self._sync_camera_boot(robot_id)
-            last = self.hub.frames[robot_id]
-            if (not last
-                    or time.monotonic() - last[-1].received_at > 0.6
-                    or last[-1].received_at < self._voice_turn_at[robot_id]):
-                # A recent pre-VAD idle frame is NOT evidence captured during
-                # the current spoken visual question. Still retain earlier
-                # frames for before/after questions when a new one arrives.
-                await self.capture(robot_id, source="voice_question")
-            if not current_turn():
-                raise RuntimeError("Visual question superseded by new human speech")
-            self._sync_camera_boot(robot_id)
-            chosen = self.hub.selected(robot_id, question, time.monotonic())
-            if not chosen:
-                raise RuntimeError("No fresh authenticated camera images available")
-            # Camera-only loss preserves the human turn but invalidates its frames.
-            camera_generation = self.hub._generation[robot_id]
-            queue_remaining = (
-                min(frame.received_at for frame in chosen) + _VISUAL_FRAME_MAX_AGE_S
-                - time.monotonic()
+            return await self._run_look(
+                robot_id, question, current_turn, camera_consent_generation, metrics,
             )
-            async with vision_lock_until(self.inference_lock, queue_remaining):
-                # Higher-priority user turns can arrive while waiting for a
-                # busy five-robot VLM. Never evaluate a stale older question.
-                if not current_turn():
-                    raise RuntimeError("Visual question superseded while queued")
-                # The grant can change while the fleet inference lock is held
-                # by another pet. Never dispatch old-grant JPEGs to the model.
-                if not self._camera_grant_valid(robot_id, camera_consent_generation):
-                    raise RuntimeError("Camera consent revoked while queued")
-                self._sync_camera_boot(robot_id)
-                if camera_generation != self.hub._generation[robot_id]:
-                    raise RuntimeError("Camera evidence invalidated while queued")
-                # Local 4B+ vision inference can be much slower than the
-                # source exposure. Do not let a 45 second provider request
-                # claim a scene is still current or delay new user turns.
-                model_started = time.monotonic()
-                # Both images of a temporal comparison must still be fresh.
-                if not all(
-                    _frame_is_fresh(frame.received_at, model_started, _VISUAL_FRAME_MAX_AGE_S)
-                    for frame in chosen
-                ):
-                    raise RuntimeError("Camera observation expired while queued")
-                # The oldest selected image limits the whole inference budget.
-                # A provider timeout is not permission to describe expired JPEGs.
-                remaining = min(
-                    self._vision_timeout_s,
-                    min(frame.received_at + _VISUAL_FRAME_MAX_AGE_S for frame in chosen)
-                    - model_started,
-                )
-                if remaining <= 0:
-                    raise RuntimeError("Camera observation expired while queued")
-                try:
-                    # An alternate VLM client may swallow cancellation after
-                    # the deadline. Its late response must not retain the
-                    # common inference lock or become a new human answer.
-                    def admit_answer() -> bool:
-                        self._sync_camera_boot(robot_id)
-                        now = time.monotonic()
-                        return (
-                            current_turn()
-                            and self._camera_grant_valid(robot_id, camera_consent_generation)
-                            and camera_generation == self.hub._generation[robot_id]
-                            and all(
-                                _frame_is_fresh(frame.received_at, now, _VISUAL_FRAME_MAX_AGE_S)
-                                for frame in chosen
-                            )
-                        )
-
-                    images = [frame.jpeg for frame in chosen]
-                    # The real adapter decodes off-thread. Recheck the exact
-                    # request grant at its final model submission boundary.
-                    def request():
-                        if isinstance(self.scene, OllamaScene):
-                            return self.scene.answer(question, images, admit=admit_answer)
-                        return self.scene.answer(question, images)
-
-                    model_task = self._model_admission.start(request)
-                    answer = await _bounded_head_reply(
-                        model_task,
-                        seconds=remaining,
-                        timeout_message="Live visual analysis timed out",
-                    )
-                    metrics["model_latency_last_ms"] = round(
-                        (time.monotonic() - model_started) * 1000
-                    )
-                except TimeoutError as exc:
-                    raise RuntimeError(
-                        "Live visual analysis timed out; do not describe old scene"
-                    ) from exc
-                except (httpx.HTTPError, OSError) as exc:
-                    if not admit_answer():
-                        raise RuntimeError(
-                            "Visual question or camera evidence invalidated"
-                        ) from exc
-                    self.hub.remember_tool(
-                        robot_id, "visual_look", "observation_unavailable", time.monotonic()
-                    )
-                    raise RuntimeError(
-                        "observation_unavailable: local vision provider failed"
-                    ) from exc
-            if not current_turn():
-                raise RuntimeError("Visual answer superseded by new speech")
-            if not self.settings.voice_vision_tools_enabled:
-                # Revoking consent during the slow model call must not
-                # publish a private scene guess into Mac memory or a reply.
-                raise RuntimeError("Camera consent revoked during visual analysis")
-            if (camera_consent_generation is not None
-                    and getattr(self.settings, "camera_consent_generation", None)
-                    != camera_consent_generation):
-                raise RuntimeError("Camera consent revoked during visual analysis")
-            self._sync_camera_boot(robot_id)
-            if camera_generation != self.hub._generation[robot_id]:
-                raise RuntimeError("Camera evidence invalidated during visual analysis")
-            completed_at = time.monotonic()
-            if not all(
-                _frame_is_fresh(frame.received_at, completed_at, _VISUAL_FRAME_MAX_AGE_S)
-                for frame in chosen
-            ):
-                raise RuntimeError("Camera observation expired during visual analysis")
-            metrics["visual_answers"] += 1
-            # The read-only answer is bound to the exact accepted question
-            # epoch and real Mac JPEG. It is a short-lived interpretation,
-            # never a second camera/VLM agent or evidence of motion success.
-            self.hub.remember_tool(
-                robot_id, "visual_look",
-                "observation_unavailable" if answer == "I can't tell from my camera right now."
-                else answer, completed_at,
-            )
-            return {
-                "robot_id": robot_id,
-                "answer": answer,
-                "frames_used": len(chosen),
-                "latest_frame_age_ms": round(
-                    1000 * (completed_at - chosen[-1].received_at)
-                ),
-                "model": self.settings.vision_model,
-                "source": "authenticated_xiao_camera_and_local_vlm",
-                "recent_sensor_events": self.hub.recent_events(
-                    robot_id, time.monotonic()
-                ),
-                "image_capture_exposure_verified": False,
-                "physical_multimodal_latency_verified": False,
-                "motor_authorized": False,
-                "charging_authorized": False,
-            }
         except Exception:
             metrics["visual_errors"] += 1
             raise

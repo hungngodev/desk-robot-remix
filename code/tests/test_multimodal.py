@@ -4720,3 +4720,50 @@ async def test_repeated_stalled_visual_calls_have_bounded_retired_owners():
     finally:
         release.set()
         await service.close()
+
+
+@pytest.mark.parametrize("question", [None, "", " x ", "a" * 281])
+async def test_rejected_visual_question_preserves_active_owner(question):
+    """Invalid questions cannot cancel or retire a valid in-flight look."""
+    robot = "robot-01"
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class PausedVision(Vision):
+        async def answer(self, question, frames):
+            entered.set()
+            await release.wait()
+            return await super().answer(question, frames)
+
+    scene = PausedVision()
+    service = MultimodalOrchestrator(
+        config(), {robot: Head(), "robot-02": Head()}, scene, asyncio.Lock(),
+    )
+    reservation = []
+    service.begin_direct_vision = lambda: reservation.append("begin")
+    service.end_direct_vision = lambda: reservation.append("end")
+    task = asyncio.create_task(service.look(robot, "What is on the desk?"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        metrics = service._metrics[robot].copy()
+        epoch = service._question_epoch[robot]
+        with pytest.raises(ValueError, match="^A short real visual question is required$"):
+            await service.look(robot, question)
+        assert service._metrics[robot] == metrics
+        assert service._question_epoch[robot] == epoch
+        assert service._look_tasks[robot] is task
+        assert not task.done()
+        assert reservation == ["begin"]
+        release.set()
+        result = await asyncio.wait_for(task, timeout=2)
+        assert result["answer"] == "I can see a dark square on the table."
+        assert len(scene.calls) == 1
+        assert reservation == ["begin", "end"]
+        assert not service._look_tasks
+        assert not service.inference_lock.locked()
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await service.close()
