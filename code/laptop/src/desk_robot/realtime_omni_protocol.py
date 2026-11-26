@@ -165,6 +165,21 @@ class I2sTransmissionPrefix:
         self._deferred = False
 
 
+def _decode_audio_delta(encoded: object, *, max_bytes: int) -> bytes:
+    """Validate bounded base64 PCM before allocating decoded audio."""
+    if not isinstance(encoded, str) or len(encoded) > 4 * ((max_bytes + 2) // 3):
+        raise ValueError("Unbounded realtime audio delta")
+    if not encoded:
+        raise ValueError("Malformed or oversized 24 kHz audio PCM")
+    try:
+        pcm = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Invalid base64 audio from realtime model") from exc
+    if not pcm or len(pcm) % 2 or len(pcm) > max_bytes:
+        raise ValueError("Malformed or oversized 24 kHz audio PCM")
+    return pcm
+
+
 class OmniDuplexWire:
     INPUT_RATE = 16000
     OUTPUT_RATE = 24000
@@ -441,15 +456,7 @@ class OmniDuplexWire:
             if (event.get("format") != "pcm16"
                     or type(rate) is not int or rate != self.OUTPUT_RATE):
                 raise ValueError("Unrecognized realtime audio codec or sample rate")
-            encoded = event.get("delta")
-            if not isinstance(encoded, str) or len(encoded) > 130_000:
-                raise ValueError("Unbounded realtime audio delta")
-            try:
-                pcm = base64.b64decode(encoded, validate=True)
-            except (binascii.Error, ValueError) as exc:
-                raise ValueError("Invalid base64 audio from realtime model") from exc
-            if not pcm or len(pcm) % 2 or len(pcm) > self.MAX_OUTPUT_BYTES:
-                raise ValueError("Malformed or oversized 24 kHz audio PCM")
+            pcm = _decode_audio_delta(event.get("delta"), max_bytes=self.MAX_OUTPUT_BYTES)
             self.generated_bytes += len(pcm)
             return OmniAudioDelta(
                 response_id=self.response_id,
