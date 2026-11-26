@@ -155,7 +155,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup", state="running")}
         coordinator.tasks = {"job-01": task}
 
-        async def failed_receipt(head):
+        async def failed_receipt(head, robot_id):
             # Allow cooperative cancellation to finish before STOP fails.
             await asyncio.sleep(0)
             raise RuntimeError("USB STOP failed")
