@@ -518,5 +518,60 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                     )
 
 
+    def test_stale_failed_stop_and_peer_recovery_preserve_latest_evidence(self):
+        from desk_robot.motion_authority import StopConfirmationTracker
+
+        tracker = StopConfirmationTracker(("robot-01", "robot-02"))
+        older = tracker.begin("robot-01")
+        latest = tracker.begin("robot-01")
+        tracker.finish("robot-01", latest, acknowledged=True)
+        self.assertTrue(tracker.blocked("robot-01"))
+        self.assertTrue(tracker.blocked())
+        tracker.finish("robot-01", older, acknowledged=False)
+        self.assertFalse(tracker.blocked())
+
+        failed = tracker.begin("robot-01")
+        tracker.finish("robot-01", failed, acknowledged=False)
+        peer = tracker.begin("robot-02")
+        tracker.finish("robot-02", peer, acknowledged=True)
+        self.assertTrue(tracker.blocked("robot-01"))
+        self.assertFalse(tracker.blocked("robot-02"))
+        self.assertTrue(tracker.blocked())
+        recovery = tracker.begin("robot-01")
+        tracker.finish("robot-01", recovery, acknowledged=True)
+        self.assertFalse(tracker.blocked())
+
+    async def test_nonterminal_recovery_commands_do_not_bypass_status_lock(self):
+        from unittest.mock import AsyncMock
+
+        from desk_robot.transport import HttpHead
+
+        for command in ("stop", "disarm"):
+            with self.subTest(command=command):
+                ordered = AsyncMock(return_value={"reply": f"OK {command}"})
+                head = SimpleNamespace(
+                    lock=asyncio.Lock(), _command_generation=0,
+                    _command_uncertain=False, _check_command_recovery=lambda _: None,
+                    _ordered_command=ordered,
+                )
+                task = None
+                try:
+                    async with head.lock:
+                        task = asyncio.create_task(HttpHead.command(head, command))
+                        await asyncio.sleep(0)
+                        self.assertFalse(task.done())
+                        ordered.assert_not_awaited()
+                    receipt = await asyncio.wait_for(task, timeout=1)
+                    self.assertEqual(receipt["reply"], f"OK {command}")
+                    self.assertEqual(head._command_generation, 0)
+                    self.assertFalse(head._command_uncertain)
+                    ordered.assert_awaited_once_with(
+                        command, f"OK {command}", 0, dispatch_check=None,
+                    )
+                finally:
+                    if task is not None:
+                        await asyncio.gather(task, return_exceptions=True)
+
+
 if __name__ == "__main__":
     unittest.main()

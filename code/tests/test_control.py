@@ -2859,3 +2859,15 @@ async def test_running_health_does_not_attribute_foreign_or_invalid_fault(
         assert not head.commands
     finally:
         await coordinator.close()
+
+
+def test_expired_permit_removes_only_its_owner(monkeypatch):
+    monkeypatch.setattr("desk_robot.controller.time", SimpleNamespace(monotonic=lambda: 100.0))
+    owner = SimpleNamespace(permits={"robot-01": 99.0, "robot-02": 101.0})
+    Coordinator._require_live_permit(owner, "robot-02")
+    with pytest.raises(OperationError, match="expired"):
+        Coordinator._require_live_permit(owner, "robot-01")
+    assert owner.permits == {"robot-02": 101.0}
+    with pytest.raises(OperationError, match="missing"):
+        Coordinator._require_live_permit(owner, "robot-01")
+    assert owner.permits == {"robot-02": 101.0}
