@@ -37,6 +37,9 @@ class GestureDecoder {
       collecting_ = false;
       return PollAction::None;
     }
+    // GVALID may remain asserted with an empty FIFO. Bound the entire
+    // session from its first valid status, not its first successful read.
+    begin_batch(now_ms);
     return PollAction::Read;
   }
   void begin_batch(std::uint32_t now_ms) {

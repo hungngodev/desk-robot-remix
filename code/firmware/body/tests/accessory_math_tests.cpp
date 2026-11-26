@@ -256,6 +256,74 @@ static void check_gesture_session_recovery() {
   }
 }
 
+static void check_gesture_stalled_fifo() {
+  using desk_robot::GestureDecoder;
+  using Action = GestureDecoder::PollAction;
+  for (const auto start : {0U, 100U, 0xffffff80U}) {
+    for (const bool partial : {false, true}) {
+      GestureDecoder g;
+      std::uint8_t direction = 99;
+      CHECK(g.poll_status(1, start, direction) == Action::Read && direction == 0);
+      // Empty FIFO polls must not postpone the deadline. A late batch
+      // must not start a new session or refresh the original clock.
+      CHECK(g.poll_status(1, start + 500U, direction) == Action::Read);
+      if (partial) {
+        g.begin_batch(start + 500U);
+        g.push(180, 30, 85, 85);
+        g.push(90, 90, 85, 85);
+      }
+      CHECK(g.poll_status(1, start + 700U, direction) == Action::Read);
+      CHECK(g.poll_status(1, start + 701U, direction) == Action::Clear && direction == 0);
+      CHECK(g.poll_status(1, start + 702U, direction) == Action::Clear && direction == 0);
+      CHECK(g.poll_status(0, start + 703U, direction) == Action::None && direction == 0);
+      CHECK(g.poll_status(1, start + 704U, direction) == Action::Read);
+      g.begin_batch(start + 704U);
+      g.push(30, 180, 85, 85);
+      // One fresh sample cannot complete the previous partial swipe.
+      CHECK(g.poll_status(0, start + 705U, direction) == Action::None && direction == 0);
+      CHECK(g.poll_status(1, start + 706U, direction) == Action::Read);
+      g.begin_batch(start + 706U);
+      g.push(180, 30, 85, 85);
+      g.push(90, 90, 85, 85);
+      g.begin_batch(start + 707U);
+      g.push(30, 180, 85, 85);
+      CHECK(g.poll_status(0, start + 708U, direction) == Action::None && direction == 1);
+    }
+    // A completed-looking late batch must not publish on an idle status.
+    GestureDecoder g;
+    std::uint8_t direction = 99;
+    CHECK(g.poll_status(1, start, direction) == Action::Read);
+    CHECK(g.poll_status(1, start + 600U, direction) == Action::Read);
+    g.begin_batch(start + 600U);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+    CHECK(g.poll_status(0, start + 701U, direction) == Action::None && direction == 0);
+  }
+}
+
+static void check_gesture_chunked_diagonals() {
+  using desk_robot::GestureDecoder;
+  using Action = GestureDecoder::PollAction;
+  for (const int vertical : {-1, 1}) {
+    for (const int horizontal : {-1, 1}) {
+      for (const int minor : {15, 30}) {
+        GestureDecoder g;
+        std::uint8_t direction = 99;
+        CHECK(g.poll_status(1, 100, direction) == Action::Read);
+        g.begin_batch(100);
+        g.push(100, 100, 100, 100);
+        g.push(100, 100, 100, 100);
+        CHECK(g.poll_status(1, 200, direction) == Action::Read && direction == 0);
+        g.begin_batch(200);
+        g.push(100 + vertical * 30, 100 - vertical * 30,
+               100 + horizontal * minor, 100 - horizontal * minor);
+        CHECK(g.poll_status(0, 201, direction) == Action::None && direction == 0);
+      }
+    }
+  }
+}
+
 static void check_bmp280_boundaries() {
   desk_robot::Bmp280Trim d{};
   d.t1 = 16384;
@@ -400,6 +468,8 @@ int main() {
     check_bmp280_trim_registers();
     check_gesture_boundaries();
     check_gesture_session_recovery();
+    check_gesture_chunked_diagonals();
+    check_gesture_stalled_fifo();
     check_gesture_optical_faults();
     const std::uint8_t known[2] = {0xBE, 0xEF};
     CHECK(desk_robot::sensirion_crc(known, 2) == 0x92);
