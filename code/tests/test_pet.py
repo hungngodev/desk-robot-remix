@@ -1816,6 +1816,54 @@ async def test_human_touch_stops_mac_without_false_latched_fault_memory(
         await pet.close()
 
 
+@pytest.mark.parametrize(("offset", "ready", "expected"), [
+    (-0.02, True, "floor_out_of_range"),
+    (0.0, True, "floor_out_of_range"),
+    (0.02, False, "floor_out_of_range"),
+    (0.02, True, "none"),
+])
+async def test_delayed_body_status_cannot_clear_newer_fault(
+    fleet, tmp_path, offset, ready, expected,
+):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def stop(robot_id):
+        entered.set()
+        await release.wait()
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), on_local_fault=stop)
+    robot_id = "robot-01"
+    state = pet.states[robot_id]
+    state.enabled, state.generation = True, 4
+
+    def body(fault, ready):
+        return {"safety": {"required": True, "ready": ready, "fault": fault}}
+
+    fault_at = time.monotonic()
+    task = None
+    try:
+        await pet._observe_body_safety(
+            robot_id, 4, body("none", True), received_at=fault_at - 0.1,
+        )
+        task = asyncio.create_task(pet._observe_body_safety(
+            robot_id, 4, body("floor_out_of_range", False), received_at=fault_at,
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await pet._observe_body_safety(
+            robot_id, 4, body("none", ready), received_at=fault_at + offset,
+        )
+        assert pet.status(robot_id)["last_local_safety_fault"] == expected
+        assert state.safety_fault_events == 1
+    finally:
+        release.set()
+        if task is not None:
+            await task
+        state.enabled = False
+        await pet.close()
+
+
 async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
     fleet, tmp_path,
 ):

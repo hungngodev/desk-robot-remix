@@ -223,6 +223,7 @@ class PetState:
     last_touch_boot_id: int | None = None
     retired_touch_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_safety_fault: str | None = None
+    last_safety_received_at: float = -math.inf
     last_social_fault_at: float = -math.inf
     safety_fault_events: int = 0
     last_extra_mask: int | None = None
@@ -578,6 +579,7 @@ class PetController:
         state.last_extra_boot_id = None
         state.retired_extra_boot_ids.clear()
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
+        state.last_safety_received_at = -math.inf
         state.aux_reads = 0
         state.last_battery_low = None
         state.last_fuel_seq = None
@@ -1855,6 +1857,15 @@ class PetController:
         if not state.enabled or state.generation != generation:
             return
         previous = state.last_safety_fault
+        # A routine status received before a fault must not clear the fault
+        # while its urgent stop is pending. Recovery requires a newer ready
+        # body report; this host receipt fence is not a firmware rearm.
+        if (previous not in (None, "none", "not_required")
+                and fault in ("none", "not_required")
+                and (fault != "none" or safety["ready"] is not True
+                     or received_at <= state.last_safety_received_at)):
+            return
+        state.last_safety_received_at = max(state.last_safety_received_at, received_at)
         state.last_safety_fault = fault
         if previous != fault and fault not in ("none", "not_required"):
             state.last_social_fault_at = time.monotonic()
