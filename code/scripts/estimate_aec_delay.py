@@ -119,6 +119,12 @@ def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
     return np.interp(ticks, np.arange(len(source)), source)
 
 
+def _reject_saturated_pcm(samples: np.ndarray, channel: str) -> None:
+    """Fail closed at either PCM16 rail; clipping obscures the acoustic signal."""
+    if np.any((samples <= -1.0) | (samples >= 32767 / 32768)):
+        raise ValueError(f"{channel} contains clipped or out-of-range PCM16 samples")
+
+
 def estimate_delay(
     reference: np.ndarray, microphone: np.ndarray,
     *, sample_rate: int = 16000, max_delay_ms: float = 250,
@@ -145,6 +151,8 @@ def estimate_delay(
         raise ValueError("Aligned reference and microphone need equal sample counts")
     if not np.isfinite(reference).all() or not np.isfinite(microphone).all():
         raise ValueError("Nonfinite audio samples")
+    _reject_saturated_pcm(reference, "Speaker reference")
+    _reject_saturated_pcm(microphone, "Microphone")
     ref = reference.astype(np.float64, copy=False)
     mic = microphone.astype(np.float64, copy=False)
     ref, mic = ref - ref.mean(), mic - mic.mean()
@@ -333,6 +341,8 @@ def _estimate_capture(args: argparse.Namespace) -> dict:
         raise ValueError("Microphone recording must be 16 kHz")
     if args.capture_report is not None:
         validate_capture_report(args.capture_report, speaker, speaker_rate, microphone, mic_rate)
+    # Resampling can hide a saturated raw speaker sample.
+    _reject_saturated_pcm(speaker, "Speaker reference")
     reference = resample_reference(speaker, speaker_rate)
     report = estimate_delay(
         reference, microphone, max_delay_ms=args.max_delay_ms,

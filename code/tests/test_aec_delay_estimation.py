@@ -599,3 +599,72 @@ def test_clock_drift_rejects_near_silent_gap_between_primary_windows():
         )["sample_lag"] == 1120
     with pytest.raises(ValueError, match="not a stable clock drift"):
         estimate_clock_drift(reference, microphone)
+
+
+@pytest.mark.parametrize("channel", ["reference", "microphone"])
+@pytest.mark.parametrize("rail", [-1.0, 32767 / 32768, 1.1, -1.1])
+def test_saturated_pcm_cannot_emit_aec_delay(channel, rail):
+    reference = np.random.default_rng(1237).uniform(-0.25, 0.25, 8000)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    samples = reference if channel == "reference" else microphone
+    samples[2000:2100] = rail
+    with np.errstate(all="raise"), pytest.raises(ValueError, match="clipped or out-of-range"):
+        estimate_delay(reference, microphone)
+
+
+@pytest.mark.parametrize("channel", ["reference", "microphone"])
+@pytest.mark.parametrize("level", [0.0, 0.125])
+def test_flat_capture_rejected_without_invalid_arithmetic(channel, level):
+    reference = np.random.default_rng(1237).uniform(-0.25, 0.25, 8000)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    samples = reference if channel == "reference" else microphone
+    samples[:] = level
+    with np.errstate(all="raise"), pytest.raises(ValueError, match="acoustic signal insufficient"):
+        estimate_delay(reference, microphone)
+
+
+def test_near_rail_unclipped_audio_retains_delay():
+    reference = np.random.default_rng(1237).uniform(-0.999, 0.999, 8000)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    with np.errstate(all="raise"):
+        report = estimate_delay(reference, microphone)
+    assert report["sample_lag"] == 1120
+    assert report["normalized_correlation"] == pytest.approx(1.0)
+    assert report["aec_physically_verified"] is False
+
+
+@pytest.mark.parametrize("rail", [-32768, 32767])
+def test_raw_32khz_speaker_saturation_is_rejected_before_resampling(tmp_path, rail):
+    import argparse
+    import wave
+
+    speaker = np.random.default_rng(1237).integers(-6000, 6000, 16000, dtype=np.int16)
+    speaker[2000] = rail
+    reference = resample_reference(speaker.astype(float) / 32768, 32000)
+    assert np.max(reference) < 32767 / 32768
+    assert np.min(reference) > -1.0
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    assert estimate_delay(reference, microphone)["sample_lag"] == 1120
+    for name, rate, samples in (
+        ("speaker.wav", 32000, speaker),
+        ("mic.wav", 16000, (microphone * 32768).astype(np.int16)),
+    ):
+        with wave.open(str(tmp_path / name), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            wav.writeframes(samples.astype("<i2").tobytes())
+    args = argparse.Namespace(
+        speaker=tmp_path / "speaker.wav", microphone=tmp_path / "mic.wav",
+        capture_report=None, max_delay_ms=250,
+    )
+    with pytest.raises(ValueError, match="Speaker reference contains clipped"):
+        source["_estimate_capture"](args)
+
+
+def test_periodic_delay_rejected_under_strict_numpy_arithmetic():
+    time = np.arange(8000)
+    reference = 0.18 * np.sin(2 * np.pi * 1000 * time / 16000)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    with np.errstate(all="raise"), pytest.raises(ValueError, match="Ambiguous acoustic delay"):
+        estimate_delay(reference, microphone)
