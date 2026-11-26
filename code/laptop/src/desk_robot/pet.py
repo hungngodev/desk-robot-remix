@@ -1927,8 +1927,11 @@ class PetController:
             return
         advance = _sensor_counter_advance(count, old)
         if advance == 0:
-            if count == old:
-                state.last_cap_mask = mask
+            if count == old and prior_mask is not None:
+                # With no new rise, only releases can change the mask. A
+                # contradictory or reordered mask makes zone attribution
+                # uncertain until a forward counter establishes a baseline.
+                state.last_cap_mask = None if mask & ~prior_mask else mask
             return  # duplicate or backwards/stale frame: do NOT rewind baseline
         if advance > 8:
             state.last_cap_events = count

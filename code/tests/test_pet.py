@@ -4023,6 +4023,44 @@ async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path
         await pet.close()
 
 
+async def test_cap1188_same_count_mask_cannot_invent_pad_identity(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 4
+
+    async def send(mask, count):
+        await pet._observe_cap("robot-01", 4, {
+            "cap": mask, "cap_ok": True, "cap_events": count,
+        })
+
+    try:
+        await send(0, 8)
+        await send(1, 8)
+        assert state.last_cap_mask is None
+        await send(1, 8)
+        assert state.last_cap_mask is None
+        assert not any(m.kind == "petting_zone" for m in memory.recent("robot-01"))
+
+        await send(3, 9)
+        rows = [m for m in memory.recent("robot-01") if m.kind == "petting_zone"]
+        assert len(rows) == 1
+        assert "registered 1 new touch contact" in rows[0].summary
+
+        # A release does not increment the rising counter. The next new
+        # electrode is nevertheless identifiable once the mask is trusted.
+        await send(2, 9)
+        assert state.last_cap_mask == 2
+        await send(130, 10)
+        rows = [m for m in memory.recent("robot-01") if m.kind == "petting_zone"]
+        assert len(rows) == 2
+        assert any("pad 8 was touched" in m.summary for m in rows)
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tmp_path):
     cancellations = []
     async def stop(robot_id):
