@@ -150,3 +150,51 @@ def test_socket_released_when_output_creation_fails(tmp_path):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind(("127.0.0.1", target))
     assert output.read_bytes() == b"existing"
+
+
+def test_late_datagram_discarded_and_socket_released(tmp_path, monkeypatch):
+    output = tmp_path / "late.wav"
+    target = port()
+    ticks = iter((10.0, 10.0, 10.2))
+
+    class LateReceiver:
+        def __enter__(self):
+            self.receiver = real_socket(socket.AF_INET, socket.SOCK_DGRAM)
+            return self
+
+        def __exit__(self, *args):
+            self.receiver.close()
+
+        def bind(self, address):
+            self.receiver.bind(address)
+
+        def settimeout(self, timeout):
+            self.receiver.settimeout(timeout)
+
+        def recvfrom(self, size):
+            return b"ab" * 800, ("127.0.0.1", 12345)
+
+    real_socket = socket.socket
+    with monkeypatch.context() as patch:
+        patch.setattr(server.time, "monotonic", lambda: next(ticks))
+        patch.setattr(server.socket, "socket", lambda *args: LateReceiver())
+        with pytest.raises(ValueError, match="no valid PCM"):
+            server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True)
+    with wave.open(str(output)) as wav:
+        assert wav.getnframes() == 0
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(("127.0.0.1", target))
+
+
+def test_competing_bind_and_timeout_release(tmp_path):
+    output = tmp_path / "competing.wav"
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as active:
+        active.bind(("127.0.0.1", 0))
+        target = active.getsockname()[1]
+        with pytest.raises(OSError):
+            server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True)
+        assert not output.exists()
+    with pytest.raises(ValueError, match="no valid PCM"):
+        server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .02, output, consent=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(("127.0.0.1", target))

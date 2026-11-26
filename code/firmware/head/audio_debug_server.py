@@ -62,6 +62,9 @@ def capture(
                     data, address = receiver.recvfrom(65535)
                 except socket.timeout:
                     break
+                # A receive may return after the deadline if the process was descheduled.
+                if time.monotonic() >= deadline:
+                    break
                 if address[0] != peer or not data or len(data) % frame_bytes:
                     continue
                 data = data[:remaining]
