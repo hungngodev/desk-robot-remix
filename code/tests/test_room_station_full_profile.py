@@ -376,6 +376,7 @@ def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
     )[0]
     harness = r"""
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 constexpr uint32_t kReportMs = 1000, kThermalScanMaxMs = 250;
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
@@ -388,7 +389,9 @@ uint8_t thermal_next_chunk;
 uint32_t thermal_requested_ms, thermal_started_ms, thermal_sample_ms;
 float thermal[64], thermal_staging[64];
 namespace desk_robot_room {
-bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels) {
+bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels,
+                        std::size_t destination_count) {
+  assert(destination_count == 64U - 8U * chunk);
   clock_ms += transfer_ms;
   for (unsigned i = 0; i < 8; ++i) pixels[i] = float(chunk + 1);
   return true;
