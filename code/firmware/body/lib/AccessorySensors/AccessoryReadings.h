@@ -59,7 +59,12 @@ inline int ina226_shunt_uv(std::int16_t raw) {
 // before division; do not assign an old shunt reading a fresh identity.
 inline bool ina226_shunt_uv_from_raw(std::uint16_t raw, int& out_uv) {
   if (raw == 0x7fffU || raw == 0x8000U) return false;
-  out_uv = ina226_shunt_uv(static_cast<std::int16_t>(raw));
+  // Decode the two's-complement wire value before narrowing: converting a
+  // large uint16_t directly to int16_t is implementation-defined in C++17.
+  const std::int32_t signed_code = raw < 0x8000U
+      ? static_cast<std::int32_t>(raw)
+      : static_cast<std::int32_t>(raw) - 65536;
+  out_uv = ina226_shunt_uv(static_cast<std::int16_t>(signed_code));
   return true;
 }
 inline bool ina226_pack_current_ma(int signed_shunt_uv,

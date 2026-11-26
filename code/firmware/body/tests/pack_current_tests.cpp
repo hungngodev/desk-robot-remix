@@ -110,6 +110,16 @@ int main() {
   }
   CHECK(valid_codes == 65534U);
 
+  // Independently cover every accepted integer microvolt input, including
+  // values between ADC codes. Neither polarity is a qualified trip limit.
+  for (int uv = -81917; uv <= 81915; ++uv) {
+    ma = 999;
+    CHECK(ina226_pack_current_ma(uv, 5U, ma));
+    const int magnitude = uv < 0 ? -uv : uv;
+    CHECK(ma == (uv < 0 ? -(magnitude / 5) : magnitude / 5));
+    CHECK(ma >= -16383 && ma <= 16383);
+  }
+
   // Invalid conversions preserve the caller's output. Validity, not an old
   // current value or a zero sentinel, is what a consumer must check.
   for (int sample : {81916, 81917, 81918, -81918,
