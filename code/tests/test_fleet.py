@@ -312,6 +312,8 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
         assert conversation.group_activity_timeline(robot_id)[0]["status"] == "completed"
 
     # The disconnected identity is admitted again only after simulated recovery.
+    # Retain the actual survivor buffers to detect reuse after admission.
+    survivor_histories = dict(conversation.histories)
     speaker.offline.remove(lost_id)
     now[0] += 300
     transcript = await conversation.run(IDS, "A new game")
@@ -319,6 +321,14 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
     assert speaker.owner is None and speaker.releases == 3
     assert conversation.active is None and not conversation.session_lock.locked()
     assert len({id(history) for history in conversation.histories.values()}) == 5
+    for robot_id, history in conversation.histories.items():
+        assert history is not survivor_histories.get(robot_id)
+        assert history[1]["content"] == "Discuss this with your robot peers: A new game"
+        assert all(
+            "Continue the game" not in entry["content"]
+            and "Play a word game" not in entry["content"]
+            for entry in history
+        )
 
 
 async def test_cancelled_stop_caller_cannot_interrupt_session_cleanup(fleet):

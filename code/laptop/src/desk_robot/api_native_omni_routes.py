@@ -120,14 +120,14 @@ def register_native_omni_routes(
                 # Even an immediate OFF/ON replaces the old camera grant.
                 # Private memory read under old live consent must not escape.
                 raise HTTPException(403, "Native live consent revoked during read")
-            current = getattr(
-                getattr(app.state.runtime, "conversation", None),
-                "_private_memory_generation", None,
-            )
-            # The owner and its exact per-pet integer lease must still
-            # exist after SQLite yields. Never allow a missing key to
-            # masquerade as generation zero or bool True as integer one.
-            if (not isinstance(current, dict)
+            current_owner = getattr(app.state.runtime, "conversation", None)
+            current = getattr(current_owner, "_private_memory_generation", None)
+            # A replaced owner or revision map can reuse the same numeric
+            # revision after restart. Reject its predecessor's snapshot,
+            # without rejecting another pet's in-place revision change.
+            if (current_owner is not owner
+                    or current is not revisions
+                    or not isinstance(current, dict)
                     or type(current.get(robot_id)) is not int
                     or current[robot_id] != generation):
                 raise HTTPException(409, "Private memory changed during native startup")

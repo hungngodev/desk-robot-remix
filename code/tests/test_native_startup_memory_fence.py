@@ -12,7 +12,10 @@ from fastapi.routing import APIRoute
 
 
 @pytest.mark.parametrize(
-    "changed_pet", ["self_delete", "self_edit", "other_pet", "bool_alias"]
+    "changed_pet", [
+        "self_delete", "self_edit", "other_pet", "bool_alias",
+        "owner_restart", "revision_map_restart",
+    ],
 )
 async def test_paused_native_startup_read_is_revision_fenced(settings, changed_pet):
     settings.mode = "hardware"
@@ -53,6 +56,12 @@ async def test_paused_native_startup_read_is_revision_fenced(settings, changed_p
         assert await asyncio.to_thread(entered.wait, 1.0)
         if changed_pet == "bool_alias":
             generations[robot] = True
+        elif changed_pet == "owner_restart":
+            app.state.runtime.conversation = SimpleNamespace(
+                _private_memory_generation=generations,
+            )
+        elif changed_pet == "revision_map_restart":
+            app.state.runtime.conversation._private_memory_generation = dict(generations)
         else:
             generations[peer if changed_pet == "other_pet" else robot] += 1
     finally:
