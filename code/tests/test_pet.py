@@ -3702,6 +3702,13 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 14, report(2, 0xFEDCBA98, seq=2))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
+        # Qualification allows a toy presentation event, not storage of a
+        # stable personal badge identifier. Both different tags stay anonymous.
+        summaries = [
+            m.summary for m in memory.recent("robot-01") if m.kind == "nfc_tag"
+        ]
+        assert summaries == ["An NFC tag was presented to my reader"] * 2
+        assert state.last_event == "An NFC tag was presented to my reader"
         previous_camera_events = sum(
             event["kind"] == "nfc_tag"
             for event in hub.recent_events("robot-01", time.monotonic())

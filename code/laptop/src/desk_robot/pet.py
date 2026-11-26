@@ -1459,7 +1459,9 @@ class PetController:
                         and nfc["t"] != 0):
                     changes.append(SceneChange(
                         "nfc_tag",
-                        f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
+                        # A qualified toy reader can also see personal badges.
+                        # Keep only the presentation edge, never its linkable token.
+                        "An NFC tag was presented to my reader",
                         1.0,
                     ))
                 state.last_nfc_events = current_events
