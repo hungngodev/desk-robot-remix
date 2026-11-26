@@ -23,6 +23,34 @@ bool feed(desk_robot_room::RadarDataFrameGate& gate,
   return valid;
 }
 
+void check_target_evidence() {
+  desk_robot_room::RadarDataFrameGate gate;
+  uint8_t frame[sizeof(kBasicFrame)] = {};
+  for (std::size_t i = 0; i < sizeof(frame); ++i) frame[i] = kBasicFrame[i];
+  // Independently vary target bits, distance and energy. A positive target
+  // bit alone must not turn an empty echo into a moving/stationary claim.
+  for (uint8_t state = 0; state <= 3; ++state) {
+    for (unsigned mask = 0; mask < 16U; ++mask) {
+      const bool moving_distance = (mask & 1U) != 0;
+      const bool moving_energy = (mask & 2U) != 0;
+      const bool stationary_distance = (mask & 4U) != 0;
+      const bool stationary_energy = (mask & 8U) != 0;
+      frame[8] = state;
+      frame[9] = moving_distance ? 42 : 0;
+      frame[11] = moving_energy ? 50 : 0;
+      frame[12] = stationary_distance ? 35 : 0;
+      frame[14] = stationary_energy ? 60 : 0;
+      assert(feed(gate, frame));
+      const auto& sample = gate.completed_sample();
+      assert(sample.presence == (state != 0));
+      assert(sample.moving == ((state & 1U) != 0 && moving_distance && moving_energy));
+      assert(sample.stationary == ((state & 2U) != 0 && stationary_distance && stationary_energy));
+      assert(sample.moving_cm == (moving_distance ? 42 : 0));
+      assert(sample.stationary_cm == (stationary_distance ? 35 : 0));
+    }
+  }
+}
+
 void check_stream_recovery() {
   using desk_robot_room::RadarDataFrameGate;
   using desk_robot_room::RadarSampleClock;
@@ -106,6 +134,7 @@ void check_stream_recovery() {
 
 int main() {
   check_stream_recovery();
+  check_target_evidence();
   // A dropped suffix (e.g. UART overflow during an I2C transaction)
   // must not consume the next complete basic packet.
   for (std::size_t cut = 1; cut < sizeof(kBasicFrame); ++cut) {
