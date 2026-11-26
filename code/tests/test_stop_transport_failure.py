@@ -55,7 +55,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
         head = SimulatedHead("robot-01")
         await head.command("arm")
         self.assertTrue(head.armed)
-        pulse = await _bounded_pulse_stop(head)
+        pulse = await _bounded_pulse_stop(head, "robot-01")
         self.assertEqual(pulse["reply"], "OK stop")
         self.assertTrue(head.armed)  # one authorized job can drive again
         await head.command("drive 20 20 100")
