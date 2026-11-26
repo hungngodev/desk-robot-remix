@@ -763,3 +763,101 @@ async def test_cancelled_status_poll_releases_camera_and_audio_leases():
         for task in pending:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
+
+
+@pytest.mark.parametrize("score_motion", [False, True])
+async def test_motion_scoring_preserves_frame_accounting_and_one_hz_gate(
+    monkeypatch, score_motion,
+):
+    """Use a logical receipt clock instead of sleeps to exercise scoring cadence."""
+    class Clock:
+        now = 0.0
+
+        def monotonic(self):
+            return self.now
+
+    clock = Clock()
+    monkeypatch.setattr(bench, "time", clock)
+    prepared = []
+    comparisons = []
+
+    def prepare(jpeg):
+        prepared.append(jpeg)
+        return jpeg, jpeg, 10.0 * len(prepared)
+
+    def change(before, after):
+        comparisons.append((before, after))
+        return 0.375
+
+    monkeypatch.setattr(bench, "_prepare", prepare)
+    monkeypatch.setattr(bench, "change_fraction", change)
+    frames = [JPEG + bytes([i]) + b"\xff\xd9" for i in range(3)]
+
+    class Head:
+        async def stream_frames(self):
+            for i, received in enumerate((0.1, 0.6, 1.2)):
+                clock.now = received
+                self._last_camera = (7, i + 1, round(received * 1_000_000))
+                yield frames[i], received
+            clock.now = 1.3
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    report = await bench.measure(
+        Head(), "robot-01", seconds=1.3, stream=True, score_motion=score_motion,
+    )
+    assert report["camera_frames_received"] == 3
+    assert report["distinct_source_camera_identities"] == 3
+    assert report["camera_error_count"] == 0
+    assert report["stream_frame_interarrival"]["count"] == 2
+    assert report["motion_score_instrumented"] is score_motion
+    assert report["motion_sample_pair_count"] == int(score_motion)
+    assert report["motion_changed_fraction_max"] == (0.375 if score_motion else None)
+    assert report["motion_changed_fraction_p95"] == (0.375 if score_motion else None)
+    assert report["brightness_change_max"] == (10.0 if score_motion else None)
+    assert prepared == ([frames[0], frames[2]] if score_motion else [])
+    assert comparisons == ([(frames[0], frames[2])] if score_motion else [])
+    assert report["physical_motion_qualified"] is False
+
+
+async def test_final_audio_diagnostic_does_not_dilute_camera_fps(monkeypatch):
+    """Advance only the benchmark clock during the final optional GET."""
+    class Clock:
+        offset = 0.0
+
+        def monotonic(self):
+            return time.monotonic() + self.offset
+
+    clock = Clock()
+    monkeypatch.setattr(bench, "time", clock)
+
+    class Head:
+        seq = 0
+        audio_calls = 0
+
+        async def snapshot(self):
+            self.seq += 1
+            self._last_camera = (7, self.seq, self.seq * 100)
+            return JPEG
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            self.audio_calls += 1
+            clock.offset += 100.0
+            return {"diagnostic": "read-only"}
+
+    head = Head()
+    report = await bench.measure(
+        head, "robot-01", seconds=0.1, camera_period_s=0.05, status_period_s=0.05,
+    )
+    assert head.audio_calls == 1
+    assert report["camera_frames_received"] > 0
+    assert report["elapsed_s"] < 100.0
+    assert report["successful_camera_fps"] > 1.0
+    assert report["aec_reference_diagnostics"] == {"diagnostic": "read-only"}
+    assert report["aec_reference_probe_error"] is None
+    assert report["concurrent_audio_samples"] == 0
+    assert report["speaker_silence_verified"] is False
