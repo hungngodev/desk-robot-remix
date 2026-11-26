@@ -795,7 +795,7 @@ class Coordinator:
     ) -> dict:
         return await dispatch_job_command(
             self.heads[job.robot_id], command, lambda: self._require_job_motion(job),
-            dispatch_check=dispatch_check,
+            robot_id=job.robot_id, dispatch_check=dispatch_check,
         )
 
     async def _keepalive(self, job: Job, acknowledged: asyncio.Event):

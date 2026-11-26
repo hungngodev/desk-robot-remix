@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 from typing import Awaitable, Callable, TypeVar
 
+from .command_framing import command_ack_matches, expected_ack
+
 _T = TypeVar("_T")
 
 
@@ -15,10 +17,12 @@ def require_active_operation(state: str) -> None:
 
 
 async def dispatch_job_command(
-    head, command: str, check: Callable[[], None], *,
+    head, command: str, check: Callable[[], None], *, robot_id: str,
     dispatch_check: Callable[[], None] | None = None,
 ) -> dict:
-    """Recheck host authority before enqueue, at supported dispatch, and after ACK."""
+    """Recheck authority and require a matching command receipt from every adapter."""
+    expected = expected_ack(command)
+
     def at_dispatch() -> None:
         check()
         if dispatch_check is not None:
@@ -33,6 +37,8 @@ async def dispatch_job_command(
             dispatch_check()
         reply = await head.command(command)
     check()
+    if not command_ack_matches(reply, robot_id, expected):
+        raise OperationError("Unmatched or failed command ACK; movement not retried")
     return reply
 
 
