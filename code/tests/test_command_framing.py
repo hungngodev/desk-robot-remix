@@ -96,3 +96,31 @@ def test_command_requires_plain_wire_string(command):
 )
 def test_ack_requires_plain_decoded_receipt_types(receipt):
     assert not command_ack_matches(receipt, "r1", "OK halt")
+
+
+@pytest.mark.parametrize("length", [94, 95, 96])
+def test_command_line_length_boundary(length):
+    # A padded in-range servo angle isolates the wire length from numeric bounds.
+    command = "lift " + "60".zfill(length - len("lift "))
+    assert len(command.encode("ascii")) == length
+    if length <= 95:
+        assert validate_command(command) == "lift"
+        assert expected_ack(command) == "OK lift angle=60"
+    else:
+        with pytest.raises(ValueError, match="Invalid command"):
+            expected_ack(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "", " ", "\r", "\n", "\x00", b"", b"\xff", b"halt", bytearray(b"halt"),
+        "driv", "drive", "drive 0", "drive 0 ", "drive 0 0 ", "lift", "grip ",
+        "hal", "st", "halt\t", "halt\nstop", "halt\ufffd",
+    ],
+)
+def test_incomplete_or_non_text_commands_are_rejected(command):
+    with pytest.raises(ValueError):
+        validate_command(command)
+    with pytest.raises(ValueError):
+        expected_ack(command)
