@@ -429,6 +429,16 @@ class RoomSerialFeed:
             self.last_error = None
             if not running():
                 return
+            last_clock: float | None = None
+
+            def checked_now() -> float:
+                nonlocal last_clock
+                now = time.monotonic()
+                if not math.isfinite(now) or (last_clock is not None and now < last_clock):
+                    raise RuntimeError("Invalid or backwards Mac USB clock")
+                last_clock = now
+                return now
+
             # The Feather accepts repeated SYNC challenges. Re-issue one
             # after each report to exclude stale USB frames after a stall.
             def request_sync() -> tuple[bytes, float]:
@@ -437,10 +447,11 @@ class RoomSerialFeed:
                 # parser by an interrupted USB write. A stale ACK produced
                 # by that delimiter still cannot match the fresh nonce.
                 request = b"\nSYNC " + nonce + b"\n"
+                checked_now()
                 if port.write(request) != len(request):
                     raise RuntimeError("Room station SYNC write incomplete")
                 return (b"SYNC_ACK " + nonce + b"\n",
-                        time.monotonic() + USB_SYNC_TIMEOUT_S)
+                        checked_now() + USB_SYNC_TIMEOUT_S)
 
             expected, deadline = request_sync()
             synchronized = False
@@ -448,7 +459,7 @@ class RoomSerialFeed:
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
             discard_until_newline = False
             while running():
-                now = time.monotonic()
+                now = checked_now()
                 if not synchronized and now >= deadline:
                     raise RuntimeError("Room station post-connect SYNC unacknowledged")
                 if synchronized and now >= frame_deadline:
@@ -459,10 +470,11 @@ class RoomSerialFeed:
                 # until the size limit. read_until() adds a whole-line timeout.
                 line = port.read_until(b"\n", size=MAX_FRAME_BYTES + 1)
                 if not line:
+                    checked_now()
                     continue
                 if not running():
                     break
-                now = time.monotonic()
+                now = checked_now()
                 if not synchronized and now >= deadline:
                     # A read may return an exact nonce ACK after the timeout.
                     # Never turn that overdue response into fresh USB evidence.
@@ -492,7 +504,7 @@ class RoomSerialFeed:
                         frame_deadline = now + USB_POST_SYNC_FRAME_TIMEOUT_S
                     continue
                 try:
-                    evidence = decoder.accept(line, now=time.monotonic())
+                    evidence = decoder.accept(line, now=now)
                 except ValueError:
                     self.rejected += 1
                     continue
