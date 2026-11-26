@@ -1,3 +1,4 @@
+#include "AttitudeNorm.h"
 #include "ImuYawCapture.h"
 #include <cstdint>
 #include <initializer_list>
@@ -200,7 +201,91 @@ static void saturation_on_every_gyro_axis() {
   }
 }
 
+// The norm helper is integer-only, including a zero or axis-aligned vector.
+// Yaw capture must reject zero acceleration without retaining a pose segment.
+static void zero_acceleration_and_norm_edges() {
+  using desk_robot::attitude_norm_root;
+  check(attitude_norm_root(0) == 0);
+  check(attitude_norm_root(16384ULL * 16384ULL) == 16384);
+  ImuYawCapture cap;
+  auto c = calibration();
+  c.accel_norm_min_raw = 0;
+  check(!cap.configure(c));
+  check(cap.configure(calibration()));
+  auto r = sample(131, 100);
+  r.accel[2] = 12000;
+  check(cap.observe(r, 100) == Result::Baseline);
+  r.at_ms = 200;
+  r.accel[2] = 20000;
+  check(cap.observe(r, 200) == Result::Delta);
+  check(cap.yaw_urad() != 0 && cap.error_bound_urad() != 0);
+  r.at_ms = 300;
+  r.accel[2] = 0;
+  check(cap.observe(r, 300) == Result::Invalid);
+  check(!cap.continuous() && !cap.fresh(300));
+  check(cap.yaw_urad() == 0 && cap.last_delta_urad() == 0);
+  check(cap.error_bound_urad() == 0 && cap.segment() == 1);
+  check(cap.observe(sample(131, 300), 300) == Result::Invalid);
+  check(cap.observe(sample(131, 301), 301) == Result::Baseline);
+  check(cap.segment() == 2);
+  for (const std::int16_t outside : {11999, 20001}) {
+    ImuYawCapture edge;
+    check(edge.configure(calibration()));
+    r = sample(131, 100);
+    r.accel[2] = outside;
+    check(edge.observe(r, 100) == Result::Invalid);
+  }
+}
+
+static void signed_half_turn_wrap() {
+  // 180 deg/s: three 200 ms and four 100 ms steps reach exactly pi
+  // after per-step microradian rounding. Neither endpoint wraps early.
+  for (const int sign : {-1, 1}) {
+    ImuYawCapture cap;
+    auto c = calibration(sign);
+    c.max_rate_raw = 23580;
+    c.bias_uncertainty_raw = 1;
+    c.scale_error_ppm = 1;
+    check(cap.configure(c));
+    std::uint32_t t = 100;
+    check(cap.observe(sample(23580, t), t) == Result::Baseline);
+    for (const std::uint32_t dt : {200U, 200U, 200U, 100U, 100U, 100U, 100U}) {
+      t += dt;
+      check(cap.observe(sample(23580, t), t) == Result::Delta);
+      check(cap.last_delta_urad() == sign * (dt == 200 ? 628319 : 314159));
+    }
+    check(cap.yaw_urad() == sign * 3141593);
+    const auto error = cap.error_bound_urad();
+    t += 100;
+    check(cap.observe(sample(23580, t), t) == Result::Delta);
+    check(cap.yaw_urad() == sign * -2827434);
+    check(cap.last_delta_urad() == sign * 314159);
+    check(cap.segment() == 1 && cap.error_bound_urad() > error);
+  }
+}
+
+static void exact_age_and_gap_boundaries() {
+  ImuYawCapture cap;
+  check(cap.configure(calibration()));
+  check(cap.observe(sample(131, 100), 250) == Result::Baseline);
+  check(cap.fresh(250) && !cap.fresh(251));
+  check(cap.observe(sample(131, 100), 250) == Result::Duplicate);
+  check(cap.observe(sample(131, 300), 450) == Result::Delta);
+  check(cap.last_delta_urad() == 3491 && cap.fresh(450));
+  check(cap.observe(sample(131, 300), 451) == Result::Invalid);
+  check(!cap.continuous() && cap.acquisition_ms() == 300);
+  check(cap.observe(sample(131, 301), 451) == Result::Baseline);
+  check(cap.observe(sample(131, 502), 502) == Result::Invalid);
+  check(!cap.continuous() && cap.acquisition_ms() == 502);
+  check(cap.observe(sample(131, 502), 502) == Result::Invalid);
+  check(cap.observe(sample(131, 503), 503) == Result::Baseline);
+  check(cap.segment() == 3);
+}
+
 int main() {
+  zero_acceleration_and_norm_edges();
+  signed_half_turn_wrap();
+  exact_age_and_gap_boundaries();
   saturation_on_every_gyro_axis();
   yaw_and_replay();
   handling_and_calibration_faults();
