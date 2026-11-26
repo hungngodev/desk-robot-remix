@@ -1021,3 +1021,60 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_thermal_report_retires_expired_grid_until_new_scan(tmp_path):
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    report = "void thermal_observation(" + source.split(
+        "void thermal_observation(", 1
+    )[1].split("\n}", 1)[0] + "\n}\n"
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <sstream>
+#include <string>
+#define F(value) value
+constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
+constexpr uint32_t kThermalStaleMs = 3000;
+bool thermal_valid = true;
+uint32_t thermal_sample_ms = UINT32_MAX - 1000;
+float thermal[64]{};
+struct Telemetry {
+  std::ostringstream output;
+  template<typename T> void print(T value) { output << value; }
+  std::string take() { auto result = output.str(); output.str(""); return result; }
+} telemetry;
+void jsbool(bool value) { telemetry.print(value ? "true" : "false"); }
+void number(float value, int) { telemetry.print(value); }
+""" + report + r"""
+int main() {
+  thermal[63] = 80;
+  thermal_observation(thermal_sample_ms + 3000U);
+  const auto fresh = telemetry.take();
+  assert(fresh.find("\"valid\":true") != std::string::npos);
+  assert(fresh.find("80]") != std::string::npos);
+  thermal_observation(thermal_sample_ms + 3001U);
+  assert(telemetry.take() == "\"amg8833\":{\"valid\":false}");
+  // After the 32-bit clock cycles again, an expired grid must not revive.
+  thermal_observation(thermal_sample_ms + 1U);
+  assert(telemetry.take() == "\"amg8833\":{\"valid\":false}");
+  // A new completed scan may publish again.
+  thermal_valid = true;
+  thermal_sample_ms = 10;
+  thermal[63] = 50;
+  thermal_observation(11);
+  assert(telemetry.take().find("50]") != std::string::npos);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    native = tmp_path / "thermal_report.cpp"
+    native.write_text(harness)
+    executable = tmp_path / "thermal_report"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         str(native), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)

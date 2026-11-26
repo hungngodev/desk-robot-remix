@@ -536,6 +536,8 @@ void thermal_step(uint32_t now) {
 void thermal_observation(uint32_t now) {
   // Never read I2C in the report path or stamp cached pixels with now.
   const bool valid = thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
+  // Retire expired grids until a complete new scan, even across clock rollover.
+  thermal_valid = valid;
   telemetry.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
   if (valid) {
     telemetry.print(F(",\"sample_ms\":")); telemetry.print(thermal_sample_ms);
