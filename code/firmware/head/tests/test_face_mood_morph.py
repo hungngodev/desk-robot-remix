@@ -22,7 +22,37 @@ def test_face_mood_morph_native(tmp_path):
 #include <cassert>
 #include <initializer_list>
 using desk_robot::FaceMoodMorph;
+// These are model-selected cosmetic targets, not a sensor-to-mood mapping.
+static void CheckRecovery(uint32_t start, uint32_t hold_ms) {
+    FaceMoodMorph face;
+    assert(face.Step(start, "neutral", true, true) == 10);
+    assert(face.Step(start + 1, "surprised", true, true) == 10);
+    const uint32_t recovery = start + 1 + hold_ms;
+    const auto peak = face.Step(recovery, "surprised", true, true);
+    if (hold_ms < FaceMoodMorph::kDurationMs) {
+        assert(peak > 10 && peak < 14);
+    } else {
+        assert(peak == 14);
+    }
+    // A fresh target must begin at the current aperture, even mid-morph.
+    assert(face.Step(recovery, "neutral", true, true) == peak);
+    auto previous = peak;
+    for (uint32_t elapsed = 20; elapsed <= FaceMoodMorph::kDurationMs; elapsed += 20) {
+        const auto aperture = face.Step(recovery + elapsed, "neutral", true, true);
+        assert(aperture >= 10 && aperture <= previous);
+        assert(previous - aperture <= 1);
+        previous = aperture;
+    }
+    // Repeated observations of the same target must not renew the easing timer.
+    assert(previous == 10);
+    assert(face.Step(recovery + 301, "neutral", true) == 0);
+}
+
 int main() {
+    for (uint32_t start : {0U, 0xffffff00U}) {
+        CheckRecovery(start, 150);   // brief cosmetic cue, recovery mid-morph
+        CheckRecovery(start, 1600);  // held cosmetic cue, full recovery
+    }
     for (uint32_t start : {0U, 0xffffff00U}) {
         FaceMoodMorph face;
         assert(face.Step(start, "happy", true) == 0);
