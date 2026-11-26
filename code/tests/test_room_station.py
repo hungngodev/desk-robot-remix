@@ -1470,3 +1470,31 @@ def test_cached_room_sample_cannot_renew_host_age(sensor, first_age, limit):
     recovered = accept(current, decoder=decoder, now=boundary + 0.003)
     assert recovered.readings[sensor]["valid"] is True
     assert recovered.sensor_ages_ms[sensor] == 0
+
+
+@pytest.mark.parametrize("port", ["/dev/null", "/dev/../tmp/cu.test", "/dev/serial/by-id/usb"])
+def test_invalid_room_port_is_rejected_by_config_and_feed(port):
+    robots = [RobotConfig(id="robot-01", name="Pip", token_env="A")]
+    with pytest.raises(ValueError, match="real explicit local USB"):
+        Settings(robots=robots, room_station_enabled=True, room_station_port=port)
+    with pytest.raises(ValueError, match="explicit local serial"):
+        RoomSerialFeed(port, lambda _: None)
+
+
+def test_room_feed_rejects_unavailable_device_before_serial_open(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from desk_robot import serial_device
+
+    def absent(_):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(serial_device, "os", SimpleNamespace(lstat=absent))
+    monkeypatch.setitem(
+        sys.modules, "serial",
+        SimpleNamespace(Serial=lambda *a, **kw: pytest.fail("Unexpected serial open")),
+    )
+    feed = RoomSerialFeed("/dev/cu.test", lambda _: pytest.fail("Unexpected observation"))
+    with pytest.raises(ValueError, match="unavailable"):
+        feed._read_port(lambda: True)

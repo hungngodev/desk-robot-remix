@@ -81,6 +81,7 @@ def test_runtime_bench_runtime_handoff_discards_previous_epoch(monkeypatch, tmp_
             clock[0] += 1.0
             return b""
 
+    monkeypatch.setattr(room_station, "require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
 
     def bench():

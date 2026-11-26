@@ -282,3 +282,15 @@ def test_wrong_motion_ack_is_not_success(monkeypatch, command, reply):
         transact(port, command, receipt=receipt)
     assert port.writes == [(command + "\n").encode("ascii")]
     assert receipt == {}
+
+
+@pytest.mark.parametrize("port", ["/dev/null", "/dev/../tmp/ttyUSB0", "/tmp/ttyUSB0"])
+def test_invalid_cli_port_never_opens_serial(monkeypatch, port):
+    monkeypatch.setitem(
+        transact.__globals__, "serial",
+        SimpleNamespace(Serial=lambda *a, **kw: pytest.fail("Unexpected serial open")),
+    )
+    monkeypatch.setattr(sys, "argv", ["serial_bench.py", "--port", port, "--inspect"])
+    with pytest.raises(SystemExit) as exc:
+        transact.__globals__["main"]()
+    assert exc.value.code == 2
