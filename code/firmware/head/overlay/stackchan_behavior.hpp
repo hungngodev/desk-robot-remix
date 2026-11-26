@@ -161,7 +161,7 @@ class HsmBehavior {
   // current HSM mood even when this update emitted no new mood action.
   Mood mood() const { return mood_; }
 
-  /// Queue an event. It is handled in the next update(). Events are dropped if the queue is full.
+  /// Queue an event for the next update. Low battery replaces the newest event on overflow.
   void pushEvent(const Event& e) {
     // Unknown IDs are not activity and must not consume a bounded queue slot.
     switch (e.type) {
@@ -180,6 +180,10 @@ class HsmBehavior {
     if (queue_len_ < kQueueSize) {
       queue_[(queue_head_ + queue_len_) % kQueueSize] = e;
       queue_len_++;
+    } else if (e.type == EventType::kBatteryLow) {
+      // Keep the fault newest in FIFO order; an older charging cue must not
+      // clear it. Ordinary overflow never displaces a queued fault.
+      queue_[(queue_head_ + queue_len_ - 1) % kQueueSize] = e;
     }
   }
 
