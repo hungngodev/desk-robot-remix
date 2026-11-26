@@ -235,11 +235,80 @@ static void fast_floor_lane_swap() {
   fake_arduino_millis() = saved_clock;
 }
 
+// Range interrupt errors are explicit invalid samples, unlike a sensor that
+// simply has no fresh conversion. Exercise independent failures on all eight
+// lanes in one scan, including optional errors preceding a mandatory fault.
+static void check_explicit_error_mask(unsigned mask) {
+  Wire = TwoWire{};
+  fake_i2c_lines() = FakeI2cLines{};
+  fake_arduino_millis() = 0;
+  desk_robot::TofBus bus;
+  desk_robot::CliffGuard guard;
+  ready(bus, guard);
+  desk_robot::BodyControl control;
+  const std::uint8_t order[] = {5, 0, 1, 2, 3, 4, 6, 0, 1,
+                                2, 3, 4, 7, 0, 1, 2, 3, 4};
+  std::uint32_t now = 60;
+  const auto poll = [&](std::uint8_t lane, bool fault) {
+    fake_arduino_millis() = now++;
+    Wire.tof_interrupt_error_bits = fault ? 0x08 : 0;
+    const auto errors = bus.errors();
+    bus.poll(guard, now - 1U);
+    desk_robot::publish_range_telemetry(bus, control, now - 1U, bus.errors() != errors);
+    CHECK(bus.errors() == errors);
+    CHECK(bus.last_channel() == lane);
+    CHECK(bus.rejected_channel() == (fault ? lane : 255));
+    CHECK(bus.new_optical_channel() == (fault ? 255 : lane));
+    CHECK(bus.new_extra_channel() == (!fault && lane >= 5 ? lane - 5 : 255));
+    CHECK(control.state().optical[lane].present);
+    CHECK(control.state().optical[lane].valid == !fault);
+    if (lane >= 5) CHECK(control.state().side_valid[lane - 5] == !fault);
+  };
+  for (const auto lane : order) poll(lane, false);
+  std::uint8_t first = 255;
+  for (const auto lane : order) {
+    const bool fault = (mask & (1U << lane)) != 0;
+    if (fault && lane < 5 && first == 255) first = lane;
+    poll(lane, fault);
+    CHECK(guard.fault_sensor() == first); // immediate, before evaluate()
+    CHECK(guard.evaluate(now) == (first == 255));
+    if (first != 255) CHECK(!guard.try_rearm(now));
+  }
+  CHECK((first != 255) == ((mask & 0x1fU) != 0));
+  for (std::uint8_t lane = 0; lane < 8; ++lane) {
+    const bool valid = (mask & (1U << lane)) == 0;
+    CHECK(bus.optical_diagnostic(lane, now).valid == valid);
+    if (lane < 5) CHECK(guard.diagnostic(lane, now).valid == valid);
+    else CHECK(bus.extra_diagnostic(lane - 5, now).valid == valid);
+  }
+  for (const auto lane : order) {
+    poll(lane, false);
+    CHECK(guard.evaluate(now) == (first == 255));
+    CHECK(guard.fault_sensor() == first);
+  }
+  CHECK(guard.try_rearm(now));
+  CHECK(guard.evaluate(now));
+}
+
+static void explicit_error_mask_matrix() {
+  const auto saved_clock = fake_arduino_millis();
+  for (unsigned mask = 0; mask < 256U; ++mask) {
+    try {
+      check_explicit_error_mask(mask);
+    } catch (const std::exception&) {
+      std::cerr << "Explicit range error mask: " << mask << '\n';
+      throw;
+    }
+  }
+  fake_arduino_millis() = saved_clock;
+}
+
 int main() {
   try {
     fast_floor_lane_swap();
     check_shared_mux_recovery();
     dropout_matrix_and_partial_mux_recovery();
+    explicit_error_mask_matrix();
     {
       // A later verified close must not erase a transient overlap,
       // regardless of which mux was enabled last.
