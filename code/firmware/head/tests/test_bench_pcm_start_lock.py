@@ -61,16 +61,25 @@ struct esp_timer_create_args_t { void (*callback)(void*); void* arg; const char*
 int esp_timer_create(esp_timer_create_args_t*, void** timer) { *timer = timer; return ESP_OK; }
 int esp_timer_stop(void*) { return ESP_OK; }
 bool fail_timer = false, fail_alloc = false;
-int esp_timer_start_once(void*, int64_t) { return fail_timer ? -1 : ESP_OK; }
+int timer_starts = 0;
+int esp_timer_start_once(void* timer, int64_t delay_us) {
+    assert(timer != nullptr && delay_us == 12'000'000);
+    ++timer_starts;
+    return fail_timer ? -1 : ESP_OK;
+}
 int64_t esp_timer_get_time() { return 100; }
 std::function<void()> allocation_hook, free_hook;
 int allocations = 0, frees = 0;
 void* heap_caps_malloc(size_t bytes, int caps) {
     assert(caps == (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    assert(bytes == desk_robot::SensePcmWindow::kBytes);
     if (auto hook = std::exchange(allocation_hook, {})) hook();
     if (fail_alloc) return nullptr;
+    auto* data = static_cast<uint8_t*>(std::malloc(bytes));
+    assert(data != nullptr);
+    std::fill_n(data, bytes, 0xa5);
     ++allocations;
-    return std::malloc(bytes);
+    return data;
 }
 void heap_caps_free(void* p) {
     if (free_hook) free_hook();
@@ -127,7 +136,14 @@ int main() {
     allocation_hook = [&] { while_unlocked(codec, [] {}); };
     assert(codec.BeginBenchPcmCapture(1));
     assert(codec.bench_window_.occupied() && !codec.bench_start_pending_);
+    assert(timer_starts == 1 && allocations == 1 && frees == 0);
+    auto* samples = codec.bench_window_.data;
+    const auto sample_count = desk_robot::SensePcmWindow::kFrames * 2;
+    assert(std::all_of(samples, samples + sample_count, [](int16_t x) { return x == 0; }));
+    // Simulate captured private PCM so skipping the wipe cannot pass on zeroed RAM.
+    std::fill_n(samples, sample_count, 1234);
     codec.AbortBenchPcmCapture(true);
+    assert(!codec.bench_window_.occupied() && allocations == 1 && frees == 1);
 
     codec.bench_consent_.grant = true;
     allocation_hook = [&] { while_unlocked(codec, [&] { codec.AbortBenchPcmCapture(false); }); };
@@ -164,6 +180,8 @@ int main() {
     fail_alloc = true;
     assert(!codec.BeginBenchPcmCapture(2));
     assert(!codec.bench_window_.occupied() && !codec.bench_start_pending_);
-    assert(allocations == frees);
+    // Only the two successful STARTs and the timer-failure path arm expiry.
+    assert(timer_starts == 3);
+    assert(allocations == 5 && frees == 5);
 }
 """

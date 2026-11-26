@@ -145,7 +145,10 @@ static void check_tag_boundaries() {
     bad[1] = 0;
     reject(bad.data(), bad.size());
     CHECK(desk_robot::pn532_tag(tag.data(), tag.size(), token, uid_size) == Pn532TagResult::Present);
-    CHECK(uid_size == length && token != 0);
+    // Known FNV-1a vectors include the UID length before the UID bytes.
+    const std::uint32_t expected = length == 4 ? 0x9781744bU :
+        length == 7 ? 0x2b93787aU : 0xcc99829aU;
+    CHECK(uid_size == length && token == expected);
     const auto previous = token;
     tag.back() ^= 1;
     CHECK(desk_robot::pn532_tag(tag.data(), tag.size(), token, uid_size) == Pn532TagResult::Present);
@@ -201,7 +204,7 @@ static void check_ats_and_wire_limit() {
       uid_size = 10;
       const auto result = desk_robot::pn532_tag(payload, size, token, uid_size);
       if (declared == actual) {
-        CHECK(result == Pn532TagResult::Present && uid_size == 4 && token != 0);
+        CHECK(result == Pn532TagResult::Present && uid_size == 4 && token == 0x9781744bU);
       } else {
         CHECK(result == Pn532TagResult::Invalid && uid_size == 0 && token == 0);
       }
@@ -247,18 +250,15 @@ int main() {
     check_encoder_boundaries();
     check_ats_and_wire_limit();
     const std::uint8_t sam[] = {1, 0x14, 1};
-    std::uint8_t encoded[32]{};
-    const auto n = desk_robot::pn532_encode(0x14, sam, 3, encoded, sizeof(encoded));
-    CHECK(n == 12);
-    CHECK(encoded[0] == 0 && encoded[1] == 0 && encoded[2] == 0xff);
-    CHECK(encoded[3] == 5 && encoded[4] == 0xfb);
-    CHECK(encoded[5] == 0xd4 && encoded[6] == 0x14);
-    std::uint8_t checksum = 0;
-    for (std::size_t i = 5; i < 10; ++i)
-      checksum = static_cast<std::uint8_t>(checksum + encoded[i]);
-    CHECK(static_cast<std::uint8_t>(checksum + encoded[10]) == 0);
-    CHECK(encoded[11] == 0);
-    CHECK(desk_robot::pn532_encode(0x14, sam, 17, encoded, sizeof(encoded)) == 0);
+    std::vector<std::uint8_t> encoded(32, 0x55);
+    const auto n = desk_robot::pn532_encode(0x14, sam, 3, encoded.data(), encoded.size());
+    const std::vector<std::uint8_t> expected_sam = {
+        0, 0, 0xff, 5, 0xfb, 0xd4, 0x14, 1, 0x14, 1, 2, 0
+    };
+    CHECK(n == expected_sam.size());
+    CHECK(std::vector<std::uint8_t>(encoded.begin(), encoded.begin() + n) == expected_sam);
+    CHECK(std::vector<std::uint8_t>(encoded.begin() + n, encoded.end()) ==
+          std::vector<std::uint8_t>(encoded.size() - n, 0x55));
 
     const std::uint8_t ack[] = {1, 0, 0, 0xff, 0, 0xff, 0};
     const std::uint8_t fake_ack[] = {1, 0, 0, 0xff, 0, 0xfe, 0};
@@ -293,7 +293,7 @@ int main() {
         present.data(), present.size(), 0x4a, payload, size));
     CHECK(desk_robot::pn532_tag(payload, size, token, uid_size)
           == desk_robot::Pn532TagResult::Present);
-    CHECK(uid_size == 4 && token != 0);
+    CHECK(uid_size == 4 && token == 0x3b1f3363U);
     const auto first_token = token;
     CHECK(desk_robot::pn532_tag(payload, size, token, uid_size)
           == desk_robot::Pn532TagResult::Present);
