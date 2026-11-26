@@ -172,6 +172,10 @@ creates a new report with mode 0600. It refuses an existing filename rather
 than overwriting evidence. The repository's tracked `docs/records/reports`
 folder is not a private capture destination and must not receive raw trial
 receipts. Use a new filename for each attempt.
+Invalid CLI arguments exit with status 2 before creating report directories.
+A failed capture retains its private diagnostic receipt and exits with status 1.
+A 3600-second request also requires the one-hour USB continuity screen to pass
+for exit status 0. Neither exit status 0 nor a continuity pass qualifies hardware.
 
 Record the actual operator, board revision, connected exact sensor carrier
 revisions and independent voltage/current/temperature instrument readings

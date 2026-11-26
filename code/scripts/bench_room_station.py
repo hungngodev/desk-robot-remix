@@ -45,12 +45,7 @@ def _git_sha() -> str | None:
             else None)
 
 
-def capture(
-    port: str, *, seconds: float,
-    feed_factory: Callable = RoomSerialFeed,
-    clock: Callable[[], float] = time.monotonic,
-) -> dict:
-    """Take one serial epoch. A timeout or failure never promotes hardware."""
+def _validate_capture_args(port: str, seconds: float) -> None:
     if not isinstance(port, str) or not port.startswith("/dev/"):
         raise ValueError("Explicit /dev/ room station USB port required")
     # Huge integers can raise OverflowError during math.isfinite().
@@ -61,6 +56,15 @@ def capture(
         finite_duration = False
     if not finite_duration or not 0.5 <= seconds <= 3600:
         raise ValueError("Bounded live station trial must last 0.5 to 3600 seconds")
+
+
+def capture(
+    port: str, *, seconds: float,
+    feed_factory: Callable = RoomSerialFeed,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict:
+    """Take one serial epoch. A timeout or failure never promotes hardware."""
+    _validate_capture_args(port, seconds)
 
     received_at: list[float] = []
     sequence: list[int] = []
@@ -321,10 +325,19 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=60.0)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    try:
+        _validate_capture_args(args.port, args.seconds)
+    except ValueError as exc:
+        parser.error(str(exc))
     preflight_private_bench_report(args.report)
     result = capture(args.port, seconds=args.seconds)
     save_private_bench_report(args.report, result)
     print(json.dumps(result, indent=2))
+    # Keep failed diagnostic receipts, but never signal shell success for them.
+    if (result.get("read_only_usb_sample_captured") is not True
+            or (args.seconds == 3600
+                and result.get("one_hour_usb_continuity_screen_pass") is not True)):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

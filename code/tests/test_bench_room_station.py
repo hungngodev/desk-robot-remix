@@ -112,7 +112,10 @@ def test_room_cli_preflights_private_destination_before_usb(monkeypatch, tmp_pat
     def read_only_capture(port, *, seconds):
         assert port == "/dev/cu.test"
         assert seconds == 1
-        return {"station": "room-pod-01", "charging_verified": False}
+        return {
+            "station": "room-pod-01", "charging_verified": False,
+            "read_only_usb_sample_captured": True,
+        }
 
     monkeypatch.setitem(main.__globals__, "capture", read_only_capture)
     ready = private / "new.json"
@@ -120,6 +123,7 @@ def test_room_cli_preflights_private_destination_before_usb(monkeypatch, tmp_pat
     main()
     assert json.loads(ready.read_text()) == {
         "station": "room-pod-01", "charging_verified": False,
+        "read_only_usb_sample_captured": True,
     }
     assert stat.S_IMODE(ready.stat().st_mode) == 0o600
 
@@ -585,3 +589,79 @@ def test_room_bench_refuses_checkout_even_when_private(monkeypatch, tmp_path, wr
     args = (outside, {}) if writer == "save_private_bench_report" else (outside,)
     method(*args)
     assert outside.parent.is_dir()
+
+
+@pytest.mark.parametrize(("port", "seconds"), [
+    ("ttyUSB0", "1"), ("/dev/cu.test", "nan"), ("/dev/cu.test", "inf"),
+    ("/dev/cu.test", "0"), ("/dev/cu.test", "3601"),
+])
+def test_room_cli_invalid_arguments_do_not_create_report_directory(
+    monkeypatch, tmp_path, port, seconds,
+):
+    report = tmp_path / "not-created" / "station.json"
+    monkeypatch.setattr(sys, "argv", [
+        "bench_room_station.py", "--port", port, "--seconds", seconds,
+        "--report", str(report),
+    ])
+    with pytest.raises(SystemExit) as exc:
+        BENCH["main"]()
+    assert exc.value.code == 2
+    assert not report.parent.exists()
+
+
+def test_room_cli_missing_port_saves_failed_receipt_and_exits_nonzero(
+    monkeypatch, tmp_path, capsys,
+):
+    from types import SimpleNamespace
+
+    def absent_port(*args, **kwargs):
+        raise OSError("USB port absent")
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=absent_port))
+    report = tmp_path / "private" / "station.json"
+    monkeypatch.setattr(sys, "argv", [
+        "bench_room_station.py", "--port", "/dev/cu.absent", "--seconds", "1",
+        "--report", str(report),
+    ])
+    with pytest.raises(SystemExit) as exc:
+        BENCH["main"]()
+    assert exc.value.code == 1
+    result = json.loads(report.read_text())
+    assert json.loads(capsys.readouterr().out) == result
+    assert result["serial_error_type"] == "OSError"
+    assert result["accepted_frames"] == 0
+    assert result["read_only_usb_sample_captured"] is False
+    assert result["one_hour_usb_continuity_screen_pass"] is False
+    assert result["charging_verified"] is False
+    assert result["motion_authorized"] is False
+    assert stat.S_IMODE(report.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize(("seconds", "sample", "continuity", "expected"), [
+    ("1", False, False, 1), ("1", True, False, 0),
+    ("3600", True, False, 1), ("3600", True, True, 0),
+    ("3600", False, True, 1),
+])
+def test_room_cli_exit_requires_requested_diagnostic_receipt(
+    monkeypatch, tmp_path, capsys, seconds, sample, continuity, expected,
+):
+    main = BENCH["main"]
+    result = {
+        "read_only_usb_sample_captured": sample,
+        "one_hour_usb_continuity_screen_pass": continuity,
+        "charging_verified": False, "motion_authorized": False,
+    }
+    monkeypatch.setitem(main.__globals__, "capture", lambda *a, **kw: result)
+    report = tmp_path / "private" / "station.json"
+    monkeypatch.setattr(sys, "argv", [
+        "bench_room_station.py", "--port", "/dev/cu.test", "--seconds", seconds,
+        "--report", str(report),
+    ])
+    if expected:
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == expected
+    else:
+        main()
+    assert json.loads(report.read_text()) == result
+    assert json.loads(capsys.readouterr().out) == result
