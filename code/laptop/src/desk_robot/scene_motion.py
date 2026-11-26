@@ -73,3 +73,12 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
     """Cheap exposure-compensated motion score, not calibrated optical flow."""
     mask = scene_change_mask(a, b, threshold=threshold)
     return (len(mask) - mask.count(0)) / len(mask)
+
+
+def consistent_change_mask(previous: bytes | None, current: bytes) -> bool:
+    """Require half the smaller nonempty changed region to persist with the same sign."""
+    if previous is None:
+        return False
+    overlap = sum(old != 0 and old == new for old, new in zip(previous, current, strict=True))
+    smaller = min(len(previous) - previous.count(0), len(current) - current.count(0))
+    return smaller > 0 and 2 * overlap >= smaller

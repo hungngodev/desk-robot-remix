@@ -14,7 +14,7 @@ from typing import Callable, Protocol, TypeGuard
 
 from PIL import Image
 
-from .scene_motion import scene_change_mask
+from .scene_motion import consistent_change_mask, scene_change_mask
 
 
 def valid_visual_text(value: object, min_chars: int, max_chars: int) -> TypeGuard[str]:
@@ -258,7 +258,7 @@ class VisualChangeGate:
                     and current.count(current[0]) == len(current)):
                 self._pixel_baseline, self._baseline = current, jpeg
             return None
-        if not self._consistent_candidate(mask, changed):
+        if not consistent_change_mask(self._candidate_mask, mask):
             self._hits = 0
         self._candidate_mask = mask
         self._hits += 1
@@ -268,16 +268,6 @@ class VisualChangeGate:
         self._pixel_baseline, self._baseline, self._hits = current, jpeg, 0
         self._candidate_mask = None
         return baseline
-
-    def _consistent_candidate(self, mask: bytes, changed: int) -> bool:
-        """Require half the smaller changed region to persist with the same sign."""
-        previous = self._candidate_mask
-        if previous is None:
-            return False
-        overlap = sum(old != 0 and old == new for old, new in zip(previous, mask, strict=True))
-        previous_changed = len(previous) - previous.count(0)
-        return 2 * overlap >= min(previous_changed, changed)
-
 
 class _InsufficientSceneDetail(ValueError):
     """A decodable latest frame does not provide usable visual contrast."""
