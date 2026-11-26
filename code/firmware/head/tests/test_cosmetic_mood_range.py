@@ -1,6 +1,7 @@
 """Exercise the Sense cosmetic mailbox and fault classification on a host."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,16 @@ from desk_robot.expression_policy import _MODEL_MOODS, model_mood_event
 OVERLAY = Path(__file__).resolve().parents[1] / "overlay"
 
 
+def test_sense_cosmetic_name_mapping():
+    # The parser and morph alone cannot detect a swapped name in FaceTask.
+    sense = (OVERLAY.parent / "sense" / "desk_robot_sense.cc").read_text()
+    mapping = sense.split("static const char* CosmeticMoodName(", 1)[1].split("\n    }", 1)[0]
+    assert dict(re.findall(r'case CosmeticMood::k(\w+): return "(\w+)";', mapping)) == {
+        mood.capitalize(): mood for mood in _MODEL_MOODS
+    }
+    assert 'default: return "neutral";' in mapping
+
+
 def test_cosmetic_mood_range_and_fault_classification(tmp_path):
     compiler = shutil.which("g++") or shutil.which("clang++")
     if not compiler:
@@ -20,12 +31,13 @@ def test_cosmetic_mood_range_and_fault_classification(tmp_path):
     assert _MODEL_MOODS == frozenset(moods)
     events = [model_mood_event(mood) for mood in moods]
     assert events == [f"mood:{mood}" for mood in moods]
-    for mood in ("sleepy", "sad", "angry", "none", "happy:14", 14, 0.5):
+    for mood in ("sleepy", "sad", "angry", "none", "happy:14", "Happy", "happy ", 14, 0.5):
         assert model_mood_event(mood) is None
     source = tmp_path / "mood.cc"
     binary = tmp_path / "mood"
     source.write_text(r"""
 #include "face_mood_morph.hpp"
+#include "face_eye_geometry.hpp"
 #include "robot_protocol.h"
 #include <cassert>
 using namespace desk_robot;
@@ -57,6 +69,28 @@ static void CheckTransitions(char** events) {
     }
 }
 
+static void CheckFallback() {
+    using namespace face_eye_geometry;
+    for (uint32_t start : {0U, 0xfffffff0U}) {
+        for (auto unknown : {"", "unknown", "Happy", "happy ", "mood:happy"}) {
+            FaceMoodMorph face;
+            assert(face.Step(start, "sleepy", true, true) == kClosedHeight);
+            assert(face.Step(start + 1, "surprised", true, true) == kClosedHeight);
+            const auto mid = face.Step(start + 151, "surprised", true, true);
+            assert(mid > kClosedHeight && mid < kOpenHeight);
+            // Unknown names hide the morph and discard its in-flight history.
+            assert(face.Step(start + 152, unknown, true, true) == 0);
+            assert(face.Step(start + 153, unknown, true) == 0);
+            assert(face.Step(start + 154, "happy", true) == 0);
+            assert(face.Step(start + 155, "happy", true, true) == 8);
+        }
+        FaceMoodMorph face;
+        assert(face.Step(start, "sad", true, true) == 6);
+        assert(face.Step(start, "angry", false, true) == 0);
+        assert(face.Step(start, "angry", true, true) == 5);
+    }
+}
+
 int main(int argc, char** argv) {
     assert(argc == 5);
     auto events = argv + 1;
@@ -70,6 +104,7 @@ int main(int argc, char** argv) {
         assert(cue.take(8U) == CosmeticMood::kNone);
     }
     CheckTransitions(events);
+    CheckFallback();
     for (unsigned raw = 0; raw <= 255; ++raw) {
         if (raw >= 1 && raw <= 4) continue;
         const auto invalid = static_cast<CosmeticMood>(raw);
