@@ -108,11 +108,20 @@ static void check_direction_drift_after_verified_reset() {
   desk_robot::McpPortDirectionLock lock;
   regs.values[0] = 0xFE;
   CHECK(!regs.verify(lock) && lock.faulted());
-  for (unsigned bit = 0; bit < 4; ++bit) {
-    regs.values[0] = static_cast<std::uint8_t>(0xFFU ^ (1U << bit));
-    CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
-    CHECK(regs.values[0] == 0xFF);
+  for (unsigned port = 0; port < 2; ++port) {
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      regs.values[port] = static_cast<std::uint8_t>(0xFFU ^ (1U << bit));
+      CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+      CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+    }
   }
+  regs.values[0x15] = 0x04;
+  CHECK(!regs.verify(lock) && regs.values[0x15] == 0);
+  regs.values[0] = 0xFB;
+  regs.fail_read = 0;
+  CHECK(!regs.verify(lock) && regs.values[0] == 0xFF);
+  regs.fail_read = -1;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
 }
 
 int main() {

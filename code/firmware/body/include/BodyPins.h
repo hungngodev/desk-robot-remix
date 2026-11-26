@@ -45,6 +45,14 @@ constexpr int kBumperInput = 35;
 // ESP32 GPIO36/39 RTC/ADC glitch erratum needs RMT filtering and bench tests.
 constexpr int kTerminalIrLeftInput = 36;
 constexpr int kTerminalIrRightInput = 39;
+// Dock seat/charger status is NOT a WROOM output or a power-enable pin.
+// MCP23017 at accessory mux 0x71 lane 5, address 0x20, BANK=0:
+// GPA0/1 are independent NC seat switches; GPA2/3 are active-low
+// BQ24075 PGOOD/CHG open-drain status outputs, pulled up only to 3.3V.
+// Keep all GPIOA bits INPUT (IODIRA=0xFF); never write GPIOA/OLATA.
+// Raw 5V dock contacts must never connect to these logic inputs.
+// McpPortDirectionLock owns runtime checks; wiring/short protection
+// and correct BANK configuration still require physical qualification.
 // Slow magnetic hat/reed and PIR inputs move to MCP23017 GPIOB0 and GPIOB1.
 // They are not WROOM GPIOs and cannot capture 560us IR pulses.
 #endif
