@@ -1637,3 +1637,67 @@ async def test_readonly_tool_total_deadline_cancels_http_without_retry(
     assert result == {
         "error": "Robot Mac connection unavailable", "retried": False,
     }
+
+
+@pytest.mark.parametrize("route,method,path,payload,body,query,timeout,readonly", [
+    ("status", "GET", "/v1/robots/robot-01/status", None, None, {}, 5, True),
+    ("power-status", "GET", "/v1/pet/robot-01/power-status", None, None, {}, 5, True),
+    ("aux-status", "GET", "/v1/robots/robot-01/aux", None, None, {}, 5, True),
+    ("latest-pickup", "GET", "/v1/robots/robot-01/jobs/latest-pickup", None, None, {}, 5, True),
+    ("interaction-context", "GET", "/v1/pet/robot-01/interaction-context",
+     None, None, {}, 5, True),
+    ("voice-context", "GET", "/v1/pet/robot-01/voice-context", None, None, {}, 5, True),
+    ("voice-context", "GET", "/v1/pet/robot-01/voice-context",
+     {"question": "  key  "}, None, {"query": "key"}, 5, True),
+    ("voice-context", "GET", "/v1/pet/robot-01/voice-context",
+     {"question": "  "}, None, {}, 5, True),
+    ("look", "POST", "/v1/pet/robot-01/look",
+     {"question": "  What moved?  "}, {"question": "What moved?"}, {}, 50, True),
+    ("plan-readonly", "POST", "/v1/pet/robot-01/plan-readonly",
+     {"transcript": "  Check status  "}, {"transcript": "  Check status  "}, {}, 4, True),
+    ("pickup", "POST", "/v1/robots/robot-01/pickup",
+     {"target": "candy"}, {"target": "candy"}, {}, 5, False),
+    ("stop", "POST", "/v1/robots/robot-01/stop", None, {}, {}, 5, False),
+])
+async def test_dispatch_route_contract(
+    bridge_tools, monkeypatch, route, method, path, payload, body, query, timeout, readonly,
+):
+    """Every supported route preserves its wire and turn ownership contract."""
+    import asyncio
+
+    calls = []
+    observed = []
+    event = asyncio.Event()
+    original = httpx.AsyncClient
+
+    def observe(device):
+        observed.append(device)
+        return event
+
+    monkeypatch.setattr(bridge_tools.bridge, "tool_turn_cancel_event", observe, raising=False)
+    expected = {"robot_id": "robot-01", "motor_authorized": False, "charging_authorized": False}
+    if route == "look":
+        expected.update(source="authenticated_xiao_camera_and_local_vlm", frames_used=1,
+                        answer="A key might be visible")
+    elif route == "plan-readonly":
+        expected.update(source="existing_mac_ollama_readonly_route_selection",
+                        model_can_arm_motors=False, untrusted_model_selection=True, tools=[])
+
+    def handler(request):
+        calls.append(request)
+        assert request.method == method
+        assert request.url.path == path
+        assert dict(request.url.params) == query
+        assert (json.loads(request.content) if request.content else None) == body
+        assert request.headers["x-desk-robot-tool-receipt"] == "1"
+        assert set(request.extensions["timeout"].values()) == {timeout}
+        return httpx.Response(200, json=expected)
+
+    def client_factory(*args, **kwargs):
+        assert kwargs["trust_env"] is False
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    assert await bridge_tools.call(bridge_tools.registered_head, route, payload) == expected
+    assert len(calls) == 1
+    assert observed == (["mac-head-01"] if readonly else [])

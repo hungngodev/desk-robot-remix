@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import time
+from functools import partial
 
 import desk_robot_bridge as bridge
 import httpx
@@ -106,15 +107,168 @@ def _valid_local_credential(token):
     return len(token) >= 24 and all(33 <= ord(char) <= 126 for char in token)
 
 
+async def _get_tool(send, robot, _payload, *, path):
+    return await send("GET", path.format(robot=robot))
+
+
+async def _post_tool(send, robot, payload, *, path, timeout=None):
+    kwargs = {"json": payload or {}}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    return await send("POST", path.format(robot=robot), **kwargs)
+
+
+async def _voice_context_tool(send, robot, payload):
+    kwargs = {}
+    if payload and payload.get("question"):
+        kwargs["params"] = {"query": payload["question"]}
+    return await send("GET", f"/v1/pet/{robot}/voice-context", **kwargs)
+
+
+# Each allowlisted route owns its fixed endpoint and cancellation policy.
+_TOOL_HANDLERS = {
+    "status": (partial(_get_tool, path="/v1/robots/{robot}/status"), True),
+    "power-status": (partial(_get_tool, path="/v1/pet/{robot}/power-status"), True),
+    "aux-status": (partial(_get_tool, path="/v1/robots/{robot}/aux"), True),
+    "latest-pickup": (partial(_get_tool, path="/v1/robots/{robot}/jobs/latest-pickup"), True),
+    "interaction-context": (partial(_get_tool, path="/v1/pet/{robot}/interaction-context"), True),
+    "voice-context": (_voice_context_tool, True),
+    "look": (partial(_post_tool, path="/v1/pet/{robot}/look", timeout=50), True),
+    "plan-readonly": (partial(_post_tool, path="/v1/pet/{robot}/plan-readonly", timeout=4), True),
+    "pickup": (partial(_post_tool, path="/v1/robots/{robot}/pickup"), False),
+    "stop": (partial(_post_tool, path="/v1/robots/{robot}/stop"), False),
+}
+
+_SUPERSEDED = object()
+
+
+def _superseded_result():
+    return {
+        "error": "Robot tool result superseded by new speech or reconnect",
+        "retried": False,
+    }
+
+
+async def _await_readonly(request_mac, signal, timeout):
+    # Only optional read-only work is cancelled on a newer human turn.
+    if signal.is_set():
+        return _SUPERSEDED
+    request_task = asyncio.create_task(request_mac())
+    turn_task = asyncio.create_task(signal.wait())
+    # Observe both child outcomes, including failures during teardown.
+    for task in (request_task, turn_task):
+        task.add_done_callback(
+            lambda completed: None if completed.cancelled()
+            else completed.exception()
+        )
+    try:
+        done, _ = await asyncio.wait(
+            {request_task, turn_task},
+            timeout=timeout,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        # The source event may be set before the waiter is scheduled.
+        if signal.is_set() or turn_task in done:
+            return _SUPERSEDED
+        if request_task not in done:
+            raise asyncio.TimeoutError
+        return request_task.result()
+    finally:
+        turn_task.cancel()
+        if not request_task.done():
+            request_task.cancel()
+        # Never hold the speaker on an optional task suppressing cancellation.
+        pending = [task for task in (request_task, turn_task) if not task.done()]
+        if pending:
+            await asyncio.wait(
+                pending, timeout=0.2, return_when=asyncio.ALL_COMPLETED
+            )
+
+
+def _valid_plan_receipt(result):
+    return not (
+        result.get("source") != "existing_mac_ollama_readonly_route_selection"
+        or result.get("model_can_arm_motors") is not False
+        or result.get("untrusted_model_selection") is not True
+        or not isinstance(result.get("tools"), list)
+        or len(result["tools"]) > 3
+        or any(
+            not isinstance(tool, dict)
+            or not isinstance(tool.get("route"), str)
+            or tool.get("route") not in {
+                "look", "status", "power-status", "aux-status",
+                "latest-pickup", "interaction-context", "voice-context",
+            }
+            or not isinstance(tool.get("payload"), dict)
+            or not _valid_tool_payload(tool["route"], tool["payload"])
+            for tool in result["tools"]
+        )
+        # Even an otherwise allowlisted plan must not execute a duplicate
+        # route twice and crowd out a distinct explicitly requested fact.
+        or len(result["tools"]) != len({
+            tool["route"] for tool in result["tools"]
+            if isinstance(tool, dict) and isinstance(tool.get("route"), str)
+        })
+    )
+
+
+def _valid_visual_receipt(result):
+    return not (
+        result.get("source") != "authenticated_xiao_camera_and_local_vlm"
+        or type(result.get("frames_used")) is not int
+        or not 1 <= result["frames_used"] <= 2
+        or not isinstance(result.get("answer"), str)
+        or not 1 <= len(result["answer"].strip()) <= 2000
+        or result.get("motor_authorized") is not False
+        or result.get("charging_authorized") is not False
+    )
+
+
+def _format_receipt(response, route, robot, readonly):
+    if response.status_code >= 400:
+        result = {
+            "error": f"Robot Mac rejected request ({response.status_code})",
+            "retried": False,
+        }
+        if route == "look":
+            result["error_code"] = "observation_unavailable"
+        return result
+    try:
+        result = response.json()
+        # Python's decoder accepts NaN/Infinity and overflowing exponents.
+        # Never forward nonfinite values, even nested in otherwise valid receipts.
+        json.dumps(result, allow_nan=False)
+    except (ValueError, TypeError, RecursionError):
+        return {"error": "Malformed robot Mac tool response", "retried": False}
+    if not isinstance(result, dict):
+        return {"error": "Unexpected robot Mac tool response", "retried": False}
+    # Every Mac tool receipt, including STOP and pickup, belongs to the
+    # authenticated device's robot. Never forward a missing or foreign ID.
+    if result.get("robot_id") != robot:
+        return {
+            "error": "Robot Mac tool identity or authority invalid",
+            "error_code": "robot_identity_mismatch",
+            "retried": False,
+        }
+    if readonly and (("motor_authorized" in result
+                      and result["motor_authorized"] is not False)
+                     or ("charging_authorized" in result
+                         and result["charging_authorized"] is not False)):
+        return {"error": "Robot Mac tool identity or authority invalid",
+                "retried": False}
+    if route == "plan-readonly" and not _valid_plan_receipt(result):
+        return {"error": "Invalid read-only Mac intent plan", "retried": False}
+    if route == "look" and not _valid_visual_receipt(result):
+        return {"error": "Missing authenticated visual tool evidence", "retried": False}
+    return result
+
+
 async def call(conn, route, payload=None):
     # Only the pinned registered tools may reach the Mac. Never forward
     # arbitrary model-supplied paths, even to a separately protected API.
-    if not isinstance(route, str) or route not in {
-        "status", "power-status", "aux-status", "latest-pickup",
-        "interaction-context", "voice-context",
-        "look", "pickup", "stop", "plan-readonly",
-    }:
+    if not isinstance(route, str) or route not in _TOOL_HANDLERS:
         return {"error": "Unsupported robot tool route", "retried": False}
+    handler, readonly = _TOOL_HANDLERS[route]
     if not _valid_tool_payload(route, payload):
         return {"error": "Invalid robot tool arguments", "retried": False}
     # Validate raw schema lengths before normalization, including legacy calls.
@@ -149,83 +303,18 @@ async def call(conn, route, payload=None):
             trust_env=False,
             headers={"Authorization": f"Bearer {token}"},
         ) as client:
-            async def signed_get(path, **kwargs):
-                return await client.get(
+            async def signed_request(method, path, **kwargs):
+                send = client.get if method == "GET" else client.post
+                return await send(
                     path,
                     headers=_receipt_headers(
-                        receipt_token,
-                        robot,
-                        conn.device_id,
-                        generation,
-                        "GET",
-                        path,
+                        receipt_token, robot, conn.device_id, generation, method, path,
                     ),
                     **kwargs,
                 )
 
-            async def signed_post(path, **kwargs):
-                return await client.post(
-                    path,
-                    headers=_receipt_headers(
-                        receipt_token,
-                        robot,
-                        conn.device_id,
-                        generation,
-                        "POST",
-                        path,
-                    ),
-                    **kwargs,
-                )
+            return await handler(signed_request, robot, payload)
 
-            if route == "status":
-                response = await signed_get(f"/v1/robots/{robot}/status")
-            elif route == "power-status":
-                response = await signed_get(f"/v1/pet/{robot}/power-status")
-            elif route == "aux-status":
-                # Reuse the existing authenticated and validated WROOM sensor
-                # adapter; never accept an arbitrary model-selected URL.
-                response = await signed_get(f"/v1/robots/{robot}/aux")
-            elif route == "latest-pickup":
-                response = await signed_get(
-                    f"/v1/robots/{robot}/jobs/latest-pickup"
-                )
-            elif route == "interaction-context":
-                response = await signed_get(
-                    f"/v1/pet/{robot}/interaction-context"
-                )
-            elif route == "voice-context":
-                if payload and payload.get("question"):
-                    response = await signed_get(
-                        f"/v1/pet/{robot}/voice-context",
-                        params={"query": payload["question"]},
-                    )
-                else:
-                    response = await signed_get(f"/v1/pet/{robot}/voice-context")
-            elif route == "look":
-                response = await signed_post(
-                    f"/v1/pet/{robot}/look", json=payload or {},
-                    timeout=50,
-                )
-            elif route == "plan-readonly":
-                response = await signed_post(
-                    f"/v1/pet/{robot}/plan-readonly",
-                    json=payload or {}, timeout=4,
-                )
-            else:
-                response = await signed_post(
-                    f"/v1/robots/{robot}/{route}", json=payload or {}
-                )
-
-        return response
-
-    # Reuse the *existing* authenticated Xiaozhi turn generation as the
-    # cancellation owner. Only read-only tools may be aborted this way.
-    # Safety STOP and permitted pickup jobs must keep their established
-    # physical acknowledgement/owner semantics, not lose an HTTP request.
-    readonly = route in {
-        "status", "power-status", "aux-status", "latest-pickup", "voice-context",
-        "interaction-context", "look", "plan-readonly",
-    }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
     signal = None
 
@@ -247,52 +336,11 @@ async def call(conn, route, payload=None):
                 observe_turn(conn.device_id) if callable(observe_turn)
                 else asyncio.Event()
             )
-            # A turn already invalidated before scheduling must not start
-            # even a read-only Mac request or fresh camera capture.
-            if signal.is_set():
-                return {
-                    "error": "Robot tool result superseded by new speech or reconnect",
-                    "retried": False,
-                }
-            request_task = asyncio.create_task(request_mac())
-            turn_task = asyncio.create_task(signal.wait())
-            # Observe both child outcomes from creation, including a failure
-            # during bounded cancellation cleanup or a second cancellation.
-            for task in (request_task, turn_task):
-                task.add_done_callback(
-                    lambda completed: None if completed.cancelled()
-                    else completed.exception()
-                )
-            try:
-                done, _ = await asyncio.wait(
-                    {request_task, turn_task},
-                    timeout=_READONLY_TIMEOUTS.get(route, 5),
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                # The HTTP task can finish in the same event-loop turn as
-                # cancellation before signal.wait() itself is scheduled.
-                # Inspect the source event, not only the waiter task state.
-                if signal.is_set() or turn_task in done:
-                    return {
-                        "error": "Robot tool result superseded by new speech or reconnect",
-                        "retried": False,
-                    }
-                if request_task not in done:
-                    raise asyncio.TimeoutError
-                response = request_task.result()
-            finally:
-                turn_task.cancel()
-                if not request_task.done():
-                    request_task.cancel()
-                # Task cancellation must be requested before returning to
-                # the active human turn. Never hold the speaker on a hung
-                # optional VLM task that suppresses cancellation.
-                pending = [task for task in (request_task, turn_task)
-                           if not task.done()]
-                if pending:
-                    await asyncio.wait(
-                        pending, timeout=0.2, return_when=asyncio.ALL_COMPLETED
-                    )
+            response = await _await_readonly(
+                request_mac, signal, _READONLY_TIMEOUTS.get(route, 5),
+            )
+            if response is _SUPERSEDED:
+                return _superseded_result()
         else:
             response = await request_mac()
     except (httpx.TransportError, asyncio.TimeoutError):
@@ -300,97 +348,18 @@ async def call(conn, route, payload=None):
         # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
         # diagnostics in the text returned to the language model.
         if not connection_current() or turn_is_superseded():
-            return {
-                "error": "Robot tool result superseded by new speech or reconnect",
-                "retried": False,
-            }
+            return _superseded_result()
         return {"error": "Robot Mac connection unavailable", "retried": False}
     if not connection_current():
-        return {
-            "error": "Robot tool result superseded by new speech or reconnect",
-            "retried": False,
-        }
+        return _superseded_result()
     turn_superseded = turn_is_superseded()
     if turn_superseded and readonly:
-        return {
-            "error": "Robot tool result superseded by new speech or reconnect",
-            "retried": False,
-        }
+        return _superseded_result()
     # An accepted pickup/STOP is NOT undone by newer speech. The Mac owns
     # the job receipt; never expose its old payload to a newer voice turn.
     if turn_superseded:
         return {"_desk_robot_turn_superseded": True}
-    if response.status_code >= 400:
-        result = {
-            "error": f"Robot Mac rejected request ({response.status_code})",
-            "retried": False,
-        }
-        if route == "look":
-            result["error_code"] = "observation_unavailable"
-        return result
-    try:
-        result = response.json()
-        # Python's decoder accepts NaN/Infinity and overflowing exponents.
-        # Never forward nonfinite values, even nested in otherwise valid receipts.
-        json.dumps(result, allow_nan=False)
-    except (ValueError, TypeError, RecursionError):
-        return {"error": "Malformed robot Mac tool response", "retried": False}
-    if not isinstance(result, dict):
-        return {"error": "Unexpected robot Mac tool response", "retried": False}
-    # Every Mac tool receipt, including STOP and pickup, belongs to the
-    # authenticated device's robot. Never forward a missing or foreign ID.
-    if result.get("robot_id") != robot:
-        return {
-            "error": "Robot Mac tool identity or authority invalid",
-            "error_code": "robot_identity_mismatch",
-            "retried": False,
-        }
-    if readonly and (("motor_authorized" in result
-                      and result["motor_authorized"] is not False)
-                     or ("charging_authorized" in result
-                         and result["charging_authorized"] is not False)):
-        return {"error": "Robot Mac tool identity or authority invalid",
-                "retried": False}
-    # A free-form answer is not evidence that the authenticated XIAO camera
-    # was used. Only the existing Mac look() response contract may become
-    # a visual answer spoken by Xiaozhi or consumed by native duplex.
-    if route == "plan-readonly" and (
-        result.get("source") != "existing_mac_ollama_readonly_route_selection"
-        or result.get("model_can_arm_motors") is not False
-        or result.get("untrusted_model_selection") is not True
-        or not isinstance(result.get("tools"), list)
-        or len(result["tools"]) > 3
-        or any(
-            not isinstance(tool, dict)
-            or not isinstance(tool.get("route"), str)
-            or tool.get("route") not in {
-                "look", "status", "power-status", "aux-status",
-                "latest-pickup", "interaction-context", "voice-context",
-            }
-            or not isinstance(tool.get("payload"), dict)
-            or not _valid_tool_payload(tool["route"], tool["payload"])
-            for tool in result["tools"]
-        )
-        # Even an otherwise allowlisted plan must not execute a duplicate
-        # route twice and crowd out a distinct explicitly requested fact.
-        or len(result["tools"]) != len({
-            tool["route"] for tool in result["tools"]
-            if isinstance(tool, dict) and isinstance(tool.get("route"), str)
-        })
-    ):
-        return {"error": "Invalid read-only Mac intent plan", "retried": False}
-    if route == "look" and (
-        result.get("source") != "authenticated_xiao_camera_and_local_vlm"
-        or type(result.get("frames_used")) is not int
-        or not 1 <= result["frames_used"] <= 2
-        or not isinstance(result.get("answer"), str)
-        or not 1 <= len(result["answer"].strip()) <= 2000
-        or result.get("motor_authorized") is not False
-        or result.get("charging_authorized") is not False
-    ):
-        return {"error": "Missing authenticated visual tool evidence",
-                "retried": False}
-    return result
+    return _format_receipt(response, route, robot, readonly)
 
 
 def voice_turn_response(result: dict) -> ActionResponse:
@@ -428,7 +397,8 @@ def description(name, text, properties=None, required=None):
     "desk_robot_pickup",
     description(
         "desk_robot_pickup",
-        "Request one experimental camera-guided pickup. A human must first enable one job for this robot. "
+        "Request one experimental camera-guided pickup. "
+        "A human must first enable one job for this robot. "
         "The result is only an accepted job ID; check the job before claiming a pickup.",
         {"target": {"type": "string", "enum": ["key", "candy"]}},
         ["target"],
