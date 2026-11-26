@@ -918,7 +918,10 @@ class Conversation:
                 self.stop_generation == stop_generation
                 and loop.time() < deadline
                 and (origin != "autonomous_social"
-                     or not quiet_hours_active(self.settings.pet_quiet_hours))
+                     or (not quiet_hours_active(self.settings.pet_quiet_hours)
+                         and consent.allows_autonomous_social(
+                             has_permission_check=permission_check is not None,
+                         )))
                 and not consent.revoked(private_memory_current=private_memory_current())
                 and (permission_check is None or permission_check())
             )

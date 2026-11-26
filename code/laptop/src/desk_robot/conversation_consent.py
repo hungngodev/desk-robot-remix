@@ -29,6 +29,17 @@ class GroupContextConsent:
                 fence.admit_camera()
         return fence
 
+    def allows_autonomous_social(self, *, has_permission_check: bool) -> bool:
+        """Hardware peer dialogue needs its own opt-in and a live caller fence."""
+        settings = self.settings
+        return settings.mode != "hardware" or (
+            has_permission_check
+            and settings.fleet_social_autonomy_enabled
+            and self.sharing_generation is not None
+            and settings.fleet_text_sharing_enabled
+            and settings.fleet_sharing_consent_generation == self.sharing_generation
+        )
+
     def admit_camera(self) -> None:
         if self.camera_generation is None:
             self.camera_generation = self.settings.camera_consent_generation

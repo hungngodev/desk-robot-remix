@@ -1,5 +1,8 @@
 """A Xiaozhi tool credential cannot claim human initiated fleet dialogue."""
+import pytest
 from desk_robot.api import create_app
+from desk_robot.conversation import Conversation
+from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 from fastapi.testclient import TestClient
 
 
@@ -35,3 +38,25 @@ def test_tool_credential_cannot_preempt_fleet_or_claim_operator_origin(
             "run", ("robot-01", "robot-02"), "Start a two-pet chat", 2,
         )
         assert sum(row[0] == "interrupt" for row in calls) == len(settings.robots)
+
+
+@pytest.mark.parametrize(("sharing", "social", "callback"), [
+    (False, False, True),
+    (True, False, True),
+    (True, True, False),
+])
+async def test_direct_hardware_social_requires_all_grants(settings, sharing, social, callback):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = sharing
+    settings.fleet_social_autonomy_enabled = social
+    speaker = SimulatedSpeaker()
+    agent = Conversation(settings, SimulatedChat(), speaker)
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await agent.run(
+            ["robot-01", "robot-02"], "Peer chat", 2,
+            origin="autonomous_social",
+            permission_check=(lambda: True) if callback else None,
+        )
+    assert agent.active is None
+    assert agent.histories == {}
+    assert not speaker.spoken
