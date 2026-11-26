@@ -277,7 +277,9 @@ def run(context):
             "Retain original CAD attribution and applicable noncommercial/share-alike "
             "terms; this import grants no commercial or redistribution approval. "
             "This is not the finished robot. Align shaft centers and gears, "
-            "validate track compatibility and inspect collisions. Then model "
+            "validate track compatibility and inspect collisions. Use "
+            "mg90s_sweep_screen.py with measured lift and jaw geometry and all eight "
+            "ToF optical keepouts plus the battery cover; a clear screen is not fit proof. Then model "
             "adapters to caliper measurements before printing.\\n"
             + packaging_warning(fit_receipt) + "\n" + jaw_warning
         )
