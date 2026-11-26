@@ -1622,7 +1622,8 @@ class NativeOmniSession:
         accepted = []
         for entry in entries:
             route = entry[0]
-            if not isinstance(route, str) or route not in batch_routes:
+            if (entry[2:] != (epoch, request_turn)
+                    or not isinstance(route, str) or route not in batch_routes):
                 self.native_readonly_tools_dropped += 1
                 continue
             accepted.append(entry)

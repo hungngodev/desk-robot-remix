@@ -10231,3 +10231,49 @@ def test_prompt_append_preserves_boundary_when_escaped_text_exceeds_budget(nativ
     assert value.startswith(json.loads(encoded))
     assert module.append_prompt_data(base, label, value, limit=len(base)) == base
 
+
+@pytest.mark.parametrize("stale_epoch, stale_turn", [(0, 2), (1, 1), (0, 1)])
+async def test_native_mixed_batch_rejects_stale_entry_before_dispatch(
+    native, monkeypatch, stale_epoch, stale_turn,
+):
+    """A current first clause cannot lend its turn to a stale sibling."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._generation = 1
+    session._readonly_turn = 2
+    calls = []
+
+    async def call(current, route, payload):
+        assert current is conn
+        calls.append(route)
+        return None
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, val in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, val)
+
+    facts = await session._run_readonly_batch([
+        ("status", {}, 1, 2),
+        ("look", {}, stale_epoch, stale_turn),
+    ])
+    assert calls == ["status"]
+    assert facts == []
+    assert session.native_readonly_tools_dropped == 2
+    assert session.native_readonly_tools_completed == 0
