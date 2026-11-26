@@ -70,8 +70,9 @@ inline bool decode_stored_calibration(const StoredCliffCalibration& bytes,
   decoded.front_obstacle_mm = static_cast<std::uint16_t>(read_calibration_le(bytes, 26, 2));
   decoded.front_max_mm = static_cast<std::uint16_t>(read_calibration_le(bytes, 28, 2));
   decoded.freshness_ms = read_calibration_le(bytes, 32, 4);
+  if (!CliffGuard::valid_config(decoded)) return false;
   config = decoded;
-  // The caller must apply CliffGuard::configure to validate physical bounds.
+  // Applying calibration still requires configure(), fresh samples and local rearm.
   return true;
 }
 

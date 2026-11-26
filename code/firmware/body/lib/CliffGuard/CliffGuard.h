@@ -61,6 +61,8 @@ enum class CliffFault : std::uint8_t {
 // never clears a fault. Only an explicit, authorized try_rearm may clear it.
 class CliffGuard {
  public:
+  // Shared bounds policy for stored records and live configuration.
+  static bool valid_config(const CliffConfig& config) noexcept;
   bool configure(const CliffConfig& config) noexcept;
   void sample(std::uint8_t channel, std::uint16_t distance_mm, bool valid,
               std::uint32_t now_ms) noexcept;
@@ -93,7 +95,6 @@ class CliffGuard {
   CliffFault fault_ = CliffFault::Unconfigured;
   std::uint8_t fault_sensor_ = kNoFaultSensor;
 
-  static bool valid_config(const CliffConfig& config) noexcept;
   CliffFault sample_fault(std::uint8_t channel) const noexcept;
   bool current_health(std::uint32_t now_ms, CliffFault& reason,
                       std::uint8_t& sensor) noexcept;
