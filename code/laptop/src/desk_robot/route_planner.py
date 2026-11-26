@@ -312,7 +312,9 @@ def plan_route(
             priority = new_cost + abs(request.goal[0] - nx) + abs(request.goal[1] - ny)
             heapq.heappush(queue, (priority, new_cost, turns + int(turning),
                                    nx, ny, new_heading))
-    return refuse("no_safe_route")
+    # Queue exhaustion can follow an invalidation during the final expansion.
+    expired = live()
+    return refuse(expired or "no_safe_route")
 
 
 def revalidate_route_step(
