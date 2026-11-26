@@ -93,7 +93,12 @@ async def capture_phase(
     previous_ms: int | None = None, previous_boot: int | None = None,
     surface_condition: str | None = None,
 ) -> list[dict]:
-    if (side not in SIDES or label not in {"near", "far"}
+    if (type(side) is not str or side not in SIDES
+            or type(label) is not str or label not in {"near", "far"}
+            or (previous_ms is not None and (
+                type(previous_ms) is not int or not 0 <= previous_ms <= 0xffffffff))
+            or (previous_boot is not None and (
+                type(previous_boot) is not int or not 1 <= previous_boot <= 0xffffffff))
             or type(count) is not int or not 1 <= count <= 100
             or type(interval) not in (int, float) or not .05 <= interval <= 2
             or type(sample_id_start) is not int or sample_id_start < 1
@@ -115,9 +120,11 @@ async def capture_phase(
         response.raise_for_status()
         received = time.monotonic()
         elapsed_ms = (received - start) * 1000
-        raw, sample_ms, next_boot = _reading(
-            response.json(), robot, side, elapsed_ms,
-        )
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise RuntimeError("Malformed WROOM status JSON") from exc
+        raw, sample_ms, next_boot = _reading(body, robot, side, elapsed_ms)
         if boot is not None and next_boot != boot:
             raise RuntimeError("WROOM reboot during side range calibration")
         boot = next_boot
