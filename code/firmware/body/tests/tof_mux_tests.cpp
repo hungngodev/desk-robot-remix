@@ -412,53 +412,70 @@ int main() {
       }
     }
     {
-      // A complete, plausible result is not publishable until the
-      // interrupt-clear STOP succeeds. A read timeout test alone cannot
-      // distinguish dropping the write_byte() failure check from correct
-      // behavior. Cover both the optional and safety-critical lane.
-      for (const bool critical : {false, true}) {
-        Wire = TwoWire{};
-        fake_i2c_lines() = FakeI2cLines{};
-        desk_robot::TofBus bus;
-        desk_robot::CliffGuard guard;
-        ready(bus, guard);
-        if (critical) {
-          bus.poll(guard, 60); // establish valid side-lane evidence
-          CHECK(bus.extra_diagnostic(0, 60).valid);
+      // Exercise both sensor timeout seams on every physical mux lane.
+      // The host fake models one expired Wire transaction, not electrical
+      // clock stretching or end-to-end motor stopping time.
+      const auto saved_clock = fake_arduino_millis();
+      const std::uint8_t order[] = {5, 0, 1, 2, 3, 4, 6, 0, 1, 2, 3, 4,
+                                    7, 0, 1, 2, 3, 4};
+      for (const bool clear_timeout : {false, true}) {
+        for (std::uint8_t target = 0; target < 8; ++target) {
+          Wire = TwoWire{};
+          fake_i2c_lines() = FakeI2cLines{};
+          fake_arduino_millis() = 0;
+          desk_robot::TofBus bus;
+          desk_robot::CliffGuard guard;
+          ready(bus, guard);
+          auto poll = [&](std::uint32_t at) {
+            fake_arduino_millis() = at;
+            bus.poll(guard, at);
+          };
+          std::uint32_t now = 60;
+          for (const auto lane : order) {
+            poll(now++);
+            CHECK(bus.last_channel() == lane);
+          }
+          for (const auto lane : order) {
+            if (lane == target) break;
+            poll(now++);
+          }
+          CHECK(guard.evaluate(now));
+          CHECK(bus.optical_diagnostic(target, now).valid);
+          const auto samples = Wire.tof_samples;
+          const auto stops = Wire.tof_register_stop_transmissions;
+          const auto transactions = Wire.transactions;
+          const auto errors = bus.errors();
+          if (clear_timeout) Wire.next_stop_timeout_address = 0x29;
+          else Wire.next_read_timeout_address = 0x29;
+          poll(now);
+          CHECK(millis() - now == 10U);
+          CHECK(bus.last_channel() == target);
+          CHECK(Wire.ranges == (1U << target) && Wire.extras == 0);
+          CHECK(!Wire.repeated_start_pending);
+          CHECK(Wire.next_read_timeout_address == -1);
+          CHECK(Wire.next_stop_timeout_address == -1);
+          CHECK(Wire.tof_samples == samples + (clear_timeout ? 1U : 0U));
+          CHECK(Wire.tof_register_stop_transmissions == stops + (clear_timeout ? 1U : 0U));
+          CHECK(Wire.transactions - transactions == (clear_timeout ? 9U : 6U));
+          CHECK(bus.errors() == errors + 1);
+          CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
+          for (std::uint8_t lane = 0; lane < 8; ++lane)
+            CHECK(!bus.optical_diagnostic(lane, now).valid);
+          for (std::uint8_t lane = 0; lane < 5; ++lane)
+            CHECK(!guard.diagnostic(lane, now).present);
+          for (std::uint8_t lane = 0; lane < 3; ++lane)
+            CHECK(!bus.extra_diagnostic(lane, now).valid);
+          CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
+          CHECK(!guard.evaluate(millis()));
+          CHECK(!guard.try_rearm(millis()));
+          now = millis();
+          for (unsigned i = 0; i < 7; ++i) poll(++now);
+          CHECK(!guard.evaluate(now)); // fresh data alone cannot clear STOP
+          CHECK(guard.try_rearm(now)); // explicit rearm after fresh critical sweep
+          CHECK(!Wire.repeated_start_pending && !Wire.unsafe_parallel_mux);
         }
-        const std::uint32_t now = critical ? 61U : 60U;
-        const auto samples = Wire.tof_samples;
-        const auto stops = Wire.tof_register_stop_transmissions;
-        const auto errors = bus.errors();
-        // Register pointer writes use repeated START, so this one-shot
-        // STOP timeout targets the 0x0B acknowledgement after the read.
-        Wire.next_stop_timeout_address = 0x29;
-        fake_arduino_millis() = now;
-        bus.poll(guard, now);
-        CHECK(millis() - now == 10U);
-        CHECK(Wire.next_stop_timeout_address == -1);
-        CHECK(Wire.tof_samples == samples + 1);
-        CHECK(Wire.tof_register_stop_transmissions == stops + 1);
-        CHECK(bus.errors() == errors + 1);
-        CHECK(bus.new_optical_channel() == 255);
-        CHECK(bus.new_extra_channel() == 255);
-        CHECK(!bus.extra_diagnostic(0, now).valid);
-        CHECK(!bus.optical_diagnostic(5, now).valid);
-        for (std::uint8_t lane = 0; lane < 5; ++lane) {
-          CHECK(!bus.optical_diagnostic(lane, now).valid);
-          CHECK(!guard.diagnostic(lane, now).present);
-        }
-        CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
-        CHECK(!guard.evaluate(now));
-        CHECK(!guard.try_rearm(now));
-        const auto recovered_at = millis();
-        for (std::uint32_t at = recovered_at + 1; at <= recovered_at + 7; ++at) {
-          fake_arduino_millis() = at;
-          bus.poll(guard, at);
-        }
-        CHECK(!guard.evaluate(recovered_at + 7)); // no automatic rearm
-        CHECK(guard.try_rearm(recovered_at + 7)); // new critical sweep + operator
       }
+      fake_arduino_millis() = saved_clock;
     }
     {
       // A full millis revolution must not make expired diagnostics fresh.
