@@ -51,14 +51,22 @@ class GroupContextConsent:
             self.room_generation = self.settings.room_station_consent_generation
 
     def filter_live_transcripts(self, timeline: list[dict], *, now: float) -> list[dict]:
-        """Exclude queued ASR captured before the current live grant."""
+        """Exclude queued ASR outside the group's current sharing and live grants."""
         settings = self.settings
         if settings.mode != "hardware":
             return timeline
+        live_relay_allowed = (
+            self.sharing_generation is not None
+            and settings.fleet_text_sharing_enabled
+            and settings.fleet_sharing_consent_generation == self.sharing_generation
+            and self.camera_generation is not None
+            and settings.voice_vision_tools_enabled
+            and settings.camera_consent_generation == self.camera_generation
+        )
         return [
             item for item in timeline
             if live_asr_in_current_grant(
-                item, now=now, enabled=settings.voice_vision_tools_enabled,
+                item, now=now, enabled=live_relay_allowed,
                 consent_started_at=settings.camera_consent_started_at,
             )
         ]
