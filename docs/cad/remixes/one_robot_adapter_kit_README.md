@@ -182,8 +182,13 @@ draws the actual **source-polygon** left and right rail shapes, 37 mm entry
 flare, nominal 100 mm straight channel and 126 x 138 mm passive cradle
 footprint. The arrow marks the approaching robot's entry end; the backstop
 is at the opposite end. The 96 mm chassis track width and 2 mm side
-clearances are still **nominal**, not a measured fit, and the paper drawing
-does not supply a usable charging-contact fixture. Compare a real unpowered
+clearances are still **nominal**, not a measured fit. The 96 mm dimension is
+an outer fit envelope, not the effective left/right track separation used for
+odometry. Measure loaded wheel radius, separate signed travel per encoder count,
+and effective track width on each assembled unit before configuring body pose.
+The Mac consumes metric pose receipts; neither this CAD dimension nor stepper
+commands qualify odometry. The paper drawing does not supply a usable
+charging-contact fixture. Compare a real unpowered
 track assembly with this sheet and the rail entry coupon before committing
 the full dock print. The independent full-power, current and temperature
 gates remain mandatory.

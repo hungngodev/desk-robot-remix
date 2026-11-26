@@ -3,6 +3,9 @@
 Body sample_us and Mac monotonic receipt clocks have different epochs. We
 compare elapsed durations, never absolute clock readings. This module does not
 anchor a map, clear local safety faults, or grant an actuator lease.
+Metric pose is already integrated by the body from measured per-unit wheel
+travel per count and effective track width. Never rescale it using CAD chassis
+width, nominal wheel radius, or commanded motor steps.
 """
 
 from __future__ import annotations
