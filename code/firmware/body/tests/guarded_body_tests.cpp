@@ -2245,6 +2245,76 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
 }
 
 
+
+static void p0_interrupt_retires_active_calibrated_jaw_target() {
+  enum class Fault { LowG, Cliff, Bumper, Halt, Watchdog };
+  for (const auto fault : {Fault::LowG, Fault::Cliff, Fault::Bumper,
+                           Fault::Halt, Fault::Watchdog}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 100);
+    desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+    body.require_imu_for_motion(true);
+    body.set_imu_identity(4, 0x68, 0);
+    desk_robot::BerryReading imu{};
+    imu.model = desk_robot::BerryModel::Mpu6050;
+    imu.valid = imu.low_g_status_valid = true;
+    imu.accel[2] = 16384;
+    imu.at_ms = 100;
+    body.set_imu(imu);
+    body.require_grip_feedback(true);
+    CHECK(body.configure_jaw_force_limits({120, 60, 1000, 1, 300}));
+    desk_robot::AccessoryReadings readings{};
+    readings.force.present = readings.force.valid = true;
+    readings.force.valid_mask = 2U;
+    readings.force.adc[1] = 1000;
+    readings.force.jaw_sample_seq = 1U;
+    readings.force.at_ms = readings.force.jaw_at_ms = 100U;
+    body.set_accessories(readings, 100U);
+    CHECK(send(body, "rearm", 100, true) == "OK rearm");
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "grip 60", 100) == "OK grip angle=60");
+    body.tick(120);
+    const int held = body.state().grip;
+    CHECK(held == 89 && body.state().grip_target == 60);
+
+    // Trip with three degrees of ADC motion credit still unused.
+    switch (fault) {
+      case Fault::LowG:
+        imu.low_g_irq = true;
+        imu.low_g_event_seq = 1U;
+        imu.at_ms = 121U;
+        body.set_imu(imu);
+        break;
+      case Fault::Cliff:
+        guard.sample(0, 500, true, 121);
+        break;
+      case Fault::Bumper:
+        body.sample_bumper_input(true);
+        break;
+      case Fault::Halt:
+        CHECK(send(body, "halt", 121) == "OK halt");
+        break;
+      case Fault::Watchdog:
+        body.motor_watchdog_trip();
+        break;
+    }
+    body.tick(121);
+    CHECK(!body.state().armed && body.state().servos_attached);
+    CHECK(body.state().grip == held && body.state().grip_target == held);
+
+    // A valid new ADC conversion cannot revive a canceled closing target.
+    readings.force.jaw_sample_seq = 2U;
+    readings.force.at_ms = readings.force.jaw_at_ms = 122U;
+    body.set_accessories(readings, 122U);
+    fresh(guard, 122U);
+    body.tick(140);
+    CHECK(body.state().grip == held && body.state().grip_target == held);
+    CHECK(send(body, "grip 60", 140) == "ERR grip disarmed");
+    CHECK(send(body, "grip 120", 140) == "ERR grip disarmed");
+  }
+}
+
 static void jaw_acquisition_identity_prevents_forged_force_relief() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_grip_feedback(true);
@@ -4073,6 +4143,7 @@ int main() {
     belly_acquisition_identity_cannot_forge_contact();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();
+    p0_interrupt_retires_active_calibrated_jaw_target();
     jaw_acquisition_identity_prevents_forged_force_relief();
     jaw_force_ceiling_is_local_and_direction_aware();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
