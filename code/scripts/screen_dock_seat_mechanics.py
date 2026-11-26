@@ -64,6 +64,20 @@ def _require_dock_layout_primitives(text: str) -> None:
             "[inner_wall_x-guide_wall_mm,guide_run_mm],"
             "[inner_wall_x-guide_wall_mm,entry_flare_run_mm]]);"
         ),
+        "rail assembly": (
+            "cube([outside_width_mm,base_length_mm,base_thickness_mm]);"
+            "translate([0,0,base_thickness_mm])one_side_rail();"
+            "translate([outside_width_mm,0,base_thickness_mm])"
+            "mirror([1,0,0])one_side_rail();"
+        ),
+        "backstop": (
+            "translate([0,backstop_front_y_mm,base_thickness_mm])"
+            "cube([outside_width_mm,backstop_thickness_mm,backstop_height_mm]);"
+        ),
+        "brace": (
+            "translate([0,backstop_brace_front_y_mm,base_thickness_mm])"
+            "cube([outside_width_mm,backstop_brace_depth_mm,backstop_brace_height_mm]);"
+        ),
         "IR coupon aperture": (
             "for(x=[outside_width_mm/2-ir_pair_spacing_mm/2,"
             "outside_width_mm/2+ir_pair_spacing_mm/2])"
