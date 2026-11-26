@@ -32,7 +32,7 @@ handling_tilt_threshold_deg = 38
 handling_shake_delta_mg = 550
 ```
 
-Place the assembled pet upright on a stable flat desk with its tracks stopped. Start pet mode. Hold it still for at least the first eight 150ms reads so the software learns a relative gravity baseline, then gradually tilt and return to neutral, followed by a short careful hand movement. The two event kinds must correspond to real recorded body status before allowing spontaneous voice reactions. Start with `quiet = true` if you need to observe sensor memory without sound. In the absence of any verified IMU module or mounting, leave the default `false`.
+Place the assembled pet upright on a stable flat desk with actuator power disconnected. With both qualification flags still false, use the read-only capture procedure below to collect upright, tilted and shaking status. No handling event or handling memory is expected at this stage. After the separate physical acceptance checks and explicit operator attestation, enable both flags for supervised pet-mode verification. Start with `quiet = true`, hold the robot still for eight distinct fresh quiet IMU conversions, then gradually tilt and return to neutral, followed by a short careful hand movement. Confirm that each observed event corresponds to real recorded body status before permitting spontaneous voice reactions. Leave both flags false if the IMU module, mounting or thresholds are unverified.
 
 The example thresholds above are **not factory safety settings**; they are software bounds that still require tuning against measured data from the actual hardware. A failed/offline IMU, commands in motion, invalid types, a long sample gap or unknown BerryIMU family must yield **no handling event**. No motor stop, servo permit, automatic roaming or charging result is based on these gestures.
 
@@ -41,8 +41,8 @@ The example thresholds above are **not factory safety settings**; they are softw
 After collecting actual read-only WROOM status JSON from **one** stationary
 mounted robot, prepare a JSON Lines file with at least 8 independent upright
 conversions, 4 deliberate held tilts and 4 actual gentle shakes, plus the
-separate repeat trials below. Each line has a physical label, monotonic
-acquisition time, flashed firmware revision, mechanical IMU mount revision
+separate repeat trials below. Each line has a physical label, host monotonic
+receipt time, flashed firmware revision, mechanical IMU mount revision
 and the **unchanged real body status object**, including motor and IMU fields:
 
 ```json
@@ -52,7 +52,7 @@ and the **unchanged real body status object**, including motor and IMU fields:
 That row is an **illustrative format only**, not proof of a captured MPU6050
 conversion. Do not submit copied or synthetic rows as physical evidence.
 Capture genuine GPIO/I2C body status from the currently flashed WROOM, maintain
-monotonically increasing sample_ms, and retain the raw log, unit identity,
+forward `sample_ms` progression within one boot (including a valid uint32 rollover), and retain the raw log, unit identity,
 mounting orientation and physical rig notes. During all these observations,
 wheel command and drive permit must be zero; use controlled benchtop handling
 without loaded wheel movement.
