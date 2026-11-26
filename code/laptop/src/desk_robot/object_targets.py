@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Historical descriptions outlive metric search hints. Use the original capture clock.
+MAX_SEARCH_HINT_AGE_US = 30_000_000
+
 _SOURCES = frozenset({"camera_seen", "camera_not_seen", "user_reported"})
 
 
@@ -312,8 +315,14 @@ def resolve_object_target(
             return result("unknown", "contradictory_camera_frame")
         if len(projected_locations(past, seen)) > 1:
             return result("last_seen", "ambiguous_projected_view", past)
-        hint = (past.floor_mm if past.projection_qualified and
-                past.floor_mm is not None and same_map(past) else None)
+        metric_hint = (past.projection_qualified and past.floor_mm is not None
+                       and same_map(past))
+        hint_fresh = (past.host_boot_id == query.host_boot_id
+                      and past.captured_us is not None
+                      and 0 <= now_us - past.captured_us < MAX_SEARCH_HINT_AGE_US)
+        hint = past.floor_mm if metric_hint and hint_fresh else None
+        if metric_hint and not hint_fresh:
+            return result("last_seen", "search_hint_expired", past)
         reason = "not_currently_confirmed" if latest_absent else "historical_sighting_only"
         return result("last_seen", reason, past, hint=hint)
     if report is not None:

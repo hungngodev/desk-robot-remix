@@ -313,7 +313,8 @@ def test_other_host_clock_is_not_compared_to_current_monotonic_time():
     historical = replace(seen, host_boot_id="older-host", receipt_us=9_000_000)
     result = resolve([historical])
     assert result.status == "last_seen"
-    assert result.search_hint_mm == historical.floor_mm
+    assert result.reason == "search_hint_expired"
+    assert result.search_hint_mm is None
     assert result.confirmed_floor_mm is None
 
 @pytest.mark.parametrize("other_floor", [(240, 320), None])
