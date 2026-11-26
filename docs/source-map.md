@@ -12,6 +12,203 @@ that all components have been integrated. The product requirements remain in
 
 **Complete research preservation:** The [day-zero reuse shortlist](research/2026-11-03-active-pet-sources.md) gives inspected implementation files and compatible integration boundaries. The [200-entry feature register](#original-html-feature-and-sensor-idea-register) records original and historic sensor, game, personality and robotics ideas; [all 131 unique external links from the original 41-section HTML](#complete-original-html-research-link-index) are preserved without claiming every destination was verified. The [linear integration plan](PLAN.md) keeps these visible before buying or printing. Existing source reviews below are retained, not superseded by a small shortlist.
 
+## Implementation source inventory
+
+Source ownership index, checked against PR #17 on 2026-11-26. This inventory
+describes files, not completed functionality or passing CI. Update it alongside
+module additions, removals and extractions; the coverage test checks the listed
+source paths against the checkout. Historical research below is preserved.
+
+The Mac owns orchestration and private SQLite; Xiaozhi and the XIAO ESP32S3
+Sense retain the single voice/camera path. WROOM32 retains independent latched
+STOP, the 250 ms motion permit, 500 ms watchdog and eight VL53L0X lanes.
+DRV8833 LOW/LOW is coast, not verified active braking. The Feather nRF52840
+room station is read-only context. P0 physical fault > P1 human VAD > P2 current
+tool completion > P3 optional initiative. No inventory entry changes the $50
+delivered cap, physical HOLD, or license requirements.
+
+### Mac package
+
+All 73 direct Python modules, including the package initializer.
+API and policy helpers are part of the same runtime, not additional services.
+
+| File | Responsibility |
+| --- | --- |
+| [__init__.py](../code/laptop/src/desk_robot/__init__.py) | Package entry and disabled-by-default hardware boundary |
+| [api.py](../code/laptop/src/desk_robot/api.py) | FastAPI application composition and shared route owners |
+| [api_dock_routes.py](../code/laptop/src/desk_robot/api_dock_routes.py) | Dock observation and operator motion admission routes |
+| [api_ingress.py](../code/laptop/src/desk_robot/api_ingress.py) | Bounded authenticated ingress and JSON admission |
+| [api_lifecycle.py](../code/laptop/src/desk_robot/api_lifecycle.py) | Runtime startup, shutdown and readiness admission |
+| [api_memory_routes.py](../code/laptop/src/desk_robot/api_memory_routes.py) | Operator SQLite memory CRUD and voice context routes |
+| [api_native_omni_routes.py](../code/laptop/src/desk_robot/api_native_omni_routes.py) | Native Xiaozhi context, transcript and video routes |
+| [api_readonly_context.py](../code/laptop/src/desk_robot/api_readonly_context.py) | Read-only battery and live situation routes |
+| [api_readonly_planner.py](../code/laptop/src/desk_robot/api_readonly_planner.py) | Bounded read-only voice tool selection |
+| [api_robot_status.py](../code/laptop/src/desk_robot/api_robot_status.py) | Robot inventory and source-preserving telemetry routes |
+| [api_spatial_pose.py](../code/laptop/src/desk_robot/api_spatial_pose.py) | Operator pose diagnostics and spatial route registration |
+| [attention.py](../code/laptop/src/desk_robot/attention.py) | Volatile conversational attention ledger |
+| [aux.py](../code/laptop/src/desk_robot/aux.py) | Read-only optional sensor telemetry validation |
+| [brain_context.py](../code/laptop/src/desk_robot/brain_context.py) | Pure bounded provenance-aware prompt composition |
+| [calibration.py](../code/laptop/src/desk_robot/calibration.py) | Calibration data models and validation |
+| [cli.py](../code/laptop/src/desk_robot/cli.py) | Operator CLI and provisioning entry point |
+| [command_framing.py](../code/laptop/src/desk_robot/command_framing.py) | Command grammar, duration bounds and acknowledgment matching |
+| [config.py](../code/laptop/src/desk_robot/config.py) | Configuration, identity and credential settings |
+| [controller.py](../code/laptop/src/desk_robot/controller.py) | Coordinator job and guarded motion orchestration |
+| [conversation.py](../code/laptop/src/desk_robot/conversation.py) | Conversation, model and speaker coordination |
+| [conversation_consent.py](../code/laptop/src/desk_robot/conversation_consent.py) | Group conversation evidence admission |
+| [cue_ranking.py](../code/laptop/src/desk_robot/cue_ranking.py) | Selection of admitted multimodal timeline cues |
+| [dock_evidence.py](../code/laptop/src/desk_robot/dock_evidence.py) | Repeated contact and charge evidence classification |
+| [dock_ir.py](../code/laptop/src/desk_robot/dock_ir.py) | Authenticated dual NEC beacon observations |
+| [dock_process.py](../code/laptop/src/desk_robot/dock_process.py) | Supervised single-flight AprilTag detector workers |
+| [dock_progress.py](../code/laptop/src/desk_robot/dock_progress.py) | Bounded approach progress tracking |
+| [dock_runtime.py](../code/laptop/src/desk_robot/dock_runtime.py) | Live docking camera observation runtime |
+| [dock_timing.py](../code/laptop/src/desk_robot/dock_timing.py) | Shared dock observation freshness policy |
+| [dock_vision.py](../code/laptop/src/desk_robot/dock_vision.py) | Calibrated AprilTag geometry and observation |
+| [expression_policy.py](../code/laptop/src/desk_robot/expression_policy.py) | Optional OLED cue admission and settlement |
+| [fleet_dialogue_budget.py](../code/laptop/src/desk_robot/fleet_dialogue_budget.py) | Rolling group dialogue allowance |
+| [fleet_identity.py](../code/laptop/src/desk_robot/fleet_identity.py) | Portable identity validation and comparison keys |
+| [grasp_feedback.py](../code/laptop/src/desk_robot/grasp_feedback.py) | Fresh jaw sample feedback and guarded grasp checks |
+| [habituation.py](../code/laptop/src/desk_robot/habituation.py) | Bounded volatile repeat and inactivity tracking |
+| [handling.py](../code/laptop/src/desk_robot/handling.py) | Read-only MPU6050 handling event interpretation |
+| [initiative_policy.py](../code/laptop/src/desk_robot/initiative_policy.py) | Pure optional initiative vetoes, budgets and cooldowns |
+| [live_turns.py](../code/laptop/src/desk_robot/live_turns.py) | Offline realtime turn and playback cancellation state |
+| [live_voice_events.py](../code/laptop/src/desk_robot/live_voice_events.py) | Authenticated Xiaozhi VAD and barge event listener |
+| [memory.py](../code/laptop/src/desk_robot/memory.py) | Private provenance-aware SQLite memory |
+| [memory_worker.py](../code/laptop/src/desk_robot/memory_worker.py) | Bounded optional SQLite write worker |
+| [motion_authority.py](../code/laptop/src/desk_robot/motion_authority.py) | Host STOP confirmation fencing, not body motor authority |
+| [multimodal.py](../code/laptop/src/desk_robot/multimodal.py) | Bounded live voice and camera context orchestration |
+| [object_detector.py](../code/laptop/src/desk_robot/object_detector.py) | Bounded read-only detection on authenticated Sense frames |
+| [object_search.py](../code/laptop/src/desk_robot/object_search.py) | Last-seen object search viewpoint proposals |
+| [object_targets.py](../code/laptop/src/desk_robot/object_targets.py) | Source-qualified object recall targets |
+| [observation_policy.py](../code/laptop/src/desk_robot/observation_policy.py) | Pure receipt freshness and camera receipt calculations |
+| [operations.py](../code/laptop/src/desk_robot/operations.py) | Shared bounded asynchronous command operations |
+| [personality_policy.py](../code/laptop/src/desk_robot/personality_policy.py) | Cosmetic personality and optional initiative timing |
+| [pet.py](../code/laptop/src/desk_robot/pet.py) | Explicitly enabled pet initiative and speech orchestration |
+| [private_files.py](../code/laptop/src/desk_robot/private_files.py) | Private file, directory and SQLite path utilities |
+| [range_context.py](../code/laptop/src/desk_robot/range_context.py) | Nearby range evidence caveats for visual guesses |
+| [realtime_omni_protocol.py](../code/laptop/src/desk_robot/realtime_omni_protocol.py) | Opt-in native duplex wire protocol, not a second speaker |
+| [room_station.py](../code/laptop/src/desk_robot/room_station.py) | Read-only opt-in USB room sensor feed validation |
+| [route_planner.py](../code/laptop/src/desk_robot/route_planner.py) | Bounded read-only occupancy-grid route proposals |
+| [runtime.py](../code/laptop/src/desk_robot/runtime.py) | Shared Mac runtime composition and resource ownership |
+| [scene_motion.py](../code/laptop/src/desk_robot/scene_motion.py) | Exposure-compensated camera motion scoring |
+| [sensor_event_contract.py](../code/laptop/src/desk_robot/sensor_event_contract.py) | Shared sensor event registry and typed receipt validation |
+| [serial_device.py](../code/laptop/src/desk_robot/serial_device.py) | Local USB serial device admission |
+| [side_ranging.py](../code/laptop/src/desk_robot/side_ranging.py) | Debounced read-only side and rear range events |
+| [simulator.py](../code/laptop/src/desk_robot/simulator.py) | Synthetic mock head and images, never physical evidence |
+| [soil_calibration.py](../code/laptop/src/desk_robot/soil_calibration.py) | Relative soil moisture from measured ADC references |
+| [spatial_bracket.py](../code/laptop/src/desk_robot/spatial_bracket.py) | Stationary JPEG and odometry receipt validation |
+| [spatial_frames.py](../code/laptop/src/desk_robot/spatial_frames.py) | Planar rigid frame transforms |
+| [spatial_grid.py](../code/laptop/src/desk_robot/spatial_grid.py) | Read-only projected range occupancy evidence |
+| [spatial_memory.py](../code/laptop/src/desk_robot/spatial_memory.py) | Per-pet SQLite spatial provenance sidecar |
+| [spatial_pose.py](../code/laptop/src/desk_robot/spatial_pose.py) | Versioned read-only body pose receipt validation and fencing |
+| [spatial_projection.py](../code/laptop/src/desk_robot/spatial_projection.py) | Calibrated fixed-camera floor projection |
+| [spatial_runtime.py](../code/laptop/src/desk_robot/spatial_runtime.py) | Per-robot spatial memory, grid, search and route orchestration |
+| [streamed_ollama.py](../code/laptop/src/desk_robot/streamed_ollama.py) | Bounded incremental Ollama sentence chunks |
+| [tof_optics.py](../code/laptop/src/desk_robot/tof_optics.py) | Read-only eight-lane optical quality provenance |
+| [transport.py](../code/laptop/src/desk_robot/transport.py) | Authenticated head transport and reply validation |
+| [vision.py](../code/laptop/src/desk_robot/vision.py) | Local visual inference and observation interfaces |
+| [vision_admission.py](../code/laptop/src/desk_robot/vision_admission.py) | Fair latest-only optional JPEG preprocessing admission |
+
+### Firmware
+
+Production sources and build/configuration inputs, excluding test fixtures and
+documentation. Directory groups indicate ownership, not physical qualification.
+The body owns independent motor safety; the head owns Xiaozhi integration and
+expression; the dock is a passive evidence/beacon boundary, not charge or motion
+authority; the room station supplies opt-in environment observations.
+
+**`code/firmware/body/`**: [CMakeLists.txt](../code/firmware/body/CMakeLists.txt), [platformio.ini](../code/firmware/body/platformio.ini).
+
+**`code/firmware/body/cmake/`**: [VerifyHostTests.cmake](../code/firmware/body/cmake/VerifyHostTests.cmake).
+
+**`code/firmware/body/include/`**: [BodyPins.h](../code/firmware/body/include/BodyPins.h), [MuxWrite.h](../code/firmware/body/include/MuxWrite.h), [ServoPulse.h](../code/firmware/body/include/ServoPulse.h), [TofTransactions.h](../code/firmware/body/include/TofTransactions.h), [TofWireLimits.h](../code/firmware/body/include/TofWireLimits.h).
+
+**`code/firmware/body/lib/AccessorySensors/`**: [AccessoryReadings.h](../code/firmware/body/lib/AccessorySensors/AccessoryReadings.h), [AccessorySensors.cpp](../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp), [AccessorySensors.h](../code/firmware/body/lib/AccessorySensors/AccessorySensors.h), [ApdsOpticalQuality.h](../code/firmware/body/lib/AccessorySensors/ApdsOpticalQuality.h), [Bmp280Math.h](../code/firmware/body/lib/AccessorySensors/Bmp280Math.h), [GestureDecoder.h](../code/firmware/body/lib/AccessorySensors/GestureDecoder.h), [HapticPulse.h](../code/firmware/body/lib/AccessorySensors/HapticPulse.h), [McpPortDirectionLock.h](../code/firmware/body/lib/AccessorySensors/McpPortDirectionLock.h), [Pn532Frames.h](../code/firmware/body/lib/AccessorySensors/Pn532Frames.h).
+
+**`code/firmware/body/lib/BerryImu/`**: [BerryImu.cpp](../code/firmware/body/lib/BerryImu/BerryImu.cpp), [BerryImu.h](../code/firmware/body/lib/BerryImu/BerryImu.h).
+
+**`code/firmware/body/lib/BodyControl/`**: [AttitudeNorm.h](../code/firmware/body/lib/BodyControl/AttitudeNorm.h), [BatterySafety.h](../code/firmware/body/lib/BodyControl/BatterySafety.h), [BodyCommandParser.h](../code/firmware/body/lib/BodyControl/BodyCommandParser.h), [BodyControl.cpp](../code/firmware/body/lib/BodyControl/BodyControl.cpp), [BodyControl.h](../code/firmware/body/lib/BodyControl/BodyControl.h), [BodyReplyFormat.h](../code/firmware/body/lib/BodyControl/BodyReplyFormat.h), [DcDutyRamp.h](../code/firmware/body/lib/BodyControl/DcDutyRamp.h), [ImuYawCapture.h](../code/firmware/body/lib/BodyControl/ImuYawCapture.h), [McpContactEvidence.h](../code/firmware/body/lib/BodyControl/McpContactEvidence.h), [MotorHeartbeat.h](../code/firmware/body/lib/BodyControl/MotorHeartbeat.h), [RangeSampleClock.h](../code/firmware/body/lib/BodyControl/RangeSampleClock.h), [ServoStepClock.h](../code/firmware/body/lib/BodyControl/ServoStepClock.h), [TouchDebounce.h](../code/firmware/body/lib/BodyControl/TouchDebounce.h), [WheelAngleCapture.h](../code/firmware/body/lib/BodyControl/WheelAngleCapture.h), [WheelPairCapture.h](../code/firmware/body/lib/BodyControl/WheelPairCapture.h), [WheelPoseIntegrator.h](../code/firmware/body/lib/BodyControl/WheelPoseIntegrator.h).
+
+**`code/firmware/body/lib/CliffGuard/`**: [CliffGuard.cpp](../code/firmware/body/lib/CliffGuard/CliffGuard.cpp), [CliffGuard.h](../code/firmware/body/lib/CliffGuard/CliffGuard.h), [StoredCliffCalibration.h](../code/firmware/body/lib/CliffGuard/StoredCliffCalibration.h).
+
+**`code/firmware/body/lib/ExpansionTouch/`**: [ExpansionTouch.cpp](../code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp), [ExpansionTouch.h](../code/firmware/body/lib/ExpansionTouch/ExpansionTouch.h).
+
+**`code/firmware/body/lib/PulsePad/`**: [OpticalRaw.h](../code/firmware/body/lib/PulsePad/OpticalRaw.h), [PulsePad.cpp](../code/firmware/body/lib/PulsePad/PulsePad.cpp), [PulsePad.h](../code/firmware/body/lib/PulsePad/PulsePad.h).
+
+**`code/firmware/body/lib/ReplyTxQueue/`**: [ReplyTxQueue.h](../code/firmware/body/lib/ReplyTxQueue/ReplyTxQueue.h).
+
+**`code/firmware/body/lib/ServoCenterBench/`**: [ServoCenterBenchGate.h](../code/firmware/body/lib/ServoCenterBench/ServoCenterBenchGate.h).
+
+**`code/firmware/body/lib/StepperDrive/`**: [StepperDrive.cpp](../code/firmware/body/lib/StepperDrive/StepperDrive.cpp), [StepperDrive.h](../code/firmware/body/lib/StepperDrive/StepperDrive.h).
+
+**`code/firmware/body/lib/TerminalIr/`**: [NecBurst.h](../code/firmware/body/lib/TerminalIr/NecBurst.h), [TerminalIr.cpp](../code/firmware/body/lib/TerminalIr/TerminalIr.cpp), [TerminalIr.h](../code/firmware/body/lib/TerminalIr/TerminalIr.h).
+
+**`code/firmware/body/lib/TofBus/`**: [RangeScanOrder.h](../code/firmware/body/lib/TofBus/RangeScanOrder.h), [RangeTelemetry.h](../code/firmware/body/lib/TofBus/RangeTelemetry.h), [TofBus.cpp](../code/firmware/body/lib/TofBus/TofBus.cpp), [TofBus.h](../code/firmware/body/lib/TofBus/TofBus.h), [TofResult.h](../code/firmware/body/lib/TofBus/TofResult.h).
+
+**`code/firmware/body/src/`**: [main.cpp](../code/firmware/body/src/main.cpp), [servo_center_bench.cpp](../code/firmware/body/src/servo_center_bench.cpp), [vl53l0x_bench.cpp](../code/firmware/body/src/vl53l0x_bench.cpp).
+
+**`code/firmware/dock/`**: [platformio.ini](../code/firmware/dock/platformio.ini).
+
+**`code/firmware/dock/src/`**: [main.cpp](../code/firmware/dock/src/main.cpp).
+
+**`code/firmware/head/`**: [audio_debug_server.py](../code/firmware/head/audio_debug_server.py), [dependencies.lock](../code/firmware/head/dependencies.lock), [install_overlay.py](../code/firmware/head/install_overlay.py), [modular_snapshot.inc](../code/firmware/head/modular_snapshot.inc), [private_config.py](../code/firmware/head/private_config.py), [verify_sense_ci_assets.py](../code/firmware/head/verify_sense_ci_assets.py).
+
+**`code/firmware/head/modular/`**: [config.h](../code/firmware/head/modular/config.h), [config.json](../code/firmware/head/modular/config.json), [desk_robot_modular_s3.cc](../code/firmware/head/modular/desk_robot_modular_s3.cc).
+
+**`code/firmware/head/overlay/`**: [camera_explain_config.hpp](../code/firmware/head/overlay/camera_explain_config.hpp), [camera_frame_bounds.hpp](../code/firmware/head/overlay/camera_frame_bounds.hpp), [face_eye_animator.hpp](../code/firmware/head/overlay/face_eye_animator.hpp), [face_eye_display.hpp](../code/firmware/head/overlay/face_eye_display.hpp), [face_eye_geometry.hpp](../code/firmware/head/overlay/face_eye_geometry.hpp), [face_idle_power.hpp](../code/firmware/head/overlay/face_idle_power.hpp), [face_mood_morph.hpp](../code/firmware/head/overlay/face_mood_morph.hpp), [face_presence.hpp](../code/firmware/head/overlay/face_presence.hpp), [real_touch_edges.h](../code/firmware/head/overlay/real_touch_edges.h), [robot_bridge.cc](../code/firmware/head/overlay/robot_bridge.cc), [robot_bridge.h](../code/firmware/head/overlay/robot_bridge.h), [robot_protocol.h](../code/firmware/head/overlay/robot_protocol.h), [stackchan_behavior.hpp](../code/firmware/head/overlay/stackchan_behavior.hpp).
+
+**`code/firmware/head/sense/`**: [config.h](../code/firmware/head/sense/config.h), [config.json](../code/firmware/head/sense/config.json), [desk_robot_sense.cc](../code/firmware/head/sense/desk_robot_sense.cc), [face_speech_envelope.hpp](../code/firmware/head/sense/face_speech_envelope.hpp), [reference_decimator.h](../code/firmware/head/sense/reference_decimator.h), [reference_timeline.h](../code/firmware/head/sense/reference_timeline.h), [sense_pcm_window.h](../code/firmware/head/sense/sense_pcm_window.h), [sense_reference_codec.cc](../code/firmware/head/sense/sense_reference_codec.cc), [sense_reference_codec.h](../code/firmware/head/sense/sense_reference_codec.h), [sense_speaker_activity.hpp](../code/firmware/head/sense/sense_speaker_activity.hpp).
+
+**`code/firmware/head/waveshare/`**: [config.h](../code/firmware/head/waveshare/config.h), [config.json](../code/firmware/head/waveshare/config.json), [desk_robot_waveshare.cc](../code/firmware/head/waveshare/desk_robot_waveshare.cc).
+
+**`code/firmware/room_station/`**: [platformio.ini](../code/firmware/room_station/platformio.ini).
+
+**`code/firmware/room_station/src/`**: [bme_completed_sample.h](../code/firmware/room_station/src/bme_completed_sample.h), [main.cpp](../code/firmware/room_station/src/main.cpp), [radar_data_frame_gate.h](../code/firmware/room_station/src/radar_data_frame_gate.h), [radar_sample_clock.h](../code/firmware/room_station/src/radar_sample_clock.h), [scd_sample_freshness.h](../code/firmware/room_station/src/scd_sample_freshness.h), [sensor_recovery.h](../code/firmware/room_station/src/sensor_recovery.h), [soil_sample.h](../code/firmware/room_station/src/soil_sample.h), [thermal_pixels.h](../code/firmware/room_station/src/thermal_pixels.h), [usb_epoch_sync.h](../code/firmware/room_station/src/usb_epoch_sync.h).
+
+### Operator and verification scripts
+
+These are bench, calibration, build, procurement, receipt and verification
+entry points; executing a script alone does not release any physical gate.
+
+* [bench_head_audio.py](../code/scripts/bench_head_audio.py)
+* [bench_head_camera.py](../code/scripts/bench_head_camera.py)
+* [bench_head_privacy.py](../code/scripts/bench_head_privacy.py)
+* [bench_room_station.py](../code/scripts/bench_room_station.py)
+* [build_head.sh](../code/scripts/build_head.sh)
+* [calibrate_dock_camera.py](../code/scripts/calibrate_dock_camera.py)
+* [calibrate_handling.py](../code/scripts/calibrate_handling.py)
+* [calibrate_jaw_fsr.py](../code/scripts/calibrate_jaw_fsr.py)
+* [calibrate_side_ranges.py](../code/scripts/calibrate_side_ranges.py)
+* [calibrate_terminal_ir.py](../code/scripts/calibrate_terminal_ir.py)
+* [capture_dock_checkerboard.py](../code/scripts/capture_dock_checkerboard.py)
+* [capture_handling_trials.py](../code/scripts/capture_handling_trials.py)
+* [capture_sense_aec.py](../code/scripts/capture_sense_aec.py)
+* [capture_side_ranges.py](../code/scripts/capture_side_ranges.py)
+* [check_barge_in_trials.py](../code/scripts/check_barge_in_trials.py)
+* [check_budget.py](../code/scripts/check_budget.py)
+* [check_trials.py](../code/scripts/check_trials.py)
+* [cliff_mount_preflight.py](../code/scripts/cliff_mount_preflight.py)
+* [emit_wiring_manifest.py](../code/scripts/emit_wiring_manifest.py)
+* [estimate_aec_delay.py](../code/scripts/estimate_aec_delay.py)
+* [export_fit_kit.py](../code/scripts/export_fit_kit.py)
+* [generate_dock_tag.py](../code/scripts/generate_dock_tag.py)
+* [i2c_electrical_preflight.py](../code/scripts/i2c_electrical_preflight.py)
+* [landed_cost.py](../code/scripts/landed_cost.py)
+* [omni_duplex_smoke.py](../code/scripts/omni_duplex_smoke.py)
+* [physical_trial_ledger.py](../code/scripts/physical_trial_ledger.py)
+* [power_preflight.py](../code/scripts/power_preflight.py)
+* [procurement_policy.py](../code/scripts/procurement_policy.py)
+* [procurement_release.py](../code/scripts/procurement_release.py)
+* [render_product_concept.py](../code/scripts/render_product_concept.py)
+* [restore_upstreams.py](../code/scripts/restore_upstreams.py)
+* [screen_assembly_stability.py](../code/scripts/screen_assembly_stability.py)
+* [screen_dock_seat_mechanics.py](../code/scripts/screen_dock_seat_mechanics.py)
+* [screen_vendor_battery_harness.py](../code/scripts/screen_vendor_battery_harness.py)
+* [serial_bench.py](../code/scripts/serial_bench.py)
+* [verify_playbook_receipts.py](../code/scripts/verify_playbook_receipts.py)
+* [verify_procurement_receipts.py](../code/scripts/verify_procurement_receipts.py)
+* [verify_room_station_host.py](../code/scripts/verify_room_station_host.py)
+* [verify_system.py](../code/scripts/verify_system.py)
+
 ## Requirements that govern reuse
 
 Five identical, inexpensive robots with different removable cosmetics; Fetch
