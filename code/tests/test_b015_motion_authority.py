@@ -1,5 +1,4 @@
 import pytest
-
 from desk_robot import operations
 from desk_robot.motion_authority import StopConfirmationTracker
 

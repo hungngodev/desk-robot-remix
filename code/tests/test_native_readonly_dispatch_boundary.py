@@ -8,7 +8,9 @@ from test_native_omni_xiaozhi import native as native
 
 
 @pytest.mark.parametrize("route", ["pickup", "stop", "enable", "move", None, ["status"]])
-async def test_readonly_batch_rejects_non_observation_routes(native, monkeypatch, route):
+async def test_readonly_batch_rejects_non_observation_routes(
+    native, monkeypatch, route,  # noqa: F811
+):
     module, bridge = native
     conn, _ = connection()
     bridge.connections["mac-01"] = conn

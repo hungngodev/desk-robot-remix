@@ -54,7 +54,7 @@ async def test_vision_calls_bound_cancellation_resistant_tasks_and_recover():
         except asyncio.CancelledError:
             cancelled.put_nowait(True)
             await release.wait()
-            raise ValueError("late failure")
+            raise ValueError("late failure") from None
 
     def forbidden():
         pytest.fail("Saturated admission constructed another model coroutine")

@@ -29,14 +29,17 @@ def test_xiaozhi_memory_tool_calls_only_scoped_readonly_mac_endpoint():
     bridge = (root / "laptop/server/overlay/desk_robot_tools.py").read_text()
     api = (root / "laptop/src/desk_robot/api.py").read_text()
     routes = (root / "laptop/src/desk_robot/api_memory_routes.py").read_text()
-    assert 'elif route == "voice-context"' in bridge
-    voice_context = bridge.split('elif route == "voice-context":', 1)[1].split(
-        'elif route == "look":', 1,
+    assert '"voice-context": (_voice_context_tool, True)' in bridge
+    voice_context = bridge.split("async def _voice_context_tool(", 1)[1].split(
+        "_TOOL_HANDLERS = {", 1,
     )[0]
-    assert "signed_get(" in voice_context
+    assert 'send("GET", f"/v1/pet/{robot}/voice-context"' in voice_context
     assert "client.get(" not in voice_context
-    assert 'f"/v1/pet/{robot}/voice-context"' in voice_context
-    assert 'params={"query": payload["question"]}' in voice_context
+    assert 'params"] = {"query": payload["question"]}' in voice_context
+    signed_fn = bridge.split("async def signed_request(", 1)[1].split(
+        "return await handler(signed_request, robot, payload)", 1,
+    )[0]
+    assert "headers=_receipt_headers(" in signed_fn
     assert 'receipt_token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")' in bridge
     assert '"X-Desk-Robot-Tool-Receipt-Signature": signature' in bridge
     assert '"desk_robot_memories"' in bridge

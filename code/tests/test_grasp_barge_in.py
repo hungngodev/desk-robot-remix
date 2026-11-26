@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from desk_robot.grasp_feedback import guarded_grasp
 from desk_robot.operations import OperationError
 

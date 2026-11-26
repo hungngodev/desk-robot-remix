@@ -22,8 +22,8 @@ struct FuelTelemetry {
 // zero SOC with valid=true is a real depleted measurement.
 constexpr FuelTelemetry fuel_telemetry(bool fresh, unsigned cell_mv,
                                        unsigned soc_centi) {
-  if (!fresh || cell_mv < 2500U || cell_mv > 4500U || soc_centi > 10000U)
-    return {0U, 0U, false};
-  return {cell_mv, soc_centi, true};
+  return (!fresh || cell_mv < 2500U || cell_mv > 4500U || soc_centi > 10000U)
+             ? FuelTelemetry{0U, 0U, false}
+             : FuelTelemetry{cell_mv, soc_centi, true};
 }
 }  // namespace desk_robot

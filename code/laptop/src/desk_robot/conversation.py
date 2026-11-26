@@ -459,6 +459,8 @@ class KokoroHeadSpeaker:
 
 
 class Conversation:
+    stop_generation: int = 0
+
     def __init__(
         self, settings: Settings, chat: Chat, speaker: Speaker, *, memory: MemoryStore | None = None
     ):

@@ -43,6 +43,7 @@ class _Attention:
     topic: str = ""
     topic_origin: str = "operator"
     topic_state: str = "none"
+    topic_started_at: float = -math.inf
     topic_updated_at: float = 0
     # At most one recent operator topic survives when voluntary peer play
     # starts; it is historical data, never a second active task owner.
@@ -120,17 +121,23 @@ class AttentionLedger:
             state.prior_operator_at = -math.inf
             state.prior_operator_state = ""
             # A fresh operator topic is not a handling interruption. Retire
-            # old dialogue text while retaining source ordering and safety.
+            # any prior interrupted resumption fragment and any stale ASR from
+            # before the previous topic started (or the superseded resumption),
+            # while retaining source ordering, safety, and the current turn's
+            # triggering utterance.
+            had_interrupted_asr = state.interrupted_asr is not None
             state.interrupted_asr = None
-            state.asr = ""
-            state.asr_consent_generation = None
-            state.last_heard_id = None
+            if had_interrupted_asr or state.asr_at < state.topic_started_at:
+                state.asr = ""
+                state.asr_consent_generation = None
+                state.last_heard_id = None
             state.asr_order_at = max(state.asr_order_at, at)
             state.sent = ""
         state.generation += 1
         state.topic = cleaned
         state.topic_origin = origin
         state.topic_state = "active"
+        state.topic_started_at = at
         state.topic_updated_at = at
         # Recent safety and handling observations remain useful when the
         # next human question is "why did you stop?". Carry only factual

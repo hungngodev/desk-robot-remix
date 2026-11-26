@@ -12,7 +12,6 @@ import time
 import wave
 from pathlib import Path
 
-
 REJECTED_DATAGRAM_BACKOFF = 0.001
 
 

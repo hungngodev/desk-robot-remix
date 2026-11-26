@@ -16,7 +16,7 @@ def _section(source, start, end):
 
 def _assert_order(source, *actions):
     positions = [source.index(action) for action in actions]
-    assert all(left < right for left, right in zip(positions, positions[1:]))
+    assert all(left < right for left, right in zip(positions[:-1], positions[1:], strict=True))
 
 
 def test_sense_amp_shutdown_gpio_is_unallocated():
