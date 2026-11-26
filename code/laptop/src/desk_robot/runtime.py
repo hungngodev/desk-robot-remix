@@ -15,7 +15,7 @@ from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from .live_voice_events import VoiceEventListener
 from .memory import MemoryStore
 from .multimodal import MultimodalOrchestrator
-from .operations import _bounded_head_reply
+from .operations import bounded_head_reply as _bounded_head_reply
 from .pet import PetController
 from .room_station import RoomObservation, RoomSerialFeed
 from .simulator import (

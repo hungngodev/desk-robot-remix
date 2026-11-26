@@ -27,14 +27,10 @@ from .grasp_feedback import await_commanded_jaw_target, guarded_grasp, verify_gr
 from .motion_authority import StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
-from .operations import (
-    OperationError,
-    _bounded_head_reply,
-    _bounded_pulse_stop,
-    _require_command_receipt,
-    dispatch_job_command,
-    require_active_operation,
-)
+from .operations import OperationError, dispatch_job_command, require_active_operation
+from .operations import bounded_head_reply as _bounded_head_reply
+from .operations import bounded_pulse_stop as _bounded_pulse_stop
+from .operations import require_command_receipt as _require_command_receipt
 from .sensor_event_contract import fuel_sample_is_fresh, is_valid_fuel_measurement
 from .transport import Head, HeadError
 from .vision import Detection, Vision, validated_camera_sizes

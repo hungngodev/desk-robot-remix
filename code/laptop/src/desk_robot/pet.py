@@ -47,7 +47,7 @@ from .initiative_policy import (
     receipt_veto,
 )
 from .memory import CameraProvenance, MemoryStore
-from .operations import _bounded_head_reply
+from .operations import bounded_head_reply as _bounded_head_reply
 from .personality_policy import (
     expression_guidance,
     passive_interval,

@@ -6,7 +6,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
-from .operations import OperationError, _bounded_head_reply
+from .operations import OperationError
+from .operations import bounded_head_reply as _bounded_head_reply
 
 if TYPE_CHECKING:
     from .calibration import Calibration

@@ -8,7 +8,7 @@ from typing import Callable
 
 from .dock_process import DetectorPool, DockDetectorBusy
 from .dock_vision import DockCameraCalibration, DockPose, assess_dock
-from .operations import _bounded_head_reply
+from .operations import bounded_head_reply as _bounded_head_reply
 
 # Shared by all five robots and both read-only and guarded dock paths.
 _DETECTOR_POOL = DetectorPool()

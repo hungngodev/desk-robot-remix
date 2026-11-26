@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
 from .config import quiet_hours_active
-from .operations import _bounded_head_reply
+from .operations import bounded_head_reply as _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .scene_motion import _scene_change_mask as _scene_change_mask
 from .scene_motion import change_fraction

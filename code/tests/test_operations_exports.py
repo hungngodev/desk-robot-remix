@@ -1,4 +1,6 @@
+import ast
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -47,3 +49,35 @@ def test_public_bounded_reply_rejects_late_result():
         await asyncio.wait_for(cancelled.wait(), timeout=1)
 
     asyncio.run(scenario())
+
+
+
+def _private_operations_imports(source: str) -> list[str]:
+    return [
+        alias.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom)
+        and ((node.level == 1 and node.module == "operations")
+             or (node.level == 0 and node.module == "desk_robot.operations"))
+        for alias in node.names
+        if alias.name.startswith("_") or alias.name == "*"
+    ]
+
+
+def test_internal_consumers_import_only_shared_operations():
+    package = Path(operations.__file__).parent
+    violations = {}
+    for path in package.glob("*.py"):
+        if names := _private_operations_imports(path.read_text(encoding="utf-8")):
+            violations[path.name] = names
+    assert not violations
+
+
+@pytest.mark.parametrize("source, expected", [
+    ("from .operations import _bounded_head_reply", ["_bounded_head_reply"]),
+    ("from desk_robot.operations import *", ["*"]),
+    ("from .operations import bounded_head_reply as _bounded_head_reply", []),
+    ("from .other import _bounded_head_reply", []),
+])
+def test_operations_import_guard(source, expected):
+    assert _private_operations_imports(source) == expected
