@@ -122,3 +122,25 @@ def test_fresh_transcript_must_also_belong_to_current_grant(stamp, accepted):
     assert fence.filter_live_transcripts([transcript], now=50.0) == (
         [transcript] if accepted else []
     )
+
+
+@pytest.mark.parametrize(("flag", "generation", "social_allowed"), [
+    ("fleet_text_sharing_enabled", "fleet_sharing_consent_generation", False),
+    ("voice_vision_tools_enabled", "camera_consent_generation", True),
+])
+def test_group_admission_and_revocation_agree(flag, generation, social_allowed):
+    settings = grants(fleet_social_autonomy_enabled=True)
+    fence = GroupContextConsent.capture(settings, has_multimodal=True)
+    transcript = {"channel": "human_transcript", "source_at": 20.0}
+    sensor = {"channel": "sensor", "source": "wroom_event"}
+    timeline = [transcript, sensor]
+    assert fence.allows_autonomous_social(has_permission_check=True)
+    assert not fence.allows_autonomous_social(has_permission_check=False)
+    assert fence.filter_live_transcripts(timeline, now=21.0) == timeline
+    assert not fence.revoked(private_memory_current=True)
+    for enabled, current_generation in ((False, 0), (True, 1)):
+        setattr(settings, flag, enabled)
+        setattr(settings, generation, current_generation)
+        assert fence.revoked(private_memory_current=True)
+        assert fence.filter_live_transcripts(timeline, now=21.0) == [sensor]
+        assert fence.allows_autonomous_social(has_permission_check=True) is social_allowed

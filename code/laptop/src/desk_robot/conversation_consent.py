@@ -31,15 +31,29 @@ class GroupContextConsent:
                 fence.admit_camera()
         return fence
 
+    def _sharing_current(self) -> bool:
+        settings = self.settings
+        return (
+            self.sharing_generation is not None
+            and settings.fleet_text_sharing_enabled
+            and settings.fleet_sharing_consent_generation == self.sharing_generation
+        )
+
+    def _camera_current(self) -> bool:
+        settings = self.settings
+        return (
+            self.camera_generation is not None
+            and settings.voice_vision_tools_enabled
+            and settings.camera_consent_generation == self.camera_generation
+        )
+
     def allows_autonomous_social(self, *, has_permission_check: bool) -> bool:
         """Hardware peer dialogue needs its own opt-in and a live caller fence."""
         settings = self.settings
         return settings.mode != "hardware" or (
             has_permission_check
             and settings.fleet_social_autonomy_enabled
-            and self.sharing_generation is not None
-            and settings.fleet_text_sharing_enabled
-            and settings.fleet_sharing_consent_generation == self.sharing_generation
+            and self._sharing_current()
         )
 
     def admit_camera(self) -> None:
@@ -55,14 +69,7 @@ class GroupContextConsent:
         settings = self.settings
         if settings.mode != "hardware":
             return timeline
-        live_relay_allowed = (
-            self.sharing_generation is not None
-            and settings.fleet_text_sharing_enabled
-            and settings.fleet_sharing_consent_generation == self.sharing_generation
-            and self.camera_generation is not None
-            and settings.voice_vision_tools_enabled
-            and settings.camera_consent_generation == self.camera_generation
-        )
+        live_relay_allowed = self._sharing_current() and self._camera_current()
         # Match the hub's 30-second visible ASR lifetime at the admission boundary.
         earliest_source_at = max(settings.camera_consent_started_at, now - 30.0)
         return [
@@ -77,15 +84,11 @@ class GroupContextConsent:
         """Use the same source predicate for speech admission and prompt cleanup."""
         settings = self.settings
         return (
-            (self.sharing_generation is not None
-             and (not settings.fleet_text_sharing_enabled
-                  or settings.fleet_sharing_consent_generation != self.sharing_generation))
+            (self.sharing_generation is not None and not self._sharing_current())
             or (self.memory_generation is not None
                 and (not settings.voice_memory_tools_enabled
                      or settings.voice_memory_consent_generation != self.memory_generation))
-            or (self.camera_generation is not None
-                and (not settings.voice_vision_tools_enabled
-                     or settings.camera_consent_generation != self.camera_generation))
+            or (self.camera_generation is not None and not self._camera_current())
             or (self.room_generation is not None
                 and (not settings.room_station_context_enabled
                      or settings.room_station_consent_generation != self.room_generation))
