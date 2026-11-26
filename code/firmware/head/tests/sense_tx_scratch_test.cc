@@ -153,6 +153,24 @@ static int CheckVolumeBoundaries() {
     written = 0;
     return 0;
 }
+// Inspect the actual PCM32 submitted to I2S, including corrupt saved or
+// runtime volume settings. An AEC-only clamp cannot satisfy this test.
+static int CheckTxGainRails() {
+    NoAudioCodec codec;
+    constexpr std::array<int16_t, 5> pcm{-32768, -1, 0, 1, 32767};
+    struct GainCase { int volume; int32_t factor; };
+    constexpr GainCase cases[] = {{-1, 0}, {101, 65536}, {INT32_MIN, 0},
+        {INT32_MAX, 65536}, {0, 0}, {1, 6}, {50, 16384}, {100, 65536}};
+    for (const auto& entry : cases) {
+        codec.SetOutputVolume(entry.volume);
+        CHECK(codec.Write(pcm.data(), pcm.size()) == static_cast<int>(pcm.size()));
+        for (std::size_t i = 0; i < pcm.size(); ++i) {
+            CHECK(codec.sense_tx_scratch_[i] == int64_t(pcm[i]) * entry.factor);
+        }
+        CHECK(first_sample == int64_t(pcm[0]) * entry.factor);
+    }
+    return 0;
+}
 int main() {
     desk_robot::ReferenceDecimator decimator;
     const auto before_filter = allocations;
@@ -228,5 +246,6 @@ int main() {
     CHECK(allocations == sense_allocations);
     CHECK(startup_allocations == sense_startup_allocations);
     CHECK(CheckVolumeBoundaries() == 0);
+    CHECK(CheckTxGainRails() == 0);
     std::cout << "PASS actual accepted PCM gain across mid-write volume change\n";
 }
