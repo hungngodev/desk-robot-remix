@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from fractions import Fraction
 from pathlib import Path
 
@@ -41,6 +42,24 @@ def _num(value: object, label: str) -> float:
     if not math.isfinite(number) or number <= 0:
         raise ValueError(f"{label}: positive finite number required")
     return number
+
+
+def validate_clock_sources(body: str, head: str, clients: dict[str, str]) -> None:
+    """Keep the static Fast-mode contract; this is not electrical qualification."""
+    def code(source: str) -> str:
+        return re.sub(r'/\*.*?\*/|//[^\n]*', '', source, flags=re.S)
+
+    body = code(body)
+    head = code(head)
+    if re.findall(r'\bwire_\s*\.\s*begin\s*\(([^)]*)\)', body) != [
+        'sda, scl, 400000'
+    ]:
+        raise ValueError('Live firmware clock changed: recalibrate I2C timing model')
+    if re.findall(r'\bscl_speed_hz\s*=\s*([^;]+);', head) != [str(FAST_HZ)]:
+        raise ValueError('Sense OLED clock changed: review I2C timing contract')
+    for name, source in {'TofBus': body, **clients}.items():
+        if re.search(r'\bsetClock\s*\(', code(source)):
+            raise ValueError(f'{name}: dynamic I2C clock changes require bus-owner review')
 
 
 def topology(plan: dict | None = None) -> list[dict]:
@@ -74,8 +93,22 @@ def topology(plan: dict | None = None) -> list[dict]:
                    for device in upstream)):
         raise ValueError("Duplicate or changed upstream mux or MPU identity/address")
     addresses = {device["address"] for device in upstream}
-    if "wire_.begin(sda, scl, 400000)" not in TOF.read_text(encoding="utf-8"):
-        raise ValueError("Live firmware clock changed: recalibrate I2C timing model")
+    # PN532, VL53L0X, ADS1115 and SSD1306 support 400 kHz at chip level.
+    # NXP PN532_C1, ST DS11555, TI ADS1115 and SSD1306 Table 13-6.
+    # Generic carriers remain unqualified. Do not slow the cliff bus to hide
+    # electrical problems or switch clocks inside a repeated-START exchange.
+    body_root = ROOT / "code/firmware/body"
+    client_paths = (
+        "lib/AccessorySensors/AccessorySensors.cpp",
+        "lib/ExpansionTouch/ExpansionTouch.cpp",
+        "lib/PulsePad/PulsePad.cpp",
+        "src/main.cpp",
+    )
+    validate_clock_sources(
+        TOF.read_text(encoding="utf-8"),
+        (ROOT / "code/firmware/head/sense/desk_robot_sense.cc").read_text(encoding="utf-8"),
+        {path: (body_root / path).read_text(encoding="utf-8") for path in client_paths},
+    )
 
     results = []
     for key, address in (("mux_ranges", 0x70), ("mux_extras", 0x71)):

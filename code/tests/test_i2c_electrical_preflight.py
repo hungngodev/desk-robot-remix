@@ -403,3 +403,25 @@ def test_upstream_only_sink_budget(line, upstream_resistor, passes):
     assert report["lines"][line]["upstream_only_estimated_sink_ma"] == 3.0
     assert not report["selected_branch_paper_pass"]
     assert not report["qualified_hardware"]
+
+
+_CLOCK_BODY = 'wire_.begin(sda, scl, 400000);'
+_CLOCK_HEAD = 'io_config.scl_speed_hz = 400000;'
+
+
+def test_fixed_clock_contract():
+    tool.validate_clock_sources(
+        _CLOCK_BODY, _CLOCK_HEAD, {'accessory': '// Wire.setClock(100000);'})
+
+
+@pytest.mark.parametrize('body, head, clients, match', [
+    ('// ' + _CLOCK_BODY, _CLOCK_HEAD, {}, 'firmware clock'),
+    (_CLOCK_BODY.replace('400000', '100000'), _CLOCK_HEAD, {}, 'firmware clock'),
+    (_CLOCK_BODY, _CLOCK_HEAD.replace('400000', '100000'), {}, 'OLED clock'),
+    (_CLOCK_BODY, '// ' + _CLOCK_HEAD, {}, 'OLED clock'),
+    (_CLOCK_BODY, _CLOCK_HEAD, {'accessory': 'wire_->setClock(100000);'}, 'dynamic I2C'),
+    (_CLOCK_BODY + '\nwire_.setClock(100000);', _CLOCK_HEAD, {}, 'dynamic I2C'),
+])
+def test_clock_drift_rejected(body, head, clients, match):
+    with pytest.raises(ValueError, match=match):
+        tool.validate_clock_sources(body, head, clients)
