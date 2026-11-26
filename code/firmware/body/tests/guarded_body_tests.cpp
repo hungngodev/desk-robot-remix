@@ -5,6 +5,8 @@
 #include "CliffGuard.h"
 #include "ReplyTxQueue.h"
 #include "StepperDrive.h"
+#include "DcDutyRamp.h"
+#include <limits>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -315,6 +317,89 @@ static void receiver_recovery_authority_is_not_shared() {
   for (char c : std::string("arm\n")) head.feed(c, 2, body, reply, sizeof(reply));
   CHECK(std::string(reply) == "ERR arm safety_interlock");
   CHECK(!body.state().armed);
+}
+
+// These are independent software scheduling demands, not physical turn clearance.
+static void paired_driver_extremes_are_independent() {
+  using desk_robot::DcDutyRamp;
+  using desk_robot::StepperDrive;
+  constexpr int hi = std::numeric_limits<int>::max();
+  constexpr int lo = std::numeric_limits<int>::min();
+  struct Case { int left, right, expected_left, expected_right; };
+  const Case cases[] = {{hi, lo, 40, -40}, {lo, hi, -40, 40},
+                        {lo, 13, -40, 13}, {41, -7, 40, -7},
+                        {0, hi, 0, 40}, {hi, 0, 40, 0}};
+  for (const auto& c : cases) {
+    DcDutyRamp dc[2];
+    StepperDrive stepper[2];
+    const int requests[] = {c.left, c.right};
+    const int expected[] = {c.expected_left, c.expected_right};
+    for (std::uint32_t now = 0; now <= 600000; now += 1000) {
+      for (int wheel = 0; wheel < 2; ++wheel) {
+        const int duty = dc[wheel].update(now, requests[wheel], true);
+        stepper[wheel].update(now, requests[wheel], true);
+        const int rate = stepper[wheel].rate_milli_steps_per_second();
+        const int target = expected[wheel];
+        CHECK(target < 0 ? duty >= target && duty <= 0 : duty >= 0 && duty <= target);
+        CHECK(target < 0 ? rate >= target * 4000 && rate <= 0
+                         : rate >= 0 && rate <= target * 4000);
+        if (now == 600000) {
+          CHECK(duty == target);
+          CHECK(rate == target * 4000);
+        }
+      }
+    }
+    for (int wheel = 0; wheel < 2; ++wheel) {
+      CHECK(dc[wheel].update(600000, requests[wheel], false) == 0);
+      CHECK(stepper[wheel].update(600000, requests[wheel], false) == 0);
+      CHECK(stepper[wheel].rate_milli_steps_per_second() == 0);
+    }
+  }
+}
+
+// Raw asymmetry must be rejected before saturation can disguise it.
+static void guarded_extreme_drive_requests_do_not_bypass_direction_gate() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 0);
+    desk_robot::BodyControl body(profile, &guard);
+    CHECK(send(body, "rearm", 0, true) == "OK rearm");
+    CHECK(send(body, "arm", 0) == "OK arm");
+    for (const char* command : {
+        "drive 2147483647 20 250", "drive -2147483648 20 250",
+        "drive 20 2147483647 250", "drive 20 -2147483648 250"}) {
+      CHECK(send(body, command, 1) == "ERR drive integer_required");
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.drive_remaining(1) == 0);
+    }
+    for (const char* command : {
+        "drive 101 20 250", "drive -101 20 250",
+        "drive 20 1000000 250", "drive 20 -1000000 250"}) {
+      CHECK(send(body, command, 1) == "ERR drive out_of_range");
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.drive_remaining(1) == 0);
+    }
+    CHECK(send(body, "drive 100 100 250", 2) == "OK drive left=40 right=40 ms=250");
+    CHECK(body.drive_remaining(2) == 250);
+    // Invalid numeric input cannot replace or extend the already authorized pulse.
+    CHECK(send(body, "drive 2147483647 -2147483648 250", 3) ==
+          "ERR drive integer_required");
+    CHECK(body.state().left == 40 && body.state().right == 40);
+    CHECK(body.drive_remaining(3) == 249);
+    std::uint32_t now = 3;
+    for (const char* command : {
+        "drive 100 99 250", "drive 99 100 250", "drive 41 40 250",
+        "drive 40 41 250", "drive 100 -100 250", "drive -100 100 250",
+        "drive -100 -100 250"}) {
+      CHECK(send(body, "drive 100 100 250", ++now) == "OK drive left=40 right=40 ms=250");
+      CHECK(send(body, command, ++now) == "ERR drive directional_clearance_unqualified");
+      CHECK(body.state().armed && body.state().servos_attached);
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.drive_remaining(now) == 0);
+    }
+  }
 }
 
 static void guarded_directional_drive_rejects_unqualified_sweep() {
@@ -4443,6 +4528,8 @@ int main() {
     contact_cannot_hide_expired_host_lease();
     receiver_recovery_authority_is_not_shared();
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";
+    paired_driver_extremes_are_independent();
+    guarded_extreme_drive_requests_do_not_bypass_direction_gate();
     guarded_directional_drive_rejects_unqualified_sweep();
     std::cout << "PASS guarded reverse and turns need calibrated swept space\n";
     local_trip_blocks_forward_and_reverse_replay();
