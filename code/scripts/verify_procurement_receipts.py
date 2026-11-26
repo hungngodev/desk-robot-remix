@@ -592,7 +592,8 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
 
     The file must contain {"receipts": [record, ...]}, with an explicit
     result, reviewer, tested date, exact revision and measurement payload.
-    Mere existence of an unrelated nonempty file never releases purchasing.
+    Release audits additionally require the exact Git blob and a SHA-256
+    digest of its bytes. Mere existence of a nonempty file never releases purchasing.
     """
     url = receipt.get("evidence_url")
     if not _completed_trial_date(receipt.get("tested_on")) or type(url) is not str:
@@ -629,7 +630,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
                 return False
         source_revision = receipt.get("source_sha")
         digest = receipt.get("artifact_sha256")
-        if digest is not None and not evidence_digest_matches(raw, digest):
+        if (require_git_blob or digest is not None) and not evidence_digest_matches(raw, digest):
             return False
         if source_revision != sha and (
             not evidence_digest_matches(raw, digest)

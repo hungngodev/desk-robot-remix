@@ -132,18 +132,42 @@ def receipt(scope, gate):
     }
 
 
+def default_records():
+    records = [receipt("part:imu", gate) for gate in release.PART_GATES]
+    records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
+    records.append(receipt("system", release.FIRST_ROBOT_ROOM_GATE))
+    for ident in release.SUPPLEMENTAL_DECISIONS:
+        scope = "supplemental:" + ident
+        records += [
+            receipt(scope, "decision_receipt"),
+            receipt(scope, "alternative_or_parent_receipt"),
+        ]
+    return records
+
+
+def record_bytes(records):
+    rows = [{key: value for key, value in row.items() if key != "artifact_sha256"}
+            for row in records]
+    return json.dumps({"receipts": rows}).encode("utf-8")
+
+
+def pin_rows(rows, records=None):
+    if records is None:
+        records = default_records()
+    digest = hashlib.sha256(record_bytes(records)).hexdigest()
+    for row in rows:
+        row["artifact_sha256"] = digest
+
+
+def pin_claims(evidence, records=None, **kwargs):
+    pin_rows((row for _, _, row in release.required_receipts(evidence, **kwargs)
+              if isinstance(row, dict)), records)
+
+
 def lookup(url, records=None):
     if records is None:
-        records = [receipt("part:imu", gate) for gate in release.PART_GATES]
-        records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
-        records.append(receipt("system", release.FIRST_ROBOT_ROOM_GATE))
-        for ident in release.SUPPLEMENTAL_DECISIONS:
-            scope = "supplemental:" + ident
-            records += [
-                receipt(scope, "decision_receipt"),
-                receipt(scope, "alternative_or_parent_receipt"),
-            ]
-    raw = json.dumps({"receipts": records}).encode("utf-8")
+        records = default_records()
+    raw = record_bytes(records)
     blob_sha = hashlib.sha1(
         f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False,
     ).hexdigest()
@@ -161,7 +185,11 @@ def lookup(url, records=None):
             "html_url": REVIEW_URL,
             "user": {"login": "real_review_account", "type": "User"},
             "author_association": "OWNER",
-            "body": "\n".join(release.procurement_review_statement(row) for row in records),
+            "body": "\n".join(
+                release.procurement_review_statement({
+                    **row, "artifact_sha256": hashlib.sha256(raw).hexdigest(),
+                }) for row in records
+            ),
         }
     assert url.endswith("/contents/docs/records/"
                         "release-evidence.json?ref=" + SHA)
@@ -190,6 +218,7 @@ def test_scoped_immutable_actual_records_are_required():
             for ident in release.SUPPLEMENTAL_DECISIONS
         },
     }
+    pin_claims(data)
     assert release.audit_release(data, SHA, lookup) == []
     data["parts"]["imu"][release.PART_GATES[0]]["scope"] = "part:other"
     assert any("un pinned" in e.replace("unpinned", "un pinned")
@@ -356,6 +385,7 @@ def test_existing_file_without_claim_cannot_release_purchase():
         return lookup(url, records=[receipt("part:unrelated", gate)])
 
     assert not release.verified_scoped_record(original, SHA, unrelated)
+    pin_rows([original], records=[receipt("part:unrelated", gate)])
     errors = release.audit_release(
         {"parts": {"imu": {gate: original}}}, SHA, unrelated,
     )
@@ -529,6 +559,7 @@ def test_first_robot_uses_first_observer_not_completed_five_robot_fleet():
         "parts": {"imu": {gate: receipt("part:imu", gate)
                            for gate in release.PART_GATES}},
     }
+    pin_claims(evidence, first_robot=True)
     assert release.audit_release(evidence, SHA, lookup, first_robot=True) == []
     assert any("missing receipt" in msg
                for msg in release.audit_release(evidence, SHA, lookup))
@@ -568,6 +599,7 @@ def test_procurement_nested_measurement_type_confusion_never_releases(replacemen
 
     assert release.verified_scoped_record(recorded, SHA, source)
     assert not release.verified_scoped_record(claimed, SHA, source)
+    pin_rows([claimed], records=[recorded])
     errors = release.audit_release(
         {"parts": {"imu": {gate: claimed}}}, SHA, source,
     )
@@ -650,6 +682,7 @@ def test_reviewed_default_station_deferrals_need_no_immutable_purchase_receipts(
                    for gate in release.SYSTEM_GATES},
         "supplemental_decisions": decisions,
     }
+    pin_claims(evidence, deferred_optional_ids=deferred)
     assert release.audit_release(
         evidence, SHA, lookup, deferred_optional_ids=deferred
     ) == []
@@ -703,6 +736,7 @@ def test_selected_station_option_still_needs_every_physical_gate_receipt():
     sourced = [claim for _, _, claim in release.required_receipts(
         evidence, deferred_optional_ids=deferred
     )]
+    pin_rows(sourced, records=sourced)
     assert release.audit_release(
         evidence, SHA, lambda url: lookup(url, records=sourced),
         deferred_optional_ids=deferred,
@@ -741,6 +775,7 @@ def test_first_robot_accepts_pinned_stronger_fleet_station_receipt():
     ) if scope == "system"]
     assert fleet_gate in chosen
     assert first_gate not in chosen
+    pin_claims(evidence, first_robot=True, deferred_optional_ids=deferred)
     assert release.audit_release(
         evidence, SHA, lookup, first_robot=True,
         deferred_optional_ids=deferred,
@@ -760,6 +795,7 @@ def test_first_robot_accepts_pinned_stronger_fleet_station_receipt():
     ) if scope == "system"]
     assert first_gate in chosen
     assert fleet_gate not in chosen
+    pin_claims(evidence, first_robot=True, deferred_optional_ids=deferred)
     assert release.audit_release(
         evidence, SHA, lookup, first_robot=True,
         deferred_optional_ids=deferred,
@@ -1553,6 +1589,8 @@ def test_online_release_rejects_matching_record_without_authorized_review():
         row, SHA, lambda url: lookup(url, records=[row]),
     )
 
+    pin_rows([row], records=[row])
+
     def outsider(url):
         answer = lookup(url, records=[row])
         if "/issues/comments/" in url:
@@ -1566,6 +1604,8 @@ def test_online_release_rejects_matching_record_without_authorized_review():
 def test_purchase_audit_rejects_symlink_even_with_matching_contents_and_review():
     gate = release.PART_GATES[0]
     row = receipt("part:imu", gate)
+
+    pin_rows([row])
 
     def altered(url):
         result = lookup(url)
@@ -1645,6 +1685,8 @@ def test_purchase_audit_binds_decoded_record_to_git_tree_blob(wrong_blob):
     gate = release.PART_GATES[0]
     row = receipt("part:imu", gate)
 
+    pin_rows([row], records=[row])
+
     def source(url):
         response = lookup(url, records=[row])
         if wrong_blob and "/git/trees/" in url:
@@ -1657,3 +1699,28 @@ def test_purchase_audit_binds_decoded_record_to_git_tree_blob(wrong_blob):
     errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, source)
     assert any(f"part:imu.{gate}: immutable scoped record" in error
                for error in errors) is wrong_blob
+
+
+@pytest.mark.parametrize("digest_kind", ["valid", "missing", "wrong", "uppercase", "bool"])
+def test_purchase_release_requires_explicit_sha256(digest_kind):
+    gate = release.PART_GATES[0]
+    row = receipt("part:imu", gate)
+    recorded = dict(row)
+    pin_rows([row], records=[recorded])
+    if digest_kind == "missing":
+        del row["artifact_sha256"]
+    elif digest_kind == "wrong":
+        row["artifact_sha256"] = "f" * 64
+    elif digest_kind == "uppercase":
+        row["artifact_sha256"] = row["artifact_sha256"].upper()
+    elif digest_kind == "bool":
+        row["artifact_sha256"] = True
+
+    def source(url):
+        return lookup(url, records=[recorded])
+
+    assert release.verified_scoped_record(
+        row, SHA, source, require_git_blob=True,
+    ) is (digest_kind == "valid")
+    errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, source)
+    assert any(f"part:imu.{gate}:" in error for error in errors) is (digest_kind != "valid")
