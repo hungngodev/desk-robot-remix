@@ -538,9 +538,12 @@ class HttpHead:
         reuse distinct fresh stream frames rather than opening another
         physical camera capture.
         """
+        self.require_stream()
         url = self.config.head_url.rstrip("/") + "/api/camera.mjpg"
         headers = {"Authorization": f"Bearer {secret(self.config.token_env)}"}
-        async with self._stream_condition:
+        # Latch before waiting: queued stills fail closed while an already
+        # dispatched still releases its physical camera lease.
+        async with self.capture_lock, self._stream_condition:
             self._stream_generation += 1
             generation = self._stream_generation
             self._stream_connected = False

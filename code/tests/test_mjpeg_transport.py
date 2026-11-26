@@ -545,3 +545,51 @@ async def test_snapshot_rejects_impossible_receipt_clock(monkeypatch, future):
                 pending.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await pending
+
+
+@pytest.mark.asyncio
+async def test_stream_activation_drains_still_and_blocks_fallback(monkeypatch):
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    still_started = asyncio.Event()
+    release_still = asyncio.Event()
+    paths = []
+    jpeg = b"\xff\xd8scene\xff\xd9"
+
+    async def respond(request):
+        paths.append(request.url.path)
+        if request.url.path == "/api/camera.jpg":
+            still_started.set()
+            await release_still.wait()
+            return httpx.Response(200, content=jpeg)
+        assert request.url.path == "/api/camera.mjpg"
+        return httpx.Response(200, content=_part(1, jpeg), headers={
+            "content-type": "multipart/x-mixed-replace; boundary=deskrobotframe",
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(RobotConfig(
+            id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+            head_url="http://head.example",
+        ), client)
+        still = asyncio.create_task(head.snapshot())
+        frames = head.stream_frames()
+        streamed = None
+        try:
+            await asyncio.wait_for(still_started.wait(), timeout=1)
+            streamed = asyncio.create_task(anext(frames))
+            await asyncio.sleep(0)
+            assert paths == ["/api/camera.jpg"]
+            assert not streamed.done()
+            release_still.set()
+            with pytest.raises(HeadError, match="superseded by live stream"):
+                await asyncio.wait_for(still, timeout=1)
+            frame, _ = await asyncio.wait_for(streamed, timeout=1)
+            assert frame == jpeg
+        finally:
+            release_still.set()
+            tasks = [still] if streamed is None else [still, streamed]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await frames.aclose()
+        with pytest.raises(HeadError, match="Continuous XIAO camera stream"):
+            await head.snapshot()
+    assert paths == ["/api/camera.jpg", "/api/camera.mjpg"]
