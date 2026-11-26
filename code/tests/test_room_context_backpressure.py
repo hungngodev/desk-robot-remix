@@ -129,8 +129,8 @@ def test_pending_room_report_is_not_regranted_after_consent_cycle(settings):
     # when a human grants sharing later.
     settings.room_station_context_enabled = False
     runtime._queue_room_observation(loop, room(3))
+    assert not loop.callbacks
     settings.room_station_context_enabled = True
-    loop.callbacks.pop()()
     assert [observation.seq for observation in delivered] == [2]
 
     runtime._queue_room_observation(loop, room(4))
@@ -163,7 +163,7 @@ def test_room_grant_changes_mid_usb_queue_snapshot_are_rejected():
 
     runtime.settings = Settings()
     runtime._queue_room_observation(loop, room(1))
-    loop.callbacks.pop()()
+    assert not loop.callbacks
     assert delivered == []
 
     # A subsequent sample captured entirely under the new grant is valid.
@@ -207,3 +207,26 @@ def test_room_delivery_preserves_original_epochs(monkeypatch, boundary, change):
     runtime._queue_room_observation(loop, room(2))
     loop.callbacks.pop()()
     assert hub.shared_room.seq == 2
+
+
+def test_room_disabled_flood_never_schedules_dispatch():
+    runtime, delivered = make_runtime()
+    loop = QueuedLoop()
+    runtime.settings.room_station_context_enabled = False
+    for seq in range(1000):
+        runtime._queue_room_observation(loop, room(seq))
+        assert not loop.callbacks
+    assert runtime._room_dispatch_pending is None
+    assert runtime._room_dispatch_enqueued is False
+
+    runtime.settings.room_station_context_enabled = True
+    runtime._queue_room_observation(loop, room(1000))
+    assert len(loop.callbacks) == 1
+    runtime.settings.room_station_context_enabled = False
+    runtime._queue_room_observation(loop, room(1001))
+    assert runtime._room_dispatch_pending is None
+    runtime.settings.room_station_context_enabled = True
+    runtime._queue_room_observation(loop, room(1002))
+    assert len(loop.callbacks) == 1
+    loop.callbacks.pop()()
+    assert [item.seq for item in delivered] == [1002]

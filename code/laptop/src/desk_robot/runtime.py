@@ -223,10 +223,14 @@ class Runtime:
             grant_after = getattr(
                 self.settings, "room_station_consent_generation", None
             )
+            # Denied or ambiguous reports have no consumer. Drop them before
+            # waking the loop, while preserving ownership of any queued callback.
+            if not granted or grant_before != grant_after:
+                self._room_dispatch_pending = None
+                return
             conn_epoch = getattr(self, "_room_connection_epoch", 0)
             self._room_dispatch_pending = (
-                observation, grant_after, granted and grant_before == grant_after,
-                conn_epoch,
+                observation, grant_after, True, conn_epoch,
             )
             if self._room_dispatch_enqueued:
                 return
