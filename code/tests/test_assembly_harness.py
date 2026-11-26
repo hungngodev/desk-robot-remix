@@ -421,3 +421,65 @@ def test_wiring_guide_does_not_mix_drivetrain_variants():
     assert "GPIO27/32 to BIN1/BIN2" in guide
     assert "not a direct connection to nSLEEP" in guide
     assert "MCP23017 GPB3 on mux 0x71 channel 5" in guide
+
+
+@pytest.mark.parametrize(("path", "value", "message"), [
+    (("audio_output_power_contract", "speaker_nominal_impedance_ohm"), 8.0,
+     "Unqualified or changed 2W speaker amplifier power contract"),
+    (("bus", "upstream", 0, "address"), 104.0,
+     "Upstream I2C device identity or address conflict"),
+    (("bus", "mux_ranges", "address"), 112.0,
+     "Incorrect mux_ranges mux address"),
+    (("bus", "mux_extras", "channels", 0, "channel"), False,
+     "Invalid or incomplete mux_extras lanes"),
+    (("bus", "mux_extras", "channels", 0, "devices", 0, "address"), 41.0,
+     "Invalid mux_extras I2C address"),
+    (("bus", "mux_extras", "channels", 0, "devices", 0, "name"), "other",
+     "Accessory lane 0 sensor identity drift"),
+    (("haptic_output_contract", "physical_qualified"), 0,
+     "Unqualified or changed haptic one-shot wiring contract"),
+    (("range_breakout_power_contract", "modules_per_robot"), 8.0,
+     "Unapproved cheap ToF 3.3V breakout identity or release"),
+    (("bus", "mux_ranges", "channels", 0, "devices", 0, "name"), "other",
+     "Range lane must contain exactly one named VL53L0X at 0x29"),
+])
+def test_verify_contract_exact_diagnostics(path, value, message):
+    plan, body, sense = sources()
+    field = plan
+    for part in path[:-1]:
+        field = field[part]
+    field[path[-1]] = value
+    with pytest.raises(ValueError) as caught:
+        harness.verify(plan, body, sense)
+    assert str(caught.value) == message
+
+
+def test_verify_contract_first_error_order():
+    plan, body, sense = sources()
+    audio = plan["audio_output_power_contract"]
+    upstream = plan["bus"]["upstream"][0]
+    extras = plan["bus"]["mux_extras"]
+    audio["speaker_nominal_rating_w"] = 1
+    upstream["address"] = 104.0
+    extras["address"] = 113.0
+    for field, key, restored, message in (
+        (audio, "speaker_nominal_rating_w", 2,
+         "Unqualified or changed 2W speaker amplifier power contract"),
+        (upstream, "address", 104, "Upstream I2C device identity or address conflict"),
+        (extras, "address", 113, "Incorrect mux_extras mux address"),
+    ):
+        with pytest.raises(ValueError) as caught:
+            harness.verify(plan, body, sense)
+        assert str(caught.value) == message
+        field[key] = restored
+    harness.verify(plan, body, sense)
+
+
+def test_verify_contract_accepts_alternative_straps_and_unordered_accessories():
+    plan, body, sense = sources()
+    plan["bus"]["upstream"][0]["address"] = 0x69
+    lanes = plan["bus"]["mux_extras"]["channels"]
+    lanes[0]["devices"][0]["address"] = 0x28
+    lanes[3]["devices"][1]["address"] = 0x77
+    lanes.reverse()
+    harness.verify(plan, body, sense)

@@ -305,9 +305,12 @@ def _verify_sense_gpio(sense_pins: dict, head: str) -> None:
         raise ValueError("Sense GPIO collides with onboard camera, PDM, boot or SD signal")
 
 
-def verify(plan: dict, body: str, head: str) -> None:
-    """Source agreement only. Passing is NEVER electrical acceptance."""
-    bus = plan["bus"]
+def _accessory_devices(bus: dict, channel: int) -> list:
+    lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == channel)
+    return lane["devices"]
+
+
+def _verify_gpio_contract(bus: dict, body: str, head: str) -> None:
     for owner in ("body_gpio", "sense_gpio"):
         _verify_gpio_map(owner, bus[owner])
     body_pins = bus["body_gpio"]
@@ -331,6 +334,9 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Unexpected XIAO to WROOM UART link")
     if bus["body_gpio"]["head_uart_tx"] != 17 or bus["sense_gpio"]["head_uart_rx"] != 1:
         raise ValueError("Unexpected WROOM to XIAO UART link")
+
+
+def _verify_audio_power(plan: dict) -> None:
     # Audio power must track the CURRENT selected 8ohm 2W rectangular speaker,
     # not a retired 1W round part. The 5V MAX98357A output can be 1.8W at
     # 8ohm nominal; this contract is NOT a verified gain/thermal acceptance.
@@ -345,6 +351,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             or audio["speaker_nominal_rating_w"] != 2
             or "HOLD" not in audio.get("physical_release", "")):
         raise ValueError("Unqualified or changed 2W speaker amplifier power contract")
+
+
+def _verify_upstream_bus(bus: dict) -> None:
     # The mux inputs and IMU share the upstream bus even when every
     # downstream lane is isolated. Require the actual three firmware owners.
     upstream = bus.get("upstream")
@@ -360,6 +369,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             or any(device["address"] not in expected_upstream[device["device"]]
                    for device in upstream)):
         raise ValueError("Upstream I2C device identity or address conflict")
+
+
+def _verify_mux_topology(bus: dict) -> None:
     # Do not accept bool/float addresses that compare equal to an integer.
     # They would later break hex formatting or misstate the physical harness.
     for group, expected in (("mux_ranges", 0x70), ("mux_extras", 0x71)):
@@ -377,14 +389,20 @@ def verify(plan: dict, body: str, head: str) -> None:
                 raise ValueError(f"Invalid {group} I2C address")
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {group} I2C address on one lane")
+
+
+def _verify_dock_lane(bus: dict) -> None:
     # Dock GPIO and NFC are wired to accessory channel 5. A moved or
     # substituted expander can make a generated harness look authoritative
     # while the WROOM dock interlock reads the wrong physical device.
-    dock_lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == 5)
-    if {(d.get("name"), d["address"]) for d in dock_lane["devices"]} != {
+    devices = _accessory_devices(bus, 5)
+    if {(d.get("name"), d["address"]) for d in devices} != {
         ("PN532 I2C", 0x24), ("MCP23017", 0x20)
-    } or len(dock_lane["devices"]) != 2:
+    } or len(devices) != 2:
         raise ValueError("Dock accessory lane 5 must retain PN532 and MCP23017")
+
+
+def _verify_interaction_lanes(bus: dict) -> None:
     # Other accessory lanes also have fixed firmware owners. A valid I2C
     # address alone does not mean the driver will ever sample that device.
     # Preserve the two address straps explicitly supported by the firmware.
@@ -395,13 +413,15 @@ def verify(plan: dict, body: str, head: str) -> None:
         3: {"SHT41": {0x44}, "BMP280": {0x76, 0x77}},
     }
     for channel, expected in interaction_roles.items():
-        lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == channel)
-        devices = lane["devices"]
+        devices = _accessory_devices(bus, channel)
         if (len(devices) != len(expected)
                 or any(not isinstance(d.get("name"), str) for d in devices)
                 or {d["name"] for d in devices} != expected.keys()
                 or any(d["address"] not in expected[d["name"]] for d in devices)):
             raise ValueError(f"Accessory lane {channel} sensor identity drift")
+
+
+def _verify_haptic_contract(plan: dict) -> None:
     # A haptic edge is NOT a motor supply. Preserve the selected candidate
     # CD74HC123 channel 1 pinout and protected low-side topology; the
     # independent channel 2 watchdog remains a mutually exclusive DC profile.
@@ -450,6 +470,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             or not isinstance(haptic.get("physical_release"), str)
             or not haptic["physical_release"].startswith("HOLD ")):
         raise ValueError("Unqualified or changed haptic one-shot wiring contract")
+
+
+def _verify_battery_wheel_lanes(bus: dict) -> None:
     # Battery and wheel telemetry must not be silently moved to another
     # mux lane while retaining individually valid I2C addresses. This is
     # a declared harness contract, not proof of an assembled device.
@@ -459,11 +482,13 @@ def verify(plan: dict, body: str, head: str) -> None:
         7: {("AS5600", 0x36)},
     }
     for channel, expected in accessory_roles.items():
-        lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == channel)
-        devices = lane["devices"]
+        devices = _accessory_devices(bus, channel)
         if (len(devices) != len(expected)
                 or {(d.get("name"), d["address"]) for d in devices} != expected):
             raise ValueError(f"Accessory lane {channel} battery/wheel identity drift")
+
+
+def _verify_range_power(plan: dict) -> None:
     voltage = plan.get("range_breakout_power_contract")
     if not isinstance(voltage, dict):
         raise ValueError("Missing cheap ToF breakout power contract")
@@ -484,6 +509,9 @@ def verify(plan: dict, body: str, head: str) -> None:
             or not isinstance(voltage.get("physical_release"), str)
             or not voltage["physical_release"].strip()):
         raise ValueError("Unapproved cheap ToF 3.3V breakout identity or release")
+
+
+def _verify_range_lanes(bus: dict) -> None:
     ranges = bus["mux_ranges"]["channels"]
     # Each selected TCA9548A lane isolates one VL53L0X at its native
     # 7-bit address. Reject a manifest that silently substitutes another
@@ -501,6 +529,21 @@ def verify(plan: dict, body: str, head: str) -> None:
     if any(lane["channel"] != index or lane["position"] != expected_roles[index]
            for index, lane in enumerate(ranges)):
         raise ValueError("Critical cliff/obstacle sensor channel mapping drift")
+
+
+def verify(plan: dict, body: str, head: str) -> None:
+    """Source agreement only. Passing is NEVER electrical acceptance."""
+    bus = plan["bus"]
+    _verify_gpio_contract(bus, body, head)
+    _verify_audio_power(plan)
+    _verify_upstream_bus(bus)
+    _verify_mux_topology(bus)
+    _verify_dock_lane(bus)
+    _verify_interaction_lanes(bus)
+    _verify_haptic_contract(plan)
+    _verify_battery_wheel_lanes(bus)
+    _verify_range_power(plan)
+    _verify_range_lanes(bus)
 
 
 def render(plan: dict, body: str, head: str) -> str:
