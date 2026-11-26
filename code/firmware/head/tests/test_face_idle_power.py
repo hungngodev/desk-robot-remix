@@ -79,6 +79,50 @@ int main() {
     assert(writes.size() == 11 && writes.back() == FacePanelMode::kAwake);
     step(0, true, true);
     assert(writes.size() == 11);
+    // Cross the narrow animation clock rollover during a failed fade write.
+    FaceIdlePower rollover;
+    writes.clear();
+    const uint64_t wrap = uint64_t{1} << 32;
+    auto tick = [&](uint64_t t, bool idle, bool sleeping) {
+        rollover.Update(t, idle, sleeping, apply);
+    };
+    tick(wrap - 60500, true, false);
+    succeed = false;
+    tick(wrap - 500, true, false);
+    assert(writes.size() == 2 && writes.back() == FacePanelMode::kSoftDim);
+    succeed = true;
+    tick(wrap + 499, true, false);
+    assert(writes.size() == 2);
+    tick(wrap + 500, true, false);
+    assert(writes.size() == 3 && writes.back() == FacePanelMode::kSoftDim);
+    tick(wrap + 1499, true, false);
+    assert(writes.size() == 3);
+    tick(wrap + 1500, true, false);
+    assert(writes.size() == 4 && writes.back() == FacePanelMode::kDim);
+    tick(wrap + 3000, true, false);
+    assert(writes.size() == 4);  // Ordinary idle must never turn the panel off.
+    tick(wrap + 3001, true, true);
+    assert(writes.size() == 5 && writes.back() == FacePanelMode::kOff);
+    tick(wrap + 3002, true, false);
+    assert(writes.size() == 6 && writes.back() == FacePanelMode::kDim);
+    tick(wrap + 3003, false, false);
+    assert(writes.size() == 7 && writes.back() == FacePanelMode::kAwake);
+    tick(wrap + 3004, true, true);
+    tick(wrap + 63003, true, true);
+    assert(writes.size() == 7);  // Wake requires a new full idle interval.
+    tick(wrap + 63004, true, true);
+    assert(writes.size() == 8 && writes.back() == FacePanelMode::kSoftDim);
+    tick(wrap + 64004, true, true);
+    tick(wrap + 65004, true, true);
+    assert(writes.size() == 10 && writes.back() == FacePanelMode::kOff);
+    tick(wrap + 65005, false, true);
+    assert(writes.size() == 11 && writes.back() == FacePanelMode::kAwake);
+    // A clock reset restarts idle even from a dimmed panel.
+    tick(wrap + 65006, true, true);
+    tick(wrap + 125006, true, true);
+    assert(writes.back() == FacePanelMode::kSoftDim);
+    tick(0, true, true);
+    assert(writes.size() == 13 && writes.back() == FacePanelMode::kAwake);
 }
 """)
     pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]

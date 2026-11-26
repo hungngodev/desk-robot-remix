@@ -21,19 +21,28 @@ def test_offline_presence_status_priority(tmp_path):
 using namespace desk_robot;
 
 int main() {
-    // Five minutes plus one tick, with no Mac or voice channel activity.
-    for (unsigned elapsed = 0; elapsed <= 300100; elapsed += 100) {
-        assert(SelectFaceStatus(false, false, false, true) == FaceStatus::kVoiceLinkLost);
-        assert(!FaceStatusBlocksExpression(FaceStatus::kVoiceLinkLost));
-        assert(SelectFaceStatus(false, false, false, false) == FaceStatus::kNormal);
-    }
-    for (bool offline : {false, true}) {
-        for (bool privacy : {false, true}) {
-            assert(SelectFaceStatus(true, false, privacy, offline) == FaceStatus::kBodyFault);
-            assert(SelectFaceStatus(true, true, privacy, offline) == FaceStatus::kDockLock);
+    // All sixteen input combinations, including a stray dock bit without fault.
+    for (bool fault : {false, true}) {
+        for (bool dock : {false, true}) {
+            for (bool privacy : {false, true}) {
+                for (bool offline : {false, true}) {
+                    const auto expected = fault ?
+                        (dock ? FaceStatus::kDockLock : FaceStatus::kBodyFault) :
+                        privacy ? FaceStatus::kMicPrivacy :
+                        offline ? FaceStatus::kVoiceLinkLost : FaceStatus::kNormal;
+                    const auto actual = SelectFaceStatus(fault, dock, privacy, offline);
+                    assert(actual == expected);
+                    assert(FaceStatusBlocksExpression(actual) == (fault || privacy));
+                }
+            }
         }
-        assert(SelectFaceStatus(false, false, true, offline) == FaceStatus::kMicPrivacy);
     }
+    // Clearing each higher priority input reveals the remaining live status.
+    assert(SelectFaceStatus(true, true, true, true) == FaceStatus::kDockLock);
+    assert(SelectFaceStatus(true, false, true, true) == FaceStatus::kBodyFault);
+    assert(SelectFaceStatus(false, false, true, true) == FaceStatus::kMicPrivacy);
+    assert(SelectFaceStatus(false, false, false, true) == FaceStatus::kVoiceLinkLost);
+    assert(SelectFaceStatus(false, false, false, false) == FaceStatus::kNormal);
     assert(FaceStatusBlocksExpression(FaceStatus::kBodyFault));
     assert(FaceStatusBlocksExpression(FaceStatus::kDockLock));
     assert(FaceStatusBlocksExpression(FaceStatus::kMicPrivacy));
