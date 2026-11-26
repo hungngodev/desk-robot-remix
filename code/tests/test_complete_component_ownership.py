@@ -194,3 +194,52 @@ def test_imu_role_tracks_selected_mpu6050_without_physical_qualification():
     assert owner["host_test"] == "code/firmware/body/tests/berry_imu_tests.cpp"
     assert owner["source_state"] == "identity_and_readonly_source"
     assert "orientation calibration" in owner["remaining_qualification"]
+
+
+EXPANSION_SENSOR_LAYOUT = {
+    "max30102": ("0", "0x57"),
+    "apds9960": ("1", "0x39"),
+    "sht41": ("3", "0x44"),
+    "bmp280": ("3", "0x76 / 0x77"),
+    "mcp23017": ("5", "0x20"),
+    "pn532": ("5", "0x24"),
+}
+
+
+def _validate_expansion_sensor_rows(doc, plan, owners):
+    section = doc.split("## Selected expansion sensor roles\n", 1)[1]
+    section = section.split("\n## ", 1)[0]
+    rows = {}
+    for line in section.splitlines():
+        if not line.startswith("| `"):
+            continue
+        role, lane, address, state, _ = (cell.strip() for cell in line.split("|")[1:-1])
+        role = role.strip("`")
+        assert role not in rows, role
+        rows[role] = (lane, address, state.strip("`"))
+    assert set(rows) == set(EXPANSION_SENSOR_LAYOUT)
+    quantities = {part["id"]: part["per_robot"] for part in plan["parts"]}
+    for role, (lane, address) in EXPANSION_SENSOR_LAYOUT.items():
+        assert quantities[role] == 1, role
+        assert rows[role] == (lane, address, owners["pet_roles"][role]["source_state"]), role
+
+
+def test_expansion_sensor_doc_tracks_selected_layout_and_ownership():
+    plan, owners = _sources()
+    doc = (HARDWARE / "interaction-sensors.md").read_text()
+    _validate_expansion_sensor_rows(doc, plan, owners)
+
+
+def test_expansion_sensor_doc_rejects_lane_address_and_state_drift():
+    import pytest
+
+    plan, owners = _sources()
+    doc = (HARDWARE / "interaction-sensors.md").read_text()
+    for old, new in (
+        ("`pn532` | 5 |", "`pn532` | 6 |"),
+        ("`dock_gpio_haptic_source`", "`production_qualified`"),
+        ("`bmp280` | 3 | 0x76 / 0x77", "`bmp280` | 3 | 0x76"),
+    ):
+        assert old in doc
+        with pytest.raises(AssertionError):
+            _validate_expansion_sensor_rows(doc.replace(old, new), plan, owners)
