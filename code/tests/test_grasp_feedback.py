@@ -1319,3 +1319,43 @@ async def test_closing_contact_requires_current_commanded_target(monkeypatch, fa
         with pytest.raises(OperationError, match="commanded closing target not confirmed"):
             await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
         assert head.commands == ["grip 64", "grip 60"]
+
+@pytest.mark.parametrize("advance_epoch", [False, True])
+async def test_hold_receipt_cannot_restore_retired_motion_epoch(advance_epoch):
+    import asyncio
+
+    from desk_robot.grasp_feedback import verify_grasp_hold
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+    epoch = 7
+
+    class DelayedHead(FakeHead):
+        async def aux_status(self):
+            started.set()
+            await release.wait()
+            return await super().aux_status()
+
+    def require_current():
+        if epoch != 7:
+            raise asyncio.CancelledError
+
+    head = DelayedHead([(245, 12)])
+    tactile = {"grasped": True, "jaw_seq": 11, "boot_id": 5103, "baseline_raw": 100}
+    task = asyncio.create_task(verify_grasp_hold(
+        head, Settings(), tactile, robot_id="robot-01", require_current=require_current,
+    ))
+    await started.wait()
+    if advance_epoch:
+        epoch += 1
+    release.set()
+    if advance_epoch:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert tactile["grasped"] is False
+        assert tactile["jaw_seq"] == 11
+    else:
+        await task
+        assert tactile["grasped"] is True
+        assert tactile["jaw_seq"] == 12
+    assert head.commands == []

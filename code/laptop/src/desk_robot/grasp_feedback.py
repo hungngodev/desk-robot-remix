@@ -121,6 +121,7 @@ def _fresh_jaw_sequence(new: int, previous: int) -> bool:
 
 async def verify_grasp_hold(
     head: "Head", calibration: "Calibration", tactile: dict, *, robot_id: str,
+    require_current: Callable[[], None] | None = None,
 ) -> None:
     """Refresh same-boot tactile provenance; never retry a lost grasp or move a servo."""
     if tactile.get("grasped") is not True:
@@ -128,6 +129,8 @@ async def verify_grasp_hold(
     # Invalid, expired, cancelled or contradictory evidence must not leave
     # an earlier successful grasp usable by a later phase of this job.
     tactile["grasped"] = False
+    if require_current is not None:
+        require_current()
     threshold = calibration.grip_force_delta_raw
     ceiling = calibration.grip_force_limit_raw
     if threshold is None or ceiling is None:
@@ -140,6 +143,8 @@ async def verify_grasp_hold(
                     head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
                     timeout_message="ADS1115 hold read timed out",
                 )
+                if require_current is not None:
+                    require_current()
                 measured, seq = force_observation(sample)
                 group = sample["force"]
                 age = group.get("jaw_age_ms")

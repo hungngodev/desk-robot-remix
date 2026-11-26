@@ -1850,7 +1850,9 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         require_fresh_observation()
         async def grasp_health() -> dict:
+            self._require_job_motion(job)
             body = await self._assert_armed_health(job.robot_id)
+            self._require_job_motion(job)
             self._pickup_live_media(job.robot_id, camera_grant)
             if not isinstance(body.get("servo"), dict):
                 raise OperationError("Pickup requires WROOM commanded servo telemetry")
@@ -1862,7 +1864,10 @@ class Coordinator:
             if tactile is None:
                 return
             try:
-                await verify_grasp_hold(head, c, tactile, robot_id=job.robot_id)
+                await verify_grasp_hold(
+                    head, c, tactile, robot_id=job.robot_id,
+                    require_current=lambda: self._require_job_motion(job),
+                )
             except OperationError as exc:
                 job.events.append(str(exc))
                 raise
@@ -1873,6 +1878,7 @@ class Coordinator:
                 head, c, robot_id=job.robot_id, health=grasp_health,
                 send_command=lambda command: self._motion_command(job, command),
             )
+            self._require_job_motion(job)
             job.events.append(
                 f"tactile contact delta={tactile['contact_delta_raw']} "
                 f"commanded_angle={tactile['commanded_angle']}; not physical acceptance"
