@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 from desk_robot.config import load_settings
-from desk_robot.transport import HttpHead
+from desk_robot.transport import HeadError, HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -191,7 +191,7 @@ async def measure(head, robot_id: str, *, seconds: float,
             privacy_muted_seen |= sample["microphone_privacy_muted"]
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except (HeadError, TimeoutError, ValueError) as exc:
             invalid_receipts += 1
             if len(errors) < 20:
                 errors.append(type(exc).__name__ + ": " + str(exc)[:120])
