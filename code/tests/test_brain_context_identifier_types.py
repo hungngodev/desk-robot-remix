@@ -97,3 +97,39 @@ def test_nonplain_topical_id_cannot_promote_old_episode(identifier_type):
     result = compose_brain_context(entries, [], [], topical_event_id=identifier_type("evt0")).recent
     assert "episode 0" not in result
     assert "episode 6" in result
+
+
+@pytest.mark.parametrize("bad", ["", "   ", True, 7, [], {}])
+@pytest.mark.parametrize("field", ["channel", "kind"])
+def test_invalid_timeline_identity_never_renders_as_sensor_evidence(field, bad):
+    malformed = {"channel": "sensor", "kind": "nose_twist"}
+    malformed[field] = bad
+    valid = {"channel": "sensor", "kind": "touch_tap"}
+    assert compose_brain_context([], [], [valid, malformed]).interaction == (
+        compose_brain_context([], [], [valid]).interaction
+    )
+
+
+@pytest.mark.parametrize("kind", ["", "   "])
+def test_generic_camera_kind_can_be_absent_but_not_blank(kind):
+    malformed = {"channel": "camera", "kind": kind}
+    assert compose_brain_context([], [], [malformed]).interaction == ""
+    generic = {"channel": "camera"}
+    assert "XIAO frame received" in compose_brain_context([], [], [generic]).interaction
+
+
+@pytest.mark.parametrize("source", [
+    _IdentifierSubclass("wroom_event"), _UnhashableIdentifier("wroom_event"),
+    "", True, 7, {}, [],
+])
+def test_invalid_safety_source_cannot_displace_authenticated_fault(source):
+    valid = {
+        "channel": "sensor", "kind": "safety_fault", "source": "wroom_event",
+        "age_ms": 1, "fault_detail": "cliff",
+    }
+    malformed = {**valid, "source": source, "fault_detail": "invalid"}
+    context = compose_brain_context([], [], [
+        valid, *[{"channel": "camera"} for _ in range(63)], malformed,
+    ])
+    assert "WROOM reported latched safety fault (cliff)" in context.interaction
+    assert "fault (invalid)" not in context.interaction

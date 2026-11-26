@@ -143,7 +143,7 @@ def _fresh_valid_safety_fault(item: object) -> bool:
             or channel != "sensor" or kind != "safety_fault"):
         return False
     source = item.get("source")
-    if source is not None and source != "wroom_event":
+    if source is not None and (type(source) is not str or source != "wroom_event"):
         return False
     age = item.get("age_ms")
     return age is None or (type(age) is int and 0 <= age <= 8000)
@@ -152,6 +152,11 @@ def _fresh_valid_safety_fault(item: object) -> bool:
 def _plain_identifier(value: object) -> bool:
     """Reject empty or nonplain identifiers before comparisons and hashing."""
     return type(value) is str and bool(value.strip())
+
+
+def _timeline_identifiers_valid(channel: object, kind: object) -> bool:
+    # Generic camera/voice receipts legitimately omit their kind.
+    return _plain_identifier(channel) and (kind is None or _plain_identifier(kind))
 
 
 def _valid_memory_identity(entry: Memory) -> bool:
@@ -280,8 +285,7 @@ def compose_brain_context(
         # Match MemoryStore's plain-string identifier boundary before
         # using untrusted cue identifiers as dictionary or set keys.
         # A missing kind is still valid for generic camera/voice receipts.
-        if (type(channel) is not str or channel not in priorities
-                or (kind is not None and type(kind) is not str)):
+        if not _timeline_identifiers_valid(channel, kind) or channel not in priorities:
             continue
         # Group every camera JPEG receipt under one cue, not ten fake new
         # observations; preserve distinct physical sensor event kinds.
