@@ -79,7 +79,8 @@ async def test_identity_request_rejects_reconnected_stream_even_with_same_pid(ne
 @pytest.mark.asyncio
 async def test_read_only_pose_holds_instead_of_decoding_retired_boot(tmp_path, monkeypatch):
     calibration = tmp_path / "dock.json"
-    calibration.write_text(json.dumps({"measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+    calibration.write_text(json.dumps({"schema_version": 1,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240, "tag_side_mm": 60,
         "marker_id": 12, "target_distance_mm": 120}))
     head = make_head()

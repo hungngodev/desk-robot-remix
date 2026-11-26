@@ -53,6 +53,7 @@ def fit(views):
 def test_opencv_recovers_synthetic_distorted_camera_but_cannot_approve_dock():
     cv2 = pytest.importorskip("cv2")
     candidate = fit(projected_views(cv2))
+    assert candidate["schema_version"] == 1
     assert candidate["measured"] is False
     assert candidate["requires_real_head_mount_review"] is True
     assert candidate["mount_lateral_offset_mm"] is None
@@ -379,6 +380,7 @@ def test_checkerboard_photo_swap_to_symlink_during_read_is_rejected(
 
 def unapproved_dock_candidate():
     return {
+        "schema_version": 1,
         "robot_id": "robot-01", "camera_sensor_pid": "OV5640",
         "measured": False, "physical_acceptance_pass": False,
         "motor_authorized": False, "charging_authorized": False,
@@ -767,3 +769,16 @@ def test_private_dock_candidate_sync_failure_leaves_no_visible_file(tmp_path, mo
     with pytest.raises(OSError, match="simulated storage failure"):
         camera.write_private_dock_candidate(target, unapproved_dock_candidate())
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("version", [None, True, 1.0, "1", 0, 2])
+def test_private_dock_candidate_requires_schema_version(tmp_path, version):
+    candidate = unapproved_dock_candidate()
+    if version is None:
+        candidate.pop("schema_version")
+    else:
+        candidate["schema_version"] = version
+    target = tmp_path / "intrinsics.json"
+    with pytest.raises(ValueError, match="schema_version"):
+        fitter().write_private_dock_candidate(target, candidate)
+    assert not target.exists()

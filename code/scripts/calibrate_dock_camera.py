@@ -174,6 +174,7 @@ def fit_corners(
         if not np.isfinite(errors).all() or np.any(errors > 3.0):
             raise ValueError("Excessive checkerboard corner reprojection error")
     return {
+        "schema_version": 1,
         "measured": False,  # Operator must inspect actual mounting and images.
         "fx": fx, "fy": fy, "cx": cx, "cy": cy,
         "distortion_coeffs": list(distortion),
@@ -374,11 +375,15 @@ def write_private_dock_candidate(target: Path, candidate: dict) -> None:
     No existing calibration is modified or granted motor/charge authority.
     """
     if (".." in target.parts or not isinstance(candidate, dict)
+            or type(candidate.get("schema_version")) is not int
+            or candidate["schema_version"] != 1
             or any(candidate.get(key) is not False for key in (
                 "measured", "physical_acceptance_pass",
                 "motor_authorized", "charging_authorized",
             ))):
-        raise ValueError("Dock camera candidate requires unapproved provenance and safe path")
+        raise ValueError(
+            "Dock camera candidate requires schema_version 1, unapproved provenance and safe path"
+        )
     # Verify JSON entirely before opening a filesystem target, so a rejected
     # NaN or non-JSON input cannot leave an incomplete safety evidence file.
     contents = json.dumps(candidate, indent=2, allow_nan=False) + "\n"

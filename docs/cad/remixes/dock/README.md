@@ -146,7 +146,9 @@ The offline checkerboard tool
 Record their configured identities in every per-pet calibration. Two pets
 with the same OV5640 model and JPEG resolution cannot share measured lens
 intrinsics or camera-to-chassis offset data. The tool emits
-`"measured": false` candidates, not motion approval. Only real measured
+`"measured": false` candidates, not motion approval. The candidate and runtime
+loader require integer `"schema_version": 1`. Older unversioned camera files
+must be regenerated and physically reviewed; do not blindly relabel old evidence. Only real measured
 per-pet lens, mounting and approach trials can justify an operator-reviewed
 record. A replaced camera module or remounted head requires fresh
 measurements and a new record; nominal model PID alone is not enough.

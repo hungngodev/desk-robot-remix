@@ -49,6 +49,7 @@ async def test_dock_does_not_consume_permit_without_measured_steering(settings, 
     robot.dock_forward_sign = 1
     dock = tmp_path / "dock.json"
     dock.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
     }))
@@ -211,6 +212,7 @@ async def test_dock_motion_refuses_unmeasured_lens_distortion_before_permit(
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
     }))
@@ -242,6 +244,7 @@ async def test_dock_motion_needs_calibrated_camera_resolution_even_with_distorti
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
@@ -274,6 +277,7 @@ async def test_dock_refuses_motion_without_measured_camera_mount_before_permit(
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
@@ -372,6 +376,7 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
@@ -920,6 +925,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
         robot.dock_beacon_id = 1 if robot.id == first.id else 2
     path = tmp_path / "only-pet-one.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240,
@@ -974,6 +980,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
     robot.device_id = "xiaozhi-01"
     robot.dock_calibration = tmp_path / "replay-dock.json"
     robot.dock_calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": robot.id, "head_device_id": robot.device_id,
         "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
         "cx": 320, "cy": 240, "tag_side_mm": 60, "marker_id": 1,
@@ -1246,6 +1253,7 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
 
     calib = tmp_path / "dock_cal.json"
     calib.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True,
         "robot_id": robot.id,
         "head_device_id": "xiaozhi-01",

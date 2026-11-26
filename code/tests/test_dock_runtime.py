@@ -58,6 +58,7 @@ async def test_non_utf8_dock_calibration_fails_closed(tmp_path, payload):
 def test_measured_distortion_survives_json_loader_and_invalid_values_fail_closed(tmp_path):
     path = tmp_path / "dock.json"
     payload = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
         "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
@@ -85,6 +86,7 @@ def test_measured_distortion_survives_json_loader_and_invalid_values_fail_closed
 def test_loader_rejects_unknown_or_ill_typed_camera_pid(tmp_path, pid):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
         "camera_sensor_pid": pid,
@@ -105,6 +107,7 @@ async def test_invalid_mount_measurement_fails_before_dock_camera(
     tmp_path, invalid,
 ):
     base = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
         "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12,
@@ -126,6 +129,7 @@ async def test_invalid_mount_measurement_fails_before_dock_camera(
 async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path, monkeypatch):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -151,6 +155,7 @@ async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path,
 async def test_dock_diagnostic_rejects_missing_actual_sensor_pid(tmp_path):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -169,6 +174,7 @@ async def test_dock_diagnostic_rejects_same_resolution_wrong_sensor(
 ):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV3660",
         "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "image_width_px": 640, "image_height_px": 480,
@@ -191,6 +197,7 @@ async def test_dock_diagnostic_rejects_same_resolution_wrong_sensor(
 async def test_dock_diagnostic_refuses_identity_endpoint_absence(tmp_path):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
@@ -214,6 +221,7 @@ async def test_unrepresentable_dock_stop_target_holds_before_camera(tmp_path, ta
     # camera observation, and certainly cannot authorize docking motion.
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": target,
     }))
@@ -234,6 +242,7 @@ async def test_unrepresentable_dock_stop_target_holds_before_camera(tmp_path, ta
 ])
 async def test_fake_or_bad_dock_calibration_never_looks_or_drives(tmp_path, change):
     data = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }
@@ -255,6 +264,7 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
     import time
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -282,6 +292,7 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
 async def test_snapshot_failure_holds_without_motion(tmp_path, monkeypatch, failure):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -310,6 +321,7 @@ async def test_snapshot_failure_holds_without_motion(tmp_path, monkeypatch, fail
 async def test_detector_failure_holds_without_motion(tmp_path, monkeypatch, failure):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -342,6 +354,7 @@ async def test_corrupt_native_pose_result_fails_closed(tmp_path, monkeypatch, ma
     """A native adapter contract violation cannot escape or authorize contact."""
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -367,6 +380,7 @@ async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp
 
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -407,6 +421,7 @@ async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp
 async def test_invalid_dock_snapshot_never_starts_native_detector(tmp_path, monkeypatch, payload):
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 408, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -464,6 +479,7 @@ async def test_dock_diagnostic_uncooperative_camera_returns_hold(
 
     calibration = tmp_path / "dock.json"
     calibration.write_text('''{
+        "schema_version": 1,
         "measured": true, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
         "cx": 320, "cy": 240, "tag_side_mm": 60,
         "marker_id": 1, "target_distance_mm": 200
@@ -489,6 +505,7 @@ async def test_dock_diagnostic_uses_measured_chassis_offset_not_centered_lens(
     """A tag centered in the JPEG may be off center of the actual tracks."""
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
         "cx": 320, "cy": 240, "tag_side_mm": 60,
         "marker_id": 12, "target_distance_mm": 120,
@@ -519,6 +536,7 @@ async def test_dock_diagnostic_keeps_raw_camera_only_when_mount_unmeasured(
     """Provisional camera geometry is not secretly a chassis measurement."""
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
         "cx": 320, "cy": 240, "tag_side_mm": 60,
         "marker_id": 12, "target_distance_mm": 120,
@@ -542,6 +560,7 @@ async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
     """Dock diagnostics never choose the generic snapshot when a strict one exists."""
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -577,6 +596,7 @@ async def test_stale_mac_receipt_does_not_enter_dock_detector(tmp_path, monkeypa
 
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -627,6 +647,7 @@ async def test_unrepresentable_dock_receipt_holds_before_identity_or_detector(
 ):
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240,
@@ -682,6 +703,7 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
 
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
@@ -719,6 +741,7 @@ async def test_measured_dock_calibration_is_bound_to_pet_and_head_before_camera(
     tmp_path, changed, expected_error,
 ):
     payload = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240,
@@ -746,6 +769,7 @@ async def test_measured_dock_calibration_is_bound_to_pet_and_head_before_camera(
 
 async def test_matching_pet_camera_calibration_keeps_source_identity(tmp_path):
     payload = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240,
@@ -779,6 +803,7 @@ async def test_ambiguous_dock_calibration_fields_fail_closed_before_camera(
 ):
     """A second apparently valid JSON field cannot conceal contradictory data."""
     record = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 408, "cx": 320, "cy": 240,
@@ -816,6 +841,7 @@ def test_dock_calibration_json_rejects_nonstandard_numeric_constants(
     tmp_path, constant,
 ):
     record = {
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 408, "cx": 320, "cy": 240,
@@ -907,6 +933,7 @@ async def test_dock_identity_lookup_expires_with_original_frame(
 
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01",
         "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
         "fx": 410, "fy": 410, "cx": 320, "cy": 240,
@@ -982,6 +1009,7 @@ for line in sys.stdin:
     monkeypatch.setattr(dock_runtime, "_DETECTOR_POOL", pool)
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
+        "schema_version": 1,
         "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01",
         "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
@@ -1063,3 +1091,17 @@ async def test_selected_dock_frame_preserves_original_deadline(
         await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
     assert budgets == [pytest.approx(0.05)]
     assert verified == [receipt]
+
+
+@pytest.mark.parametrize("version", [None, True, 1.0, "1", 0, 2])
+def test_dock_loader_rejects_missing_or_unsupported_schema(tmp_path, version):
+    path = tmp_path / "dock.json"
+    payload = {
+        "measured": True, "fx": 410, "fy": 408, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }
+    if version is not None:
+        payload["schema_version"] = version
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="schema_version"):
+        dock_runtime.load_real_dock_calibration(path)

@@ -38,7 +38,10 @@ def load_real_dock_calibration(
         object_pairs_hook=_unique_calibration_object,
         parse_constant=_reject_calibration_json_constant,
     )
-    if not isinstance(data, dict) or data.get("measured") is not True:
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+            or data["schema_version"] != 1):
+        raise ValueError("Unsupported or missing dock camera schema_version")
+    if data.get("measured") is not True:
         raise ValueError("Dock camera geometry is not physically measured")
     # A camera model, PID and frame size cannot establish the robot that
     # physically produced these checkerboard and mount measurements.
