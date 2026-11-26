@@ -246,6 +246,11 @@ class HttpHead:
                 response = await self._request(
                     "POST", "/api/command", json={"command": command}
                 )
+                # A cancellation-resistant adapter may return a late ACK.
+                # It cannot restore motion authority for a revoked request.
+                task = asyncio.current_task()
+                if task is not None and task.cancelling():
+                    raise asyncio.CancelledError
                 data = _response_object(response)
                 if not command_ack_matches(data, self.config.id, expected):
                     raise HeadError("Unmatched or failed command ACK; movement not retried")
