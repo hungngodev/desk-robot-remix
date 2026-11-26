@@ -145,26 +145,24 @@ def ina226_monitor_warning(power: dict[str, Any]) -> str | None:
     return "Last INA226 shunt reading saturated; current unavailable."
 
 
-def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
-    if not isinstance(data, dict) or data.get("robot_id") != robot_id:
-        raise ValueError("Aux sensor identity mismatch")
-    pulse, angles = data.get("pulse"), data.get("angles")
-    force, climate = data.get("force"), data.get("climate")
-    power, proximity = data.get("power"), data.get("proximity")
-    if not all(isinstance(group, dict) for group in (
-        pulse, angles, force, climate, power, proximity,
-    )):
-        raise ValueError("Incomplete auxiliary sensor payload")
+def _valid_optional_sequence(group: dict[str, Any]) -> bool:
+    # Preserve legacy null-as-absent semantics for these optional clocks.
+    seq = group.get("seq")
+    return seq is None or (is_uint(seq, 0xffffffff) and (not group["valid"] or seq != 0))
 
+
+def _valid_optional_age(group: dict[str, Any], max_age_ms: int) -> bool:
+    age = group.get("age_ms")
+    return age is None or (is_uint(age, 0xffffffff) and (not group["valid"] or age < max_age_ms))
+
+
+def _validate_pulse(pulse: dict[str, Any]) -> None:
     if (not _bool(pulse.get("present")) or not _bool(pulse.get("valid"))
             or not is_uint(pulse.get("part_id"), 255)
             or not is_uint(pulse.get("red"), 262143)
             or not is_uint(pulse.get("ir"), 262143)
             or not is_uint(pulse.get("age_ms"), 0xffffffff)
-            or (pulse.get("seq") is not None and (
-                not is_uint(pulse["seq"], 0xffffffff)
-                or (pulse["valid"] and pulse["seq"] == 0)
-            ))
+            or not _valid_optional_sequence(pulse)
             or pulse.get("bpm", "missing") is not None
             or pulse.get("medical") is not False
             or ("fifo_ir_first" in pulse and not _bool(pulse["fifo_ir_first"]))
@@ -173,6 +171,8 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
             or (pulse["valid"] and not pulse["present"])):
         raise ValueError("Invalid raw MAX30102 paw source")
 
+
+def _validate_angles(angles: dict[str, Any]) -> None:
     present, valid = angles.get("present_mask"), angles.get("valid_mask")
     if (not is_uint(present, 7) or not is_uint(valid, 7)
             or valid & ~present
@@ -186,60 +186,57 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if not _valid_angle_acquisition(angles):
         raise ValueError("Invalid AS5600 acquisition provenance")
 
-    jaw_valid = force.get("jaw_valid")
-    belly_valid = force.get("belly_valid")
-    belly_seq = force.get("belly_seq")
-    belly_age = force.get("belly_age_ms")
-    jaw_age = force.get("jaw_age_ms")
 
+def _validate_force_shape(force: dict[str, Any]) -> None:
     if (not _array(force.get("adc"), 2, lambda n: is_int_in_range(n, -32768, 32767))
             or not _bool(force.get("valid"))
             or force.get("calibrated") is not False
             or not is_uint(force.get("jaw_seq"), 0xffffffff)
             or ("boot_id" in force and not is_uint(force["boot_id"], 0xffffffff))
-            or ("jaw_age_ms" in force and not is_uint(jaw_age, 0xffffffff))
-            or ("jaw_valid" in force and not _bool(jaw_valid))
-            or ("belly_seq" in force and not is_uint(belly_seq, 0xffffffff))
-            or ("belly_age_ms" in force and not is_uint(belly_age, 0xffffffff))
-            or ("belly_valid" in force and not _bool(belly_valid))
-            # Saturated ADC clipping or staleness invalidates the corresponding channel
-            or (jaw_valid is True and (
-                force["adc"][1] in (-32768, 32767)
-                or force["jaw_seq"] == 0
-                or (jaw_age is not None and jaw_age >= 500)))
-            or (belly_valid is True and (
-                force["adc"][0] in (-32768, 32767)
-                or (belly_seq is not None and belly_seq == 0)
-                or (belly_age is not None and belly_age >= 500)))
-            # Composite validity requires both channels to be fresh and unclipped.
-            # Zero is the no-acquisition sentinel even in legacy packets.
-            or (force.get("valid") is True and (
-                force["jaw_seq"] == 0
-                or belly_seq == 0
-                or force["adc"][0] in (-32768, 32767)
-                or force["adc"][1] in (-32768, 32767)
-                or (jaw_age is not None and jaw_age >= 500)
-                or (belly_age is not None and belly_age >= 500)
-                or jaw_valid is False
-                or belly_valid is False))
-            # Typed per-channel validities must match composite valid
-            or (jaw_valid is not None and belly_valid is not None and (
-                force.get("valid") != (jaw_valid and belly_valid)))):
+            or ("jaw_age_ms" in force and not is_uint(force["jaw_age_ms"], 0xffffffff))
+            or ("jaw_valid" in force and not _bool(force["jaw_valid"]))
+            or ("belly_seq" in force and not is_uint(force["belly_seq"], 0xffffffff))
+            or ("belly_age_ms" in force and not is_uint(force["belly_age_ms"], 0xffffffff))
+            or ("belly_valid" in force and not _bool(force["belly_valid"]))):
         raise ValueError("Invalid uncalibrated FSR sample")
 
+
+def _force_channel_is_usable(adc: int, seq: int | None, age: int | None) -> bool:
+    # Omitted legacy clocks remain accepted; zero is the no-acquisition sentinel.
+    return adc not in (-32768, 32767) and seq != 0 and (age is None or age < 500)
+
+
+def _validate_force(force: dict[str, Any]) -> None:
+    _validate_force_shape(force)
+    jaw_valid, belly_valid = force.get("jaw_valid"), force.get("belly_valid")
+    jaw_usable = _force_channel_is_usable(
+        force["adc"][1], force["jaw_seq"], force.get("jaw_age_ms"),
+    )
+    belly_usable = _force_channel_is_usable(
+        force["adc"][0], force.get("belly_seq"), force.get("belly_age_ms"),
+    )
+    # Independently valid channels must be fresh and unclipped. Composite
+    # validity additionally requires both channels and no explicit invalidity.
+    if ((jaw_valid is True and not jaw_usable)
+            or (belly_valid is True and not belly_usable)
+            or (force["valid"] and (
+                not jaw_usable or not belly_usable
+                or jaw_valid is False or belly_valid is False))
+            or (jaw_valid is not None and belly_valid is not None
+                and force["valid"] != (jaw_valid and belly_valid))):
+        raise ValueError("Invalid uncalibrated FSR sample")
+
+
+def _validate_climate(climate: dict[str, Any]) -> None:
     if (not is_int_in_range(climate.get("temp_centi"), -4500, 13000)
             or not is_uint(climate.get("rh_centi"), 10000)
             or not _bool(climate.get("valid"))
-            or (climate.get("seq") is not None and (
-                not is_uint(climate["seq"], 0xffffffff)
-                or (climate["valid"] and climate["seq"] == 0)
-            ))
-            or (climate.get("age_ms") is not None and (
-                not is_uint(climate["age_ms"], 0xffffffff)
-                or (climate["valid"] and climate["age_ms"] >= 1000)
-            ))):
+            or not _valid_optional_sequence(climate)
+            or not _valid_optional_age(climate, 1000)):
         raise ValueError("Invalid SHT41 climate sample")
 
+
+def _validate_power(power: dict[str, Any]) -> None:
     if (not is_uint(power.get("cell_mv"), 4500)
             or not is_uint(power.get("soc_centi"), 10000)
             or not is_uint(power.get("bus_mv"), 40959)
@@ -274,6 +271,9 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
         or (power["fuel_valid"] and not fuel_sample_is_fresh(fuel_age))
     )):
         raise ValueError("Invalid MAX17048 fuel acquisition age")
+
+
+def _validate_pack_current(power: dict[str, Any]) -> None:
     # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM
     # firmware actually exist. Raw calculated milliamp telemetry is not a
     # calibrated battery ammeter or charging authorization.
@@ -281,19 +281,22 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     pack_age = power.get("pack_age_ms")
     if ("pack_age_ms" in power and not is_uint(pack_age, 0xffffffff)):
         raise ValueError("Invalid INA226 pack conversion age")
-    if any(key in power for key in current_fields):
-        if (not all(key in power for key in current_fields)
-                or not is_int_in_range(power["pack_ma"], -16384, 16384)
-                or not _bool(power["pack_valid"])
-                or not is_uint(power["pack_seq"], 0xffffffff)
-                or (power["pack_valid"] and (
-                    not power["monitor_valid"] or power["pack_seq"] == 0
-                    or (pack_age is not None and pack_age >= 500)
-                    or not -81920 < power["shunt_uv"] < 81920
-                    or power["pack_ma"] != int(power["shunt_uv"] / 5)))
-                or (not power["pack_valid"] and power["pack_ma"] != 0)):
-            raise ValueError("Invalid INA226 pack-line current provenance")
+    if not any(key in power for key in current_fields):
+        return
+    if (not all(key in power for key in current_fields)
+            or not is_int_in_range(power["pack_ma"], -16384, 16384)
+            or not _bool(power["pack_valid"])
+            or not is_uint(power["pack_seq"], 0xffffffff)
+            or (power["pack_valid"] and (
+                not power["monitor_valid"] or power["pack_seq"] == 0
+                or (pack_age is not None and pack_age >= 500)
+                or not -81920 < power["shunt_uv"] < 81920
+                or power["pack_ma"] != int(power["shunt_uv"] / 5)))
+            or (not power["pack_valid"] and power["pack_ma"] != 0)):
+        raise ValueError("Invalid INA226 pack-line current provenance")
 
+
+def _validate_proximity(proximity: dict[str, Any]) -> None:
     if (not is_uint(proximity.get("raw"), 255)
             or not _bool(proximity.get("valid"))
             or ("saturated" in proximity and not _bool(proximity["saturated"]))
@@ -302,6 +305,9 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
             or ("boot_id" in proximity and not is_uint(proximity["boot_id"], 0xffffffff))
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
+
+
+def _validate_boot_provenance(force: dict[str, Any], proximity: dict[str, Any]) -> None:
     # A single WROOM response serializes both sensor groups under the same
     # boot epoch. Legacy bench captures can omit IDs, but any explicit ID
     # must be nonzero and two explicit IDs must agree. Otherwise an
@@ -313,60 +319,67 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
                 and force_boot != proximity_boot)):
         raise ValueError("Inconsistent WROOM auxiliary boot provenance")
 
-    bmp = data.get("bmp280")
-    if bmp is not None:
-        if (not isinstance(bmp, dict)
-                or not _bool(bmp.get("present"))
-                or not _bool(bmp.get("valid"))
-                or not is_uint(bmp.get("chip_id"), 255)
-                or not is_int_in_range(bmp.get("temp_centi"), -4000, 8500)
-                or not is_uint(bmp.get("pressure_pa"), 120000)
-                or bmp.get("physically_verified") is not False
-                or (bmp.get("seq") is not None and (
-                    not is_uint(bmp["seq"], 0xffffffff)
-                    or (bmp["valid"] and bmp["seq"] == 0)
-                ))
-                or (bmp.get("age_ms") is not None and (
-                    not is_uint(bmp["age_ms"], 0xffffffff)
-                    or (bmp["valid"] and bmp["age_ms"] >= 2000)
-                ))
-                or (bmp["valid"] and (not bmp["present"]
-                    or bmp["chip_id"] != 0x58
-                    or not 30000 <= bmp["pressure_pa"] <= 120000))
-                or (not bmp["valid"] and (
-                    bmp["pressure_pa"] != 0 or bmp["temp_centi"] != 0))):
-            raise ValueError("Invalid optional BMP280 ambient sample")
-    dock = data.get("dock")
-    if dock is not None:
-        if (not isinstance(dock, dict)
-                or any(not _bool(dock.get(key)) for key in (
-                    "present", "valid", "left_seated", "right_seated",
-                    "input_good", "charge_indicated",
-                ))
-                or dock.get("charging_verified") is not False
-                or not is_uint(dock.get("seq"), 0xffffffff)
-                or not is_uint(dock.get("age_ms"), 0xffffffff)
-                or (dock["valid"] and (
-                    not dock["present"] or dock["seq"] == 0
-                    or dock["age_ms"] >= 500))
-                # Independent CHG-low / PGOOD-high is a real electrical
-                # contradiction to report, not a malformed JSON frame.
-                # The read-only dock classifier labels it a fault and no
-                # physical or charging privilege can come from this telemetry.
-                or (not dock["valid"] and any(dock[key] for key in (
-                    "left_seated", "right_seated", "input_good",
-                    "charge_indicated",
-                )))):
-            raise ValueError("Invalid optional read only dock pin status")
-    nfc = data.get("nfc")
-    if nfc is not None:
-        if (not isinstance(nfc, dict) or type(nfc.get("v")) is not bool
-                or not is_uint(nfc.get("t"), 0xffffffff)
-                or not is_uint(nfc.get("e"), 0xffffffff)
-                or not is_uint(nfc.get("s"), 0xffffffff)
-                or (nfc["v"] and nfc["s"] == 0)
-                or (nfc["t"] != 0 and not nfc["v"])):
-            raise ValueError("Invalid read only PN532 toy tag evidence")
+
+def _validate_bmp(bmp: object) -> None:
+    if bmp is None:
+        return
+    if (not isinstance(bmp, dict)
+            or not _bool(bmp.get("present"))
+            or not _bool(bmp.get("valid"))
+            or not is_uint(bmp.get("chip_id"), 255)
+            or not is_int_in_range(bmp.get("temp_centi"), -4000, 8500)
+            or not is_uint(bmp.get("pressure_pa"), 120000)
+            or bmp.get("physically_verified") is not False
+            or not _valid_optional_sequence(bmp)
+            or not _valid_optional_age(bmp, 2000)
+            or (bmp["valid"] and (not bmp["present"]
+                or bmp["chip_id"] != 0x58
+                or not 30000 <= bmp["pressure_pa"] <= 120000))
+            or (not bmp["valid"] and (
+                bmp["pressure_pa"] != 0 or bmp["temp_centi"] != 0))):
+        raise ValueError("Invalid optional BMP280 ambient sample")
+
+
+def _validate_dock(dock: object) -> None:
+    if dock is None:
+        return
+    if (not isinstance(dock, dict)
+            or any(not _bool(dock.get(key)) for key in (
+                "present", "valid", "left_seated", "right_seated",
+                "input_good", "charge_indicated",
+            ))
+            or dock.get("charging_verified") is not False
+            or not is_uint(dock.get("seq"), 0xffffffff)
+            or not is_uint(dock.get("age_ms"), 0xffffffff)
+            or (dock["valid"] and (
+                not dock["present"] or dock["seq"] == 0
+                or dock["age_ms"] >= 500))
+            # Independent CHG-low / PGOOD-high is a real electrical
+            # contradiction to report, not a malformed JSON frame.
+            # The read-only dock classifier labels it a fault and no
+            # physical or charging privilege can come from this telemetry.
+            or (not dock["valid"] and any(dock[key] for key in (
+                "left_seated", "right_seated", "input_good",
+                "charge_indicated",
+            )))):
+        raise ValueError("Invalid optional read only dock pin status")
+
+
+def _validate_nfc(nfc: object) -> None:
+    if nfc is None:
+        return
+    if (not isinstance(nfc, dict) or type(nfc.get("v")) is not bool
+            or not is_uint(nfc.get("t"), 0xffffffff)
+            or not is_uint(nfc.get("e"), 0xffffffff)
+            or not is_uint(nfc.get("s"), 0xffffffff)
+            or (nfc["v"] and nfc["s"] == 0)
+            or (nfc["t"] != 0 and not nfc["v"])):
+        raise ValueError("Invalid read only PN532 toy tag evidence")
+
+
+def _normalize_aux_diagnostics(
+    data: dict[str, Any], pulse: dict[str, Any], proximity: dict[str, Any],
+) -> dict[str, Any]:
     # Stale or clipped optical FIFO samples cannot establish contact.
     # Match the WROOM 18-bit ADC rail rejection without invalidating other
     # sensors. Preserve raw diagnostics and do not mutate the caller's frame.
@@ -378,3 +391,28 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if proximity["raw"] == 255 or proximity.get("saturated") is True:
         data = {**data, "proximity": {**proximity, "valid": False, "saturated": True}}
     return data
+
+
+def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
+    if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+        raise ValueError("Aux sensor identity mismatch")
+    pulse, angles = data.get("pulse"), data.get("angles")
+    force, climate = data.get("force"), data.get("climate")
+    power, proximity = data.get("power"), data.get("proximity")
+    if not all(isinstance(group, dict) for group in (
+        pulse, angles, force, climate, power, proximity,
+    )):
+        raise ValueError("Incomplete auxiliary sensor payload")
+
+    _validate_pulse(pulse)
+    _validate_angles(angles)
+    _validate_force(force)
+    _validate_climate(climate)
+    _validate_power(power)
+    _validate_pack_current(power)
+    _validate_proximity(proximity)
+    _validate_boot_provenance(force, proximity)
+    _validate_bmp(data.get("bmp280"))
+    _validate_dock(data.get("dock"))
+    _validate_nfc(data.get("nfc"))
+    return _normalize_aux_diagnostics(data, pulse, proximity)
