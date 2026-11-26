@@ -373,3 +373,55 @@ def test_cli_credentials_follow_selected_config(monkeypatch, tmp_path, capsys, e
     monkeypatch.setattr(sys, "argv", [*args, "doctor"])
     cli.main()
     assert json.loads(capsys.readouterr().out)["credentials_present"] is True
+
+
+@pytest.mark.parametrize(
+    ("command", "diagnostic"),
+    [
+        ([], "action"),
+        (["doctor", "--bogus"], "unrecognized arguments"),
+        (["doctor", "--robot"], "expected one argument"),
+        (["look", "robot-01"], "question"),
+        (["move", "robot-01"], "command"),
+        (["pickup", "robot-01", "cup"], "invalid choice"),
+        (["chat", "robot-01", "--turns", "0"], "invalid choice"),
+        (["chat", "robot-01", "--turns", "11"], "invalid choice"),
+        (["chat", "robot-01", "--turns", "nan"], "invalid int value"),
+        (["serve", "--port", "bad"], "invalid int value"),
+        (["secrets", "--bogus"], "unrecognized arguments"),
+    ],
+)
+def test_cli_malformed_arguments_prevent_side_effects(command, diagnostic, monkeypatch,
+                                                      tmp_path, capsys):
+    import desk_robot.cli as cli
+
+    credentials = tmp_path / "local.env"
+    credentials.write_bytes(b"EXISTING=unchanged\n")
+    config = tmp_path / "robot.toml"
+    config.write_bytes(b'mode = "simulation"\n')
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    calls = []
+
+    def unexpected(*args, **kwargs):
+        calls.append("side effect")
+        pytest.fail("Malformed CLI arguments must not reach configuration or execution")
+
+    for name in ("load_settings", "load_env", "write_secrets", "Runtime",
+                 "request", "demo", "inspect_live_media"):
+        monkeypatch.setattr(cli, name, unexpected)
+    monkeypatch.setattr(cli.httpx, "AsyncClient", unexpected)
+    monkeypatch.setattr(sys, "argv", [
+        "desk-robot", "--config", str(config), "--secrets", str(credentials), *command,
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "usage:" in captured.err
+    assert diagnostic in captured.err
+    assert "Traceback" not in captured.err
+    assert calls == []
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
