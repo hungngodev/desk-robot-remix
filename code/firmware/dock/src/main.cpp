@@ -9,8 +9,10 @@
 // the current WROOM DualIrEvidence pairs only identical complete codes.
 // This firmware does not control charging contacts, battery, or motor permits.
 #include <Arduino.h>
+#include <stdint.h>
 #define IR_SEND_PIN 3
 #define NO_LED_SEND_FEEDBACK_CODE
+#define IR_SEND_DUTY_CYCLE_PERCENT 30
 #include <IRremote.hpp>
 
 #ifndef DESK_ROBOT_DOCK_ID
@@ -25,6 +27,9 @@ constexpr uint8_t kAddress = 0x12;
 // enforced by code/firmware/body/lib/TerminalIr/NecBurst.h.
 // Distinct dock IDs are not, by themselves, authentication or docking permits.
 constexpr uint8_t kCommand = static_cast<uint8_t>(0x30 + DESK_ROBOT_DOCK_ID);
+constexpr uint32_t kQuietMs = 80;
+uint32_t last_end_ms = 0;
+bool sent = false;
 }  // namespace
 
 void setup() {
@@ -35,9 +40,13 @@ void setup() {
 }
 
 void loop() {
-  // Arduino-IRremote generates the real modulated 38kHz carrier and NEC
-  // envelope. Do not substitute TinyIRSender's USE_NO_SEND_PWM mode, which
-  // merely simulates the receiver's active-low baseband logic.
+  // Unsigned elapsed time survives millis() rollover. Measure the quiet gap
+  // from completion, not the scheduled start; never catch up missed bursts.
+  if (sent && static_cast<uint32_t>(millis() - last_end_ms) < kQuietMs) return;
+  // The upstream sender is synchronous for one full frame. Only the idle
+  // interval is nonblocking. Never substitute unmodulated TinyIRSender mode.
   IrSender.sendNEC(kAddress, kCommand, 0);
-  delay(80);  // full fresh frames, not repeat-only NEC tokens
+  digitalWrite(IR_SEND_PIN, LOW);
+  last_end_ms = millis();
+  sent = true;
 }

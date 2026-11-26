@@ -4,7 +4,11 @@ This checks protocol allocation, not IR brightness, 38 kHz on an oscilloscope,
 receiver/baffle aim, charger contacts, or an autonomously docked robot.
 """
 import json
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
@@ -53,3 +57,68 @@ def test_five_distinct_classic_nec_beacons_match_decoder_contract():
         assert frame not in codes
         codes.add(frame)
     assert len(codes) == 5
+
+
+@pytest.mark.parametrize("dock_id", range(1, 6))
+def test_beacon_quiet_gap_and_rollover(tmp_path, dock_id):
+    """Compile the real loop with a fake clock and synchronous sender."""
+    compiler = shutil.which("g++")
+    if compiler is None:
+        pytest.skip("g++ required for dock scheduler host test")
+    (tmp_path / "Arduino.h").write_text('''#pragma once
+#include <stdint.h>
+#include <cassert>
+constexpr int LOW = 0, OUTPUT = 1;
+extern uint32_t clock_ms;
+extern int writes;
+inline uint32_t millis() { return clock_ms; }
+inline void digitalWrite(int pin, int value) {
+  assert(pin == 3 && value == LOW); ++writes;
+}
+inline void pinMode(int pin, int mode) { assert(pin == 3 && mode == OUTPUT); }
+inline void delay(unsigned) { assert(false && "blocking idle delay"); }
+''')
+    (tmp_path / "IRremote.hpp").write_text('''#pragma once
+static_assert(IR_SEND_DUTY_CYCLE_PERCENT == 30);
+struct Sender {
+  int calls = 0;
+  void sendNEC(int address, int command, int repeats) {
+    assert(address == 0x12 && command == 0x30 + DESK_ROBOT_DOCK_ID);
+    assert(repeats == 0);
+    ++calls;
+    clock_ms += 68;
+  }
+};
+inline Sender IrSender;
+''')
+    harness = tmp_path / "harness.cpp"
+    harness.write_text('''#include <Arduino.h>
+uint32_t clock_ms = 0xffffff80U;
+int writes = 0;
+#include "main.cpp"
+int main() {
+  setup();
+  assert(writes == 1);
+  loop();
+  assert(IrSender.calls == 1 && writes == 2);
+  const auto end = clock_ms;
+  clock_ms = end + 79U;  // wraps the fake 32-bit millis clock
+  loop();
+  assert(IrSender.calls == 1);
+  clock_ms = end + 80U;
+  loop();
+  assert(IrSender.calls == 2 && writes == 3);
+  clock_ms += 10000U;  // overdue: one burst, no catch-up train
+  loop();
+  loop();
+  assert(IrSender.calls == 3 && writes == 4);
+}
+''')
+    binary = tmp_path / "beacon"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         f"-DDESK_ROBOT_DOCK_ID={dock_id}", "-I", str(tmp_path),
+         "-I", str(BEACON.parent), str(harness), "-o", str(binary)],
+        check=True, capture_output=True, text=True,
+    )
+    subprocess.run([str(binary)], check=True, capture_output=True, text=True)
