@@ -83,6 +83,70 @@ static void check_gesture_boundaries() {
   CHECK(g.finish() == 1);
   CHECK(g.finish() == 0);
 }
+static void check_gesture_optical_faults() {
+  using desk_robot::GestureDecoder;
+  using Action = GestureDecoder::PollAction;
+  for (unsigned channel = 0; channel < 5; ++channel) {
+    GestureDecoder g;
+    std::uint8_t direction = 99;
+    CHECK(g.poll_status(1, 100, direction) == Action::Read);
+    g.begin_batch(100);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    std::uint8_t glare[] = {90, 90, 85, 85};
+    for (unsigned i = 0; i < 4; ++i)
+      if (channel == i || channel == 4) glare[i] = 255;
+    g.push(glare[0], glare[1], glare[2], glare[3]);
+    g.begin_batch(200);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+    CHECK(g.poll_status(0, 201, direction) == Action::None && direction == 0);
+    CHECK(g.poll_status(1, 202, direction) == Action::Read);
+    g.begin_batch(202);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+    CHECK(g.poll_status(0, 203, direction) == Action::None && direction == 1);
+  }
+  // Overflow may be reported even after GVALID falls. It must win over
+  // finalization and require clean idle before the next usable session.
+  {
+    GestureDecoder g;
+    std::uint8_t direction = 99;
+    CHECK(g.poll_status(1, 100, direction) == Action::Read);
+    g.begin_batch(100);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+    CHECK(g.poll_status(2, 101, direction) == Action::Clear && direction == 0);
+    CHECK(g.poll_status(1, 102, direction) == Action::Clear && direction == 0);
+    CHECK(g.poll_status(0, 103, direction) == Action::None && direction == 0);
+  }
+  // Rail-only input must never be mistaken for a directional observation.
+  GestureDecoder g;
+  for (unsigned i = 0; i < 32; ++i) g.push(255, 255, 255, 255);
+  CHECK(g.finish() == 0);
+  // Each active-axis diode stuck while its partner changes enough to
+  // cross the ratio threshold, in both directions and on both axes.
+  for (unsigned axis = 0; axis < 2; ++axis) {
+    for (unsigned stuck = 0; stuck < 2; ++stuck) {
+      for (unsigned reverse = 0; reverse < 2; ++reverse) {
+        for (unsigned i = 0; i < 3; ++i) {
+          std::uint8_t q[] = {100, 100, 100, 100};
+          q[2 * axis + (1 - stuck)] = reverse ? 180 - 75 * i : 30 + 75 * i;
+          g.push(q[0], q[1], q[2], q[3]);
+        }
+        CHECK(g.finish() == 0);
+      }
+    }
+  }
+  // Asymmetric brightness change with both diodes moving the same way.
+  g.push(20, 20, 85, 85);
+  g.push(40, 80, 85, 85);
+  g.push(60, 180, 85, 85);
+  CHECK(g.finish() == 0);
+}
+
 static void check_gesture_session_recovery() {
   using desk_robot::GestureDecoder;
   using Action = GestureDecoder::PollAction;
@@ -259,6 +323,7 @@ int main() {
     check_bmp280_trim_registers();
     check_gesture_boundaries();
     check_gesture_session_recovery();
+    check_gesture_optical_faults();
     const std::uint8_t known[2] = {0xBE, 0xEF};
     CHECK(desk_robot::sensirion_crc(known, 2) == 0x92);
     CHECK(desk_robot::sht_temp_centi(0) == -4500);
