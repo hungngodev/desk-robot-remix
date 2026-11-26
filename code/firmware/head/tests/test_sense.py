@@ -1802,7 +1802,7 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert "static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate" in header
     # The fixed 2:1 ratio permits zero or one publish per output sample,
     # never a misleading loop over unsupported fractional rate profiles.
-    assert "reference_decimator_.Push(static_cast<int16_t>(scaled), filtered)" in codec
+    assert "reference_decimator_.Push(scaled, filtered)" in codec
     assert "reference_decimator_.ClearHistory();" in codec
     assert "reference_decimator_.Reset();" in codec
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
@@ -1923,6 +1923,26 @@ int main() {
     assert(std::all_of(gap.reference_.begin() + 960,
                        gap.reference_.begin() + 2560,
                        [](int16_t sample) { return sample == 0; }));
+    // Partial odd-sized acceptance: the unaccepted suffix must never enter
+    // the reference. A later gap is digital silence, not comfort noise.
+    for (int polarity : {-1, 1}) {
+        std::array<int32_t, 1920> packet{}, quiet{};
+        packet.fill(-polarity * 16000 * 65536);
+        std::fill_n(packet.begin(), 959, polarity * 16000 * 65536);
+        SenseReferenceCodec partial;
+        partial.PublishAcceptedLocked(packet.data(), 959, 1000000);
+        assert(partial.write_index_ == 480);
+        assert(partial.reference_[479] == polarity * 16000);
+        partial.FillSilenceLocked(1040000);
+        assert(partial.write_index_ == 640);
+        partial.PublishAcceptedLocked(quiet.data(), 1, 1040000);
+        assert(partial.write_index_ == 640);
+        partial.PublishAcceptedLocked(quiet.data() + 1, 1919, 1040000);
+        assert(partial.write_index_ == 1600);
+        assert(std::all_of(partial.reference_.begin() + 480,
+                           partial.reference_.begin() + 1600,
+                           [](int16_t sample) { return sample == 0; }));
+    }
     // No gap: chunk boundaries, even odd-sized writes, must preserve phase
     // and filter history. Compare against one uninterrupted accepted chunk.
     SenseReferenceCodec whole, split;
