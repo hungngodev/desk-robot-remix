@@ -58,9 +58,48 @@ static void check_mpu_ghost_reads() {
   }
 }
 
+static void check_lsm9ds0_bdu_reinitialization() {
+  using desk_robot::BerryImu;
+  using desk_robot::BerryModel;
+  // Both independent BDU registers must be proven again after reinit.
+  // An ACK or a previous good sample is not evidence of current setup.
+  for (const int reg : {0x20, 0x23}) {
+    for (const int fault : {0, 1, 2}) {
+      TwoWire wire;
+      BerryImu imu;
+      CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
+      wire.extra_registers[0xa8] = 0x12;
+      wire.registers[0xa8] = 0x34;
+      imu.poll(100);
+      CHECK(imu.fresh(100));
+      CHECK(imu.reading().accel[0] == 0x12 && imu.reading().gyro[0] == 0x34);
+      if (fault == 0) {
+        // Preserve all other bits; only the required BDU bit is missing.
+        if (reg == 0x20) wire.extra_registers[reg] = 0x67;
+        else wire.registers[reg] = 0x00;
+        wire.ignore_write_reg = reg;
+      } else if (fault == 1) {
+        wire.reject_read_reg = reg;
+      } else {
+        wire.partial_read_reg = reg;
+      }
+      CHECK(!imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
+      CHECK(!imu.configured() && !imu.reading().valid);
+      imu.poll(150);
+      CHECK(!imu.fresh(150) && imu.reading().at_ms == 0U);
+      wire.ignore_write_reg = wire.reject_read_reg = wire.partial_read_reg = -1;
+      CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
+      CHECK(!imu.fresh(150));
+      imu.poll(200);
+      CHECK(imu.fresh(200) && imu.reading().at_ms == 200U);
+    }
+  }
+}
+
 int main() {
   try {
     check_mpu_ghost_reads();
+    check_lsm9ds0_bdu_reinitialization();
     using desk_robot::BerryImu;
     using desk_robot::BerryModel;
     // External bus loss must invalidate current IRQ evidence, but preserve
