@@ -35,7 +35,11 @@ Generate the first-unit projection at the live head before allocating parts. Acc
 
 For all other order roles, carry out the same feature-level comparison. Prefer the commonly used, documented choice among options that satisfy the hard requirements, and compare delivered price with the full set of adapters included. Check the actual seller variant separately. The low-cost mux listing has conflicting photo evidence and the low-cost CO₂ page groups SCD40 and SCD41. [Mux listing](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board) · [CO₂ listing](https://electropeak.com/scd40-scd41-co2-gas-sensor-module)
 
-## First order and when to test
+## Bench Pilot Evaluation and Complete First Robot
+
+**Bench Pilot Evaluation:** `costs.scope = "evaluation"` covers exactly one GY-530 and one mux. The broader `--format pilot-cart-markdown` preview quotes one GY-530 and two muxes plus other historical bench candidates; neither preview authorizes checkout. The ElectroPeak [COM-05-067 mux](https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board) is quote-only HOLD because the pictured chip conflicts with the listing. The [DFR0954 amplifier](https://www.dfrobot.com/product-2614.html) is the historical sample quote source; other distributor links are comparisons, not interchangeable price receipts.
+
+**Complete First Robot:** `--format first-robot-markdown` covers eight GY-530 and two muxes, one dock and one shared station, with every required role and linked decision visible. Keep exactly two purchasing lists: owned or incoming (inspection pending where applicable), and still to buy or HOLD. These are alternative views of one budget, not additive carts. A purchased sample counts once toward compatible stock and prior spending. The $50 delivered cap includes prior spending, shipping and tax; the strict physical release remains HOLD.
 
 If a sample is needed, quote one **SEN-19-006 GY-530**, one **DFR0954 MAX98357A amplifier**, and one **Challenge CS20-02P110-04-1X speaker** as applicable. Use the owned WROOM and Pololu’s direct single-sensor example for the range check. Keep the full quantities and the remaining order lines visible while evaluating samples. Confirm identity, quantity, availability, and delivered cost for compatible parts before ordering. Schedule ordinary add-on calibration after delivery. Validate safe stopping, independent motor cutoff, and protected charging before using those functions.
 

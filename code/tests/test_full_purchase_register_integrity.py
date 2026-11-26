@@ -303,3 +303,44 @@ def test_source_ownership_has_exact_unique_roles_and_in_tree_paths():
                 assert path.resolve().is_relative_to(root)
                 assert path.is_file()
     assert len(all_ids) == len(set(all_ids)) == 63
+
+
+def test_first_unit_shopping_scopes_and_pilot_source_links():
+    """Keep historical sample references distinct from complete build quantities."""
+    import ast
+    import json
+
+    root = HARDWARE.parents[1]
+    checklist = (root / "docs/plans/first-unit-shopping-agent-checklist.md").read_text(
+        encoding="utf-8"
+    )
+    register = REGISTER.read_text(encoding="utf-8")
+    for doc in (checklist, register):
+        assert 'costs.scope = "evaluation"' in doc
+        assert "exactly one GY-530 and one mux" in doc
+        assert "one GY-530 and two muxes" in doc
+        assert "eight GY-530 and two muxes" in doc
+        assert "--format pilot-cart-markdown" in doc
+        assert "--format first-robot-markdown" in doc
+        assert "not additive carts" in doc
+        assert "strict physical release remains HOLD" in doc
+    assert register.count("| Legacy fit target |") == 2
+    assert "| Pilot |" not in register
+    plan = json.loads(PLAN.read_text(encoding="utf-8"))
+    parts = {part["id"]: part for part in plan["parts"]}
+    source = (root / "code/scripts/procurement_release.py").read_text(encoding="utf-8")
+    assignments = [
+        node.value for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "PILOT_SAMPLE_PRODUCTS"
+                for target in node.targets)
+    ]
+    assert len(assignments) == 1
+    pilot = ast.literal_eval(assignments[0])
+    for role, full_qty, sample_qty in (("cliff_obstacle", 8, 1), ("i2c_mux", 2, 2)):
+        assert parts[role]["per_robot"] == full_qty
+        assert pilot[role][4] == sample_qty
+    for role in ("cliff_obstacle", "i2c_mux", "amp", "speaker", "dock_ir_receivers"):
+        url = pilot[role][3]
+        assert url in checklist, role
+        assert url in register, role
