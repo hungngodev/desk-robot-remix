@@ -34,18 +34,19 @@ class TwoWire {
     return 1;
   }
   std::uint8_t endTransmission(bool stop = true) {
-    if (stop && next_stop_status != 0) {
+    // Like the main bus fake, defer combined-transfer validation to requestFrom.
+    if (!stop) {
+      read_address_ = address_;
+      read_pending_ = true;
+      return 0;
+    }
+    read_pending_ = false;
+    if (next_stop_status != 0) {
       const auto status = next_stop_status;
       next_stop_status = 0;
       return status;
     }
-    if (!stop && bytes_.size() == 1) {
-      read_address_ = address_;
-      read_register_ = bytes_[0];
-      read_pending_ = true;
-      return 0;
-    }
-    if (!stop || bytes_.size() != 2) return 4;
+    if (bytes_.size() != 2) return 4;
     writes.push_back({address_, bytes_[0], bytes_[1]});
     if (static_cast<int>(bytes_[0]) != ignore_write_reg)
       bank(address_)[bytes_[0]] = bytes_[1];
@@ -62,13 +63,15 @@ class TwoWire {
     rx_pos_ = 0;
     const bool pending = read_pending_;
     read_pending_ = false;
-    if (!pending || static_cast<int>(read_register_) == reject_read_reg ||
-        count == 0 || count > rx_buffer_.size()) return 0;
-    remaining_ = static_cast<int>(read_register_) == partial_read_reg
+    if (!pending || bytes_.size() != 1 || count == 0 ||
+        count > rx_buffer_.size()) return 0;
+    const auto read_register = bytes_[0];
+    if (static_cast<int>(read_register) == reject_read_reg) return 0;
+    remaining_ = static_cast<int>(read_register) == partial_read_reg
         ? count - 1U : count;
     auto& values = bank(read_address_);
     for (std::size_t i = 0; i < remaining_; ++i) {
-      const auto reg = static_cast<std::uint8_t>(read_register_ + i);
+      const auto reg = static_cast<std::uint8_t>(read_register + i);
       rx_buffer_[i] = values[reg];
       // The device clears INT_STATUS on the bus read, not CPU consumption.
       if (reg == 0x3a && (address == 0x68 || address == 0x69))
@@ -96,7 +99,6 @@ class TwoWire {
   }
   std::uint8_t address_ = 0;
   std::uint8_t read_address_ = 0;
-  std::uint8_t read_register_ = 0;
   std::array<std::uint8_t, 14> rx_buffer_{};
   std::size_t rx_pos_ = 0;
   std::size_t remaining_ = 0;

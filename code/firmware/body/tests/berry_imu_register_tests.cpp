@@ -367,6 +367,31 @@ int main() {
       CHECK(transfer.available() == 0 && transfer.read() == -1);
     }
 
+    // Both host Wire fakes defer malformed repeated START validation until
+    // requestFrom. Wrong-address reads preserve RX; a matching failure clears it.
+    for (unsigned length : {0U, 2U, 3U}) {
+      TwoWire transfer;
+      transfer.registers[0x3a] = 0x80;
+      transfer.beginTransmission(0x68);
+      CHECK(transfer.write(0x3b) == 1);
+      CHECK(transfer.endTransmission(false) == 0);
+      CHECK(transfer.requestFrom(0x68, 1) == 1);
+      transfer.beginTransmission(0x68);
+      for (unsigned i = 0; i < length; ++i)
+        CHECK(transfer.write(0x3a) == 1);
+      CHECK(transfer.endTransmission(false) == 0);
+      CHECK(transfer.requestFrom(0x69, 1) == 0);
+      CHECK(transfer.available() == 1);
+      CHECK(transfer.requestFrom(0x68, 1) == 0);
+      CHECK(transfer.available() == 0 && transfer.read() == -1);
+      CHECK(transfer.registers[0x3a] == 0x80 && transfer.writes.empty());
+      transfer.beginTransmission(0x68);
+      CHECK(transfer.write(0x3a) == 1);
+      CHECK(transfer.endTransmission(false) == 0);
+      CHECK(transfer.requestFrom(0x68, 1) == 1);
+      CHECK(transfer.read() == 0x80 && transfer.registers[0x3a] == 0);
+    }
+
     // The fake must not leak stale RX bytes after a failed acquisition.
     TwoWire fault_wire;
     fault_wire.registers[0x3b] = 0x40;
