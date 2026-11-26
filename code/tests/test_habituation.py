@@ -84,3 +84,39 @@ def test_rejected_time_does_not_renew_or_rewind():
 def test_invalid_configuration(window, capacity):
     with pytest.raises(ValueError):
         HabituationWindow(window_s=window, capacity=capacity)
+
+
+def test_equal_timestamp_observations_count_without_rewinding():
+    model = HabituationWindow[str](window_s=10)
+    assert model.record("mug", 10)
+    assert model.record("mug", 10)
+    assert model.recent_repeats(10) == {"mug": 2}
+    assert model.refresh_if_repeated("mug", 10)
+    assert model.recent_repeats(10) == {"mug": 3}
+    assert model.recent_repeats(9) == {}
+
+
+@pytest.mark.parametrize("now", [True, math.nan, math.inf, -math.inf, 10**1000, "10"])
+def test_invalid_repeat_query_is_empty_and_nonmutating(now):
+    model = HabituationWindow[str]()
+    assert model.record("mug", 9)
+    assert model.record("mug", 10)
+    assert model.recent_repeats(now) == {}
+    assert model.recent_repeats(10) == {"mug": 2}
+
+
+def test_reset_retires_epoch_even_if_the_same_epoch_is_reintroduced():
+    model = HabituationWindow[str]()
+    model.begin_epoch((1, None))
+    model.record("mug", 1)
+    model.reset()
+    model.record("key", 2)
+    model.begin_epoch((1, None))
+    assert not model.refresh_if_repeated("key", 3)
+
+
+def test_expired_candidate_cannot_be_revived_by_a_regressing_query():
+    model = HabituationWindow[str](window_s=10)
+    model.record("mug", 10)
+    assert not model.refresh_if_repeated("mug", 20)
+    assert not model.refresh_if_repeated("mug", 19)
