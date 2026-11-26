@@ -49,6 +49,14 @@ struct FakeWire {
     }
     return 4;
   }
+  // Match the pinned Arduino-ESP32 2.0.17 overload set. The unused
+  // overloads are deleted so an ambiguous or incorrect address cannot
+  // silently compile only against this host fake.
+  std::size_t requestFrom(uint16_t, std::size_t, bool) = delete;
+  uint8_t requestFrom(uint16_t, uint8_t, bool) = delete;
+  uint8_t requestFrom(uint16_t, uint8_t, uint8_t) = delete;
+  uint8_t requestFrom(uint8_t, uint8_t, uint8_t) = delete;
+  uint8_t requestFrom(int, int, int) = delete;
   std::size_t requestFrom(uint8_t address, std::size_t count, bool stop) {
     ++reads;
     size_ = pos_ = 0;
