@@ -12,6 +12,7 @@ import io
 import json
 import math
 import os
+import secrets
 import stat
 from pathlib import Path
 from types import ModuleType
@@ -337,6 +338,34 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
 
 
 
+def _publish_candidate(folder_fd: int, name: str, contents: str) -> None:
+    """Publish a complete, synced candidate without replacing prior evidence."""
+    temporary = f".dock-candidate-{secrets.token_hex(16)}.tmp"
+    fd = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600, dir_fd=folder_fd,
+    )
+    try:
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                fd = -1
+                output.write(contents)
+                output.flush()
+                os.fsync(output.fileno())
+        finally:
+            if fd >= 0:
+                os.close(fd)
+        # Unlike replace(), link() refuses to overwrite existing evidence.
+        # Both names are anchored to the same verified directory descriptor.
+        os.link(
+            temporary, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd,
+            follow_symlinks=False,
+        )
+    finally:
+        os.unlink(temporary, dir_fd=folder_fd)
+    os.fsync(folder_fd)
+
+
 def write_private_dock_candidate(target: Path, candidate: dict) -> None:
     """Write a review-only intrinsics candidate to one private local file.
 
@@ -377,26 +406,7 @@ def write_private_dock_candidate(target: Path, candidate: dict) -> None:
         if (directory.st_uid != os.geteuid()
                 or stat.S_IMODE(directory.st_mode) & 0o022):
             raise ValueError("Dock candidate parent must be owned and private to writers")
-        created = False
-        try:
-            fd = os.open(
-                absolute.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600, dir_fd=folder_fd,
-            )
-            created = True
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as output:
-                    fd = -1
-                    output.write(contents)
-                    output.flush()
-                    os.fsync(output.fileno())
-            finally:
-                if fd >= 0:
-                    os.close(fd)
-        except BaseException:
-            if created:
-                os.unlink(absolute.name, dir_fd=folder_fd)
-            raise
+        _publish_candidate(folder_fd, absolute.name, contents)
     finally:
         os.close(folder_fd)
 

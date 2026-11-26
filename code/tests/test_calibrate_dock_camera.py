@@ -724,3 +724,46 @@ def test_fitted_radtan_order_preserves_metric_floor_rays():
         assert point.x_mm == pytest.approx(100*(1 - down)/(1 + down), abs=0.05)
         assert point.y_mm == pytest.approx(-100*2**0.5*right/(1 + down), abs=0.05)
     assert candidate["physical_acceptance_pass"] is False
+
+
+def test_private_dock_candidate_crash_before_publication(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    target = tmp_path / "intrinsics.json"
+    candidate = unapproved_dock_candidate()
+    child = """
+import importlib.util
+import os
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('calibration', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+# Kill the process before the staging file's contents are synced.
+os.fsync = lambda fd: os._exit(73)
+module.write_private_dock_candidate(Path(sys.argv[2]), __import__('json').loads(sys.argv[3]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", child, str(SOURCE), str(target), json.dumps(candidate)],
+        check=False, timeout=10,
+    )
+    assert result.returncode == 73
+    assert not target.exists()
+    # A crashed staging file cannot block a fresh candidate publication.
+    fitter().write_private_dock_candidate(target, candidate)
+    assert json.loads(target.read_text(encoding="utf-8")) == candidate
+
+
+def test_private_dock_candidate_sync_failure_leaves_no_visible_file(tmp_path, monkeypatch):
+    camera = fitter()
+    target = tmp_path / "intrinsics.json"
+
+    def fail_sync(fd):
+        raise OSError("simulated storage failure")
+
+    monkeypatch.setattr(camera.os, "fsync", fail_sync)
+    with pytest.raises(OSError, match="simulated storage failure"):
+        camera.write_private_dock_candidate(target, unapproved_dock_candidate())
+    assert list(tmp_path.iterdir()) == []
