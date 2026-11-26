@@ -8,12 +8,14 @@ from urllib.parse import unquote
 SELECTED_SENSOR_NAMES = {
     "cliff_obstacle": "VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
     "imu": "MPU6050 GY521 compatible six axis breakout",
+    "ads1115": "ADS1115 4 channel ADC breakout",
     "wroom": "ESP32 WROOM32 development board",
     "xiao_sense": "XIAO ESP32S3 Sense camera + microphone",
 }
 _REJECTED_SENSOR_IDENTITIES = {
     "cliff_obstacle": ("vl53l4cd", "vl6180x", "tcrt5000", "sen19018"),
     "imu": ("berryimu",),
+    "ads1115": ("ads1015",),
     "wroom": ("esp32c3", "c3supermini"),
     "xiao_sense": ("esp32c3", "c3supermini"),
 }

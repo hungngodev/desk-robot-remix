@@ -18,6 +18,8 @@ from procurement_policy import (  # noqa: E402
     ("cliff_obstacle", "VL53L0X GY-530 alternate PCB"),
     ("imu", "MPU6050 or BerryIMU"),
     ("imu", {"name": "MPU6050"}),
+    ("ads1115", "ADS1015 4 channel ADC breakout"),
+    ("ads1115", "ADS1115 or ADS1015 4 channel ADC breakout"),
 ])
 def test_changed_selected_plan_identity_is_held(role, replacement):
     assert not selected_sensor_identity_matches(role, replacement, {})
@@ -31,6 +33,9 @@ def test_changed_selected_plan_identity_is_held(role, replacement):
     ("cliff_obstacle", "model", "TCRT5000"),
     ("imu", "manufacturer", "BerryIMU"),
     ("imu", "model", "Berry-IMU v3"),
+    ("ads1115", "model", "ADS1015"),
+    ("ads1115", "sku", "ADS-1015"),
+    ("ads1115", "product_url", "https://example.com/ADS%31%30%31%35"),
 ])
 def test_conflicting_reviewed_sensor_identity_is_held(role, field, replacement):
     assert not selected_sensor_identity_matches(
@@ -55,3 +60,10 @@ def test_historical_notes_and_unrelated_roles_are_not_substitutions():
         "imu", SELECTED_SENSOR_NAMES["imu"], historical
     )
     assert selected_sensor_identity_matches("head_touch", "AT42QT1010", historical)
+
+
+def test_ads1115_generic_candidate_is_not_a_frozen_supplier():
+    assert selected_sensor_identity_matches(
+        "ads1115", "ADS1115 4 channel ADC breakout",
+        {"sku": "COM-05-045", "model": "ADS1115", "notes": "ADS1015 rejected"},
+    )
