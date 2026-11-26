@@ -367,8 +367,6 @@ def export_kit(
 ) -> dict:
     source_dir = root / "docs/cad/remixes"
     out = output_dir or source_dir
-    if not shutil.which(openscad):
-        raise FileNotFoundError(f"OpenSCAD is not installed: {openscad}")
     sources = (
         ("adapter_stls", source_dir / "one_robot_adapter_kit.scad", ADAPTERS),
         ("fit_stls", source_dir / "remaining_fit_gauges.scad", GAUGES),
@@ -378,9 +376,11 @@ def export_kit(
         ("dock_stls", source_dir / "dock/dock_passive_fit.scad", DOCKS),
     )
     _reject_fit_kit_output_aliases(out)
-    out.mkdir(parents=True, exist_ok=True)
     # Fail closed: a failed rebuild cannot retain an old success manifest.
     (out / "fit_kit_manifest.json").unlink(missing_ok=True)
+    if not shutil.which(openscad):
+        raise FileNotFoundError(f"OpenSCAD is not installed: {openscad}")
+    out.mkdir(parents=True, exist_ok=True)
     rendered: list[dict] = []
     # No incomplete candidate part gets published if any SCAD render fails.
     with tempfile.TemporaryDirectory(prefix="desk-fit-", dir=out) as folder:
@@ -450,7 +450,7 @@ def export_kit(
         "parts": rendered,
     }
     (out / "fit_kit_manifest.json").write_text(
-        json.dumps(report, indent=2) + "\n", encoding="utf-8",
+        json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8",
     )
     return report
 

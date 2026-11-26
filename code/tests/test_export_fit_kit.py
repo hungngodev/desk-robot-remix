@@ -1672,3 +1672,109 @@ def test_scad_source_reader_rejects_aliases_and_special_files(tmp_path, kind):
         os.mkfifo(source)
     with pytest.raises(ValueError, match="SCAD source"):
         module()._read_scad_source(root, source)
+
+
+@pytest.fixture
+def determinism_checkout(tmp_path):
+    checkout = tmp_path / "checkout"
+    folder = checkout / "docs/cad/remixes"
+    for filename in (
+        "one_robot_adapter_kit.scad",
+        "remaining_fit_gauges.scad",
+        "speaker_rect_fit_gauge.scad",
+        "mg90s_pocket_fit_gauges.scad",
+        "vl53l0x_gy530_fit_gauge.scad",
+        "dock/dock_passive_fit.scad",
+    ):
+        path = folder / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"// {filename}\ncube([1, 1, 1]);\n", encoding="utf-8")
+    return checkout
+
+
+@pytest.fixture
+def deterministic_fit_kit(monkeypatch, tmp_path, determinism_checkout):
+    source = module()
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+
+    def render(command, **kwargs):
+        Path(command[command.index("-o") + 1]).write_bytes(tetra_stl())
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(source.subprocess, "run", render)
+    output = tmp_path / "first output"
+    report = source.export_kit(determinism_checkout, output_dir=output)
+    return source, determinism_checkout, output, report
+
+
+def test_fit_kit_manifest_bytes_repeat_across_output_paths(deterministic_fit_kit, tmp_path):
+    source, checkout, output, report = deterministic_fit_kit
+    manifest = output / "fit_kit_manifest.json"
+    original = manifest.read_bytes()
+    other = tmp_path / "second output"
+    assert source.export_kit(checkout, output_dir=other) == report
+    assert (other / manifest.name).read_bytes() == original
+    assert source.export_kit(checkout, output_dir=output) == report
+    assert manifest.read_bytes() == original
+    assert source.verify_fit_kit(checkout, output_dir=other) == report
+    assert source.verify_fit_kit(checkout, output_dir=output) == report
+
+
+@pytest.mark.parametrize("field", (
+    "source", "source_sha256", "source_license", "mesh_sha256",
+    "triangles", "manifold_edges", "bbox_mm",
+))
+def test_fit_kit_verify_rejects_missing_metric(deterministic_fit_kit, field):
+    source, checkout, output, report = deterministic_fit_kit
+    assert source.verify_fit_kit(checkout, output_dir=output) == report
+    del report["parts"][0][field]
+    (output / "fit_kit_manifest.json").write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unexpected fit kit part fields"):
+        source.verify_fit_kit(checkout, output_dir=output)
+
+
+@pytest.mark.parametrize("artifact", ("source", "location"))
+def test_fit_kit_verify_rejects_missing_input(deterministic_fit_kit, artifact):
+    source, checkout, output, report = deterministic_fit_kit
+    root = checkout if artifact == "source" else output
+    (root / report["parts"][0][artifact]).unlink()
+    with pytest.raises(FileNotFoundError):
+        source.verify_fit_kit(checkout, output_dir=output)
+    if artifact == "source":
+        with pytest.raises(FileNotFoundError):
+            source.export_kit(checkout, output_dir=output)
+        assert not (output / "fit_kit_manifest.json").exists()
+
+
+def test_fit_kit_missing_renderer_invalidates_old_manifest(deterministic_fit_kit, monkeypatch):
+    source, checkout, output, _ = deterministic_fit_kit
+    manifest = output / "fit_kit_manifest.json"
+    assert manifest.is_file()
+    monkeypatch.setattr(source.shutil, "which", lambda _: None)
+    with pytest.raises(FileNotFoundError, match="OpenSCAD is not installed"):
+        source.export_kit(checkout, output_dir=output)
+    assert not manifest.exists()
+
+
+def test_fit_kit_nonfinite_metrics_never_publish_manifest(deterministic_fit_kit, monkeypatch):
+    source, checkout, output, _ = deterministic_fit_kit
+    monkeypatch.setattr(source, "mesh_bounds_mm", lambda _: {"dimensions_mm": [float("nan")]})
+    with pytest.raises(ValueError, match="Out of range float values"):
+        source.export_kit(checkout, output_dir=output)
+    assert not (output / "fit_kit_manifest.json").exists()
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_fit_kit_real_renderer_manifest_bytes_repeat(determinism_checkout, tmp_path):
+    source = module()
+    first = tmp_path / "first output"
+    second = tmp_path / "second output"
+    assert source.export_kit(determinism_checkout, output_dir=first) == source.export_kit(
+        determinism_checkout, output_dir=second,
+    )
+    assert (first / "fit_kit_manifest.json").read_bytes() == (
+        second / "fit_kit_manifest.json"
+    ).read_bytes()
+    assert source.verify_fit_kit(determinism_checkout, output_dir=first) == (
+        source.verify_fit_kit(determinism_checkout, output_dir=second)
+    )
