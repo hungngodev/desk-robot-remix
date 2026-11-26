@@ -699,6 +699,46 @@ void exact_threshold_jitter_never_clears_latch() {
   }
 }
 
+void single_value_clearance_window_boundaries() {
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    auto cfg = config();
+    const bool front = lane == desk_robot::kFloorSensorCount;
+    const std::uint16_t safe = front ? 101U : 45U + lane;
+    // An inclusive floor interval may contain exactly one value. A front
+    // interval needs a one-mm gap because its obstacle bound is exclusive.
+    if (front) {
+      cfg.front_obstacle_mm = safe - 1;
+      cfg.front_max_mm = safe;
+    } else {
+      cfg.floor[lane] = {safe, safe};
+    }
+    for (const int offset : {-2, -1, 0, 1, 2}) {
+      CliffGuard guard;
+      CHECK(guard.configure(cfg));
+      for (std::uint8_t peer = 0; peer < desk_robot::kCliffSensorCount; ++peer)
+        guard.sample(peer, peer == lane ? safe : (peer == 4 ? 300 : 45), true, 100);
+      CHECK(guard.try_rearm(100));
+      const auto raw = static_cast<std::uint16_t>(safe + offset);
+      const auto expected = offset == 0 ? CliffFault::None
+          : (!front ? CliffFault::FloorOutOfRange
+                    : (offset < 0 ? CliffFault::FrontObstacle : CliffFault::FrontOutOfRange));
+      guard.sample(lane, raw, true, 101);
+      CHECK(guard.fault() == expected);
+      CHECK(guard.fault_sensor() == (offset == 0 ? desk_robot::kNoFaultSensor : lane));
+      const auto diagnostic = guard.diagnostic(lane, 101);
+      CHECK(diagnostic.present && diagnostic.distance_mm == raw && diagnostic.age_ms == 0);
+      CHECK(diagnostic.valid == (offset == 0));
+      CHECK(guard.evaluate(101) == (offset == 0));
+      CHECK(guard.try_rearm(101) == (offset == 0));
+      guard.sample(lane, safe, true, 102);
+      CHECK(guard.diagnostic(lane, 102).valid);
+      CHECK(guard.evaluate(102) == (offset == 0));
+      CHECK(guard.try_rearm(102));
+      CHECK(guard.evaluate(102));
+    }
+  }
+}
+
 void recovery_requires_every_critical_lane_safe() {
   CliffGuard guard;
   ready(guard, 100);
@@ -812,6 +852,8 @@ int main(int argc, char** argv) {
        no_return_transient_latches_before_next_sweep},
       {"exact_threshold_jitter_never_clears_latch",
        exact_threshold_jitter_never_clears_latch},
+      {"single_value_clearance_window_boundaries",
+       single_value_clearance_window_boundaries},
       {"recovery_requires_every_critical_lane_safe",
        recovery_requires_every_critical_lane_safe},
       {"missing_lane_blocks_startup_and_bus_recovery",
