@@ -12,7 +12,6 @@ from collections.abc import AsyncIterable
 from io import BytesIO
 from urllib.parse import urlsplit
 
-
 MAX_MODEL_RESPONSE_BYTES = 2_000_000
 
 
