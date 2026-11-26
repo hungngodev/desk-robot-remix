@@ -69,11 +69,17 @@ def test_secondary_gpio_contract(tmp_path, variant):
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_22", "reserved GPIO"),
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_46", "reserved GPIO"),
             ("BOOT_BUTTON_GPIO GPIO_NUM_0", "BOOT_BUTTON_GPIO GPIO_NUM_9", "GPIO collision"),
+            # Digital I2S disable must not imply a qualified physical amp shutdown pin.
+            ("AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_NC", "AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_44",
+             "Sense amplifier has no qualified MCU shutdown connection"),
         ]
-        board_source = (HEAD / variant / "desk_robot_sense.cc").read_text()
-        assert "SingleLed heart(RGB_HEART_GPIO)" in board_source
     for before, after, diagnostic in mutations:
         assert original.count(before) == 1
         result = compile_header(original.replace(before, after))
         assert result.returncode != 0, after
         assert diagnostic in result.stderr, result.stderr
+
+
+def test_sense_heart_uses_reserved_gpio():
+    board_source = (HEAD / "sense" / "desk_robot_sense.cc").read_text()
+    assert "SingleLed heart(RGB_HEART_GPIO)" in board_source
