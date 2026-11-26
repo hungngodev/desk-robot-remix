@@ -1,9 +1,13 @@
 # Five copies of one core
 
-Updated 2026-11-03: the proposed core has Sense camera/PDM mic, owned SSD1306,
-amplifier/speaker, two 28BYJ-48/ULN2003 drives, two positional MG90S servos,
-four floor sensors, a separate front ToF, mux and lift/gripper, WROOM and regulated power. Copy the first **physically validated**
-build four times. Hats and costumes are removable covers; keep lens, acoustic
+The core retains the Mac brain, XIAO ESP32S3 Sense camera/PDM mic, owned
+SSD1306, amplifier/speaker, ESP32 WROOM32 body safety, two positional MG90S
+servos, lift/gripper, and regulated power. The selected eight VL53L0X layout has
+four downward cliff sensors, one forward obstacle sensor and three read-only
+side/rear sensors. The drivetrain profile must be physically qualified; the
+guarded DRV8833 option uses LOW/LOW coast, not active braking. Keep the physical
+HOLD and the first-unit $50 delivered-cost cap. Copy the first **physically
+validated** build four times. Hats and costumes are removable covers; keep lens, acoustic
 ports, OLED, USB, antenna area, power switch and full arm/track travel clear.
 Avoid heavy or tall decorations that tip the rover. No costume CAD has been made.
 
@@ -175,15 +179,31 @@ its real addresses and calibration paths. Do not overwrite an existing setup.
 | robot-04 | Byte | DESK_ROBOT_HEAD_04_TOKEN | `am_michael` |
 | robot-05 | Bob | DESK_ROBOT_HEAD_05_TOKEN | `af_nicole` |
 
-Names/personas may change without changing the core. Set actual LAN addresses
-and unique Xiaozhi device IDs, then reference separately measured calibration
-files. Hardware examples keep motion disabled. An identical printed core does
-not imply identical camera pose, motor polarity or servo endpoints.
-The selected `config/fleet.hardware.example.toml` and both generic
-`fleet.example.toml` and `robots.example.toml` assign the five distinct
-voices above. The Mac native runner refuses duplicate voice assignments
-for provisioned devices while allowing unbuilt siblings to remain without
-`device_id`. Do not flash a second pet using the first pet's identity.
+Names/personas may change without changing the core. Keep each configured
+`id` stable: it selects the robot in CLI/API requests and private memory.
+Robot IDs must contain 1 to 40 ASCII letters, digits, underscores or hyphens;
+Windows-reserved names (CON, PRN, AUX, NUL, COM1 through COM9, LPT1 through
+LPT9) are rejected, regardless of case. IDs must be distinct even after
+case folding. For example, `robot-01` and `ROBOT-01` cannot coexist.
+Use the exact configured spelling for routing; the collision check does
+not create case-insensitive aliases.
+
+Set actual LAN addresses and unique Xiaozhi `device_id` values, then reference
+separately measured calibration files. Device identity collision checks trim
+outer whitespace and case-fold; MAC-shaped IDs in compact, colon-separated,
+or hyphen-separated form compare as the same twelve hexadecimal digits.
+For example, `AABBCCDDEEFF` and `aa:bb:cc:dd:ee:ff` are duplicates.
+Non-MAC IDs retain their separators for comparison. This normalization is
+only for collision detection; preserve the actual device ID for wire routing.
+Hardware configurations also require distinct head hosts, credential
+environment names, and nonblank distinct voices. Unbuilt siblings may retain
+an empty `device_id`.
+
+Hardware examples keep motion disabled. An identical printed core does not
+imply identical camera pose, motor polarity or servo endpoints. The selected
+`config/fleet.hardware.example.toml` and both generic `fleet.example.toml`
+and `robots.example.toml` assign the five distinct voices above. Do not
+flash a second pet using the first pet's identity.
 [Local AI setup](local-ai.md) explains the one Xiaozhi `CustomTTS` voice
 owner, the unsupported provider hold and the required actual speaker
 verification. Five distinct configured voice strings do not prove five
@@ -225,7 +245,10 @@ uv run desk-robot --config config/local.toml chat robot-01 robot-02 robot-03 rob
 
 Run the chat in a second terminal while the coordinator is running. The CLI
 posts to `POST /v1/conversation` using the configured operator credential.
-Stop group speech with the authenticated POST endpoint (not the per-robot
+Use exact configured robot IDs; an otherwise valid request containing an
+unconfigured ID returns HTTP 404. The optional CLI `--turns` argument is
+bounded by the group-size limit described above. Stop group speech with the
+authenticated POST endpoint (not the per-robot
 motion-stop CLI command). Supply the operator token from the private environment:
 
 ```sh
