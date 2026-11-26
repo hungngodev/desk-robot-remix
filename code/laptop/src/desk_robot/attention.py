@@ -119,6 +119,14 @@ class AttentionLedger:
             state.prior_operator_topic = ""
             state.prior_operator_at = -math.inf
             state.prior_operator_state = ""
+            # A fresh operator topic is not a handling interruption. Retire
+            # old dialogue text while retaining source ordering and safety.
+            state.interrupted_asr = None
+            state.asr = ""
+            state.asr_consent_generation = None
+            state.last_heard_id = None
+            state.asr_order_at = max(state.asr_order_at, at)
+            state.sent = ""
         state.generation += 1
         state.topic = cleaned
         state.topic_origin = origin
