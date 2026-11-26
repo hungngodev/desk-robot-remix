@@ -159,10 +159,26 @@ def _timeline_identifiers_valid(channel: object, kind: object) -> bool:
     return _plain_identifier(channel) and (kind is None or _plain_identifier(kind))
 
 
-def _valid_memory_identity(entry: Memory) -> bool:
-    return all(_plain_identifier(value) for value in (
-        entry.robot_id, entry.event_id, entry.source_robot, entry.kind,
-    ))
+def _bounded_number(value: object, upper: float) -> bool:
+    """Check numeric bounds without coercion, including bool and huge integers."""
+    return type(value) in (int, float) and 0 <= value <= upper
+
+
+def _valid_memory_record(entry: Memory, now_wall: float) -> bool:
+    return (
+        all(_plain_identifier(value) for value in (
+            entry.robot_id, entry.event_id, entry.source_robot, entry.kind, entry.summary,
+        ))
+        and _bounded_number(entry.observed_at, now_wall + 60)
+        and _bounded_number(entry.confidence, 1)
+    )
+
+
+def _valid_core_fact(fact: CoreFact, now_wall: float) -> bool:
+    return (
+        all(_plain_identifier(value) for value in (fact.robot_id, fact.slot, fact.value))
+        and _bounded_number(fact.updated_at, now_wall + 60)
+    )
 
 
 def _recent_memory_context(
@@ -179,7 +195,8 @@ def _recent_memory_context(
     memory_used = 0
     now_wall = time.time()
     for entry in sorted(
-        filter(_valid_memory_identity, recent), key=lambda item: (
+        (entry for entry in recent if _valid_memory_record(entry, now_wall)),
+        key=lambda item: (
             item.event_id == topical_event_id, item.observed_at, item.event_id,
         ), reverse=True,
     ):
@@ -214,9 +231,9 @@ def _core_memory_context(core: Sequence[CoreFact]) -> str:
     seen_slots: set[str] = set()
     core_parts: list[str] = []
     core_used = 0
+    now_wall = time.time()
     for item in sorted(
-        (fact for fact in core if _plain_identifier(fact.robot_id)
-         and _plain_identifier(fact.slot)),
+        (fact for fact in core if _valid_core_fact(fact, now_wall)),
         key=lambda fact: (fact.updated_at, fact.slot), reverse=True,
     ):
         if item.slot in seen_slots:

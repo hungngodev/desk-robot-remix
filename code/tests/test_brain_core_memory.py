@@ -383,3 +383,33 @@ def test_operator_episode_edits_retract_only_matching_live_asr_cues(settings, to
         finally:
             runtime.multimodal = original_visual
             runtime.attention = original_attention
+
+
+@pytest.mark.parametrize(
+    "bad", [float("nan"), float("inf"), -float("inf"), True, False, 10**1000, -1, "bad", None],
+    ids=["nan", "inf", "negative_inf", "true", "false", "huge", "negative", "text", "none"],
+)
+def test_corrupt_core_clock_cannot_shadow_valid_preference(bad):
+    import time
+    from dataclasses import replace
+
+    from desk_robot.brain_context import compose_brain_context
+    from desk_robot.memory import CoreFact
+
+    good = CoreFact("pet1", "nickname", "valid", time.time() - 10)
+    corrupt = replace(good, updated_at=bad, value="corrupt")
+    for order in ([corrupt, good], [good, corrupt]):
+        assert compose_brain_context([], order, []).core == "nickname: valid"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, None, 23, " "])
+def test_corrupt_core_value_cannot_shadow_valid_preference(bad):
+    import time
+    from dataclasses import replace
+
+    from desk_robot.brain_context import compose_brain_context
+    from desk_robot.memory import CoreFact
+
+    good = CoreFact("pet1", "nickname", "valid", time.time() - 10)
+    corrupt = replace(good, updated_at=time.time(), value=bad)
+    assert compose_brain_context([], [corrupt, good], []).core == "nickname: valid"

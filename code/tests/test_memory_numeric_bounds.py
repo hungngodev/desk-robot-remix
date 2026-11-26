@@ -181,3 +181,25 @@ def test_spatial_attach_rejects_hostile_identity_or_clock(tmp_path, field, bad):
     result = spatial.last_seen("robot-1", "key", now=now)
     assert result is not None and result.status == "pending_localization"
     assert spatial.last_seen("robot-10", "key", now=now) is None
+
+
+@pytest.mark.parametrize("field", ["observed_at", "confidence"])
+@pytest.mark.parametrize(
+    "bad", [float("nan"), float("inf"), -float("inf"), True, False, 10**1000, -1, "bad", None],
+    ids=["nan", "inf", "negative_inf", "true", "false", "huge", "negative", "text", "none"],
+)
+def test_prompt_rejects_invalid_episode_numeric_before_deduplication(field, bad):
+    import time
+    from dataclasses import replace
+
+    from desk_robot.brain_context import compose_brain_context
+    from desk_robot.memory import Memory
+
+    good = Memory(
+        "pet1", "same", "pet1", True, "touch", "valid observation", time.time() - 10, 0.8,
+    )
+    corrupt = replace(good, **{field: bad, "summary": "corrupt observation"})
+    for order in ([corrupt, good], [good, corrupt]):
+        result = compose_brain_context(order, [], [], topical_event_id="same").recent
+        assert "valid observation" in result
+        assert "corrupt observation" not in result
