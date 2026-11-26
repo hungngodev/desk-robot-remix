@@ -13,6 +13,58 @@ static void check_floor(std::int64_t actual, std::int64_t numerator,
   CHECK(actual * denominator <= numerator);
   CHECK(numerator < (actual + 1) * denominator);
 }
+static void check_accessory_frame_integrity() {
+  // Independent known CRC vectors: BE EF -> 92, 00 00 -> 81.
+  std::uint8_t frame[6] = {0xbe, 0xef, 0x92, 0, 0, 0x81};
+  CHECK(desk_robot::sht41_frame_crc_valid(frame));
+  for (unsigned byte = 0; byte < 6; ++byte) {
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      const auto mask = static_cast<std::uint8_t>(1U << bit);
+      frame[byte] ^= mask;
+      CHECK(!desk_robot::sht41_frame_crc_valid(frame));
+      frame[byte] ^= mask;
+      CHECK(desk_robot::sht41_frame_crc_valid(frame));
+    }
+  }
+  for (unsigned raw = 0; raw <= 0xffffU; ++raw) {
+    const auto word = static_cast<std::uint16_t>(raw);
+    CHECK(desk_robot::ads1115_force_raw_valid(word) ==
+          (raw != 32767U && raw != 32768U));
+    CHECK(desk_robot::ads1115_completed_for_channel(word, 0) == (raw == 0xc383U));
+    CHECK(desk_robot::ads1115_completed_for_channel(word, 1) == (raw == 0xd383U));
+    CHECK(!desk_robot::ads1115_completed_for_channel(word, 2));
+    CHECK(!desk_robot::ads1115_completed_for_channel(word, 255));
+  }
+}
+static void check_simultaneous_gesture_clipping() {
+  // Every nonempty subset of clipped quadrants invalidates the entire swipe,
+  // including a saturated orthogonal pair and clipping between FIFO batches.
+  for (unsigned mask = 0; mask < 16; ++mask) {
+    desk_robot::GestureDecoder g;
+    using Action = desk_robot::GestureDecoder::PollAction;
+    std::uint8_t direction = 99;
+    CHECK(g.poll_status(1, 100, direction) == Action::Read);
+    g.begin_batch(100);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    std::uint8_t q[] = {90, 90, 85, 85};
+    for (unsigned i = 0; i < 4; ++i)
+      if (mask & (1U << i)) q[i] = 255;
+    g.push(q[0], q[1], q[2], q[3]);
+    g.begin_batch(200);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+    CHECK(g.poll_status(0, 201, direction) == Action::None);
+    CHECK(direction == (mask == 0 ? 1 : 0));
+    CHECK(g.poll_status(0, 202, direction) == Action::None && direction == 0);
+  }
+  // Entirely dark axes must return before ratio division.
+  desk_robot::GestureDecoder g;
+  g.push(0, 0, 100, 100);
+  g.push(100, 100, 0, 0);
+  g.push(0, 0, 0, 0);
+  CHECK(g.finish() == 0);
+}
 static void check_register_precision() {
   for (std::uint32_t code = 0; code <= 0xffffU; ++code) {
     const auto raw = static_cast<std::uint16_t>(code);
@@ -318,6 +370,8 @@ static void check_bmp280_trim_registers() {
 
 int main() {
   try {
+    check_accessory_frame_integrity();
+    check_simultaneous_gesture_clipping();
     check_register_precision();
     check_bmp280_boundaries();
     check_bmp280_zero_divisor();

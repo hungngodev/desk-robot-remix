@@ -409,7 +409,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     f.valid_mask = 0;
   // Conversion register codes 0x7fff and 0x8000 are signed full-scale
   // rails, not OS status bits. Reject them as unqualified FSR evidence.
-  } else if (fresh && value != 0x7fffU && value != 0x8000U) {
+  } else if (fresh && ads1115_force_raw_valid(value)) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
     // Timestamp conservatively at the start of the single shot, not the
@@ -462,8 +462,7 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
     else { const int v = wire_->read(); if (v < 0) c.valid = false;
            else b[i] = static_cast<std::uint8_t>(v); }
   }
-  c.valid = c.valid && sensirion_crc(b, 2) == b[2] &&
-            sensirion_crc(b + 3, 2) == b[5];
+  c.valid = c.valid && sht41_frame_crc_valid(b);
   if (c.valid) {
     const auto t = static_cast<std::uint16_t>((b[0] << 8) | b[1]);
     const auto h = static_cast<std::uint16_t>((b[3] << 8) | b[4]);

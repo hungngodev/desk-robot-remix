@@ -13,6 +13,10 @@ inline std::uint8_t sensirion_crc(const std::uint8_t* bytes, unsigned count) {
   }
   return crc;
 }
+inline bool sht41_frame_crc_valid(const std::uint8_t (&bytes)[6]) {
+  return sensirion_crc(bytes, 2) == bytes[2] &&
+         sensirion_crc(bytes + 3, 2) == bytes[5];
+}
 inline int sht_temp_centi(std::uint16_t raw) {
   return -4500 + static_cast<int>((17500L * raw) / 65535L);
 }
@@ -86,6 +90,10 @@ constexpr bool ads1115_completed_for_channel(std::uint16_t config,
                                              std::uint8_t channel) {
   return channel < 2U && (config & 0x8000U) != 0U &&
     (config & 0x7fffU) == (channel == 0U ? 0x4383U : 0x5383U);
+}
+
+constexpr bool ads1115_force_raw_valid(std::uint16_t raw) {
+  return raw != 0x7fffU && raw != 0x8000U;
 }
 
 struct ForceRaw {
