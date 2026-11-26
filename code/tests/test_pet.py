@@ -9936,6 +9936,9 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
         assert stopped == ["robot-01", "robot-01"]
         assert state.safety_fault_events == 2
         assert state.last_safety_fault == "floor_out_of_range"
+        assert state.session_habituation.recent_repeats(fake_now[0]) == {
+            "safety_fault": 2,
+        }
         hub.frames["robot-01"].append(CameraEvidence(b"jpeg2", fake_now[0], 0.0, "safety_fault"))
         pet._consider_speech(
             "robot-01", SceneChange("key", "A bright silver edge item appeared", 0.99),
@@ -9954,6 +9957,27 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
         # Unrelated user conversation reply remains unaffected
         reply = await RepeatChat().reply([{"role": "user", "content": "hello robot"}])
         assert reply == "I am doing great, thanks!"
+
+        # A quiet interval expires optional context, never the local safety latch.
+        last_arrival = fake_now[0]
+        fake_now[0] = last_arrival + 899.999
+        assert state.session_habituation.recent_repeats(fake_now[0]) == {
+            "safety_fault": 2,
+        }
+        fake_now[0] = last_arrival + 900.0
+        assert state.session_habituation.recent_repeats(fake_now[0]) == {}
+        assert state.last_safety_fault == "floor_out_of_range"
+        await pet._observe_body_safety("robot-01", 31, fault_body)
+        assert stopped == ["robot-01", "robot-01"]
+        assert state.safety_fault_events == 2
+
+        # Only a separately reported local clear starts a new fault episode.
+        await pet._observe_body_safety("robot-01", 31, clear_body)
+        await pet._observe_body_safety("robot-01", 31, fault_body)
+        assert stopped == ["robot-01", "robot-01", "robot-01"]
+        assert state.safety_fault_events == 3
+        assert state.session_habituation.recent_repeats(fake_now[0]) == {}
+        assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
     finally:
         state.enabled = False
         await pet.close()
@@ -10105,8 +10129,15 @@ async def test_song_stream_survives_cliff_cancellation_of_key_pickup(fleet, tmp_
 
 @pytest.mark.parametrize("source", ["session", "camera"])
 async def test_activity_repeated_background_chooses_silence_without_spending_budget(
-    fleet, tmp_path, source,
+    fleet, tmp_path, source, monkeypatch,
 ):
+    import desk_robot.pet as pet_module
+
+    clock = [1000.0]
+    monkeypatch.setattr(
+        pet_module, "time",
+        SimpleNamespace(monotonic=lambda: clock[0], time=time.time, localtime=time.localtime),
+    )
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     speaker = SimulatedSpeaker()
     pet = PetController(
@@ -10116,10 +10147,10 @@ async def test_activity_repeated_background_chooses_silence_without_spending_bud
     robot_id = fleet.robots[0].id
     state = pet.states[robot_id]
     state.enabled = True
-    now = time.monotonic()
+    now = clock[0]
     if source == "session":
-        state.session_habituation.record("routine", now)
-        state.session_habituation.record("routine", now)
+        pet._notify_sensor(robot_id, "side_object", received_at=now)
+        pet._notify_sensor(robot_id, "side_object", received_at=now)
     else:
         state.camera_habituation.record(("scene", "routine"), now)
         state.camera_habituation.record(("scene", "routine"), now)
@@ -10140,8 +10171,13 @@ async def test_activity_repeated_background_chooses_silence_without_spending_bud
         assert not speaker.spoken
         assert not offers
 
-        state.session_habituation.reset()
-        state.camera_habituation.reset()
+        # Real decay, rather than a manual reset, restores optional initiative.
+        clock[0] = now + 899.999
+        pet._reconsider_activity()
+        assert pet._speech_task is None
+        assert state.activity_silences == 2
+        assert pet._group_last_spoken == previous_cooldown
+        clock[0] = now + 900.0
         pet._reconsider_activity()
         await pet._speech_task
         assert len(offers) == 1
