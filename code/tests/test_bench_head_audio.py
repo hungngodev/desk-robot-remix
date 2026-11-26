@@ -5,7 +5,10 @@ import asyncio
 import importlib.util
 import json
 import stat
+import time
+from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,14 +104,37 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
     }
 
 
-async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor():
+@pytest.mark.parametrize(("mic_hz", "speaker_hz", "healthy"), [
+    (16000, 32000, True),
+    (15840, 31680, True),
+    (16160, 32320, True),
+    (15839, 31678, False),
+    (16161, 32322, False),
+    (16000, 31679, False),
+    (16000, 32321, False),
+    (8000, 16000, False),
+    (15840, 32320, False),
+    (16000, 0, False),
+])
+async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor(
+    monkeypatch, mic_hz, speaker_hz, healthy,
+):
+    receipt_times = count(0, 1_000_000_000)
+    monkeypatch.setattr(bench, "time", SimpleNamespace(
+        monotonic=time.monotonic, monotonic_ns=lambda: next(receipt_times),
+    ))
+
     class Head:
         def __init__(self):
             self.calls = 0
 
         async def audio_reference_status(self):
             self.calls += 1
-            return _sample(self.calls)
+            return dict(
+                _sample(self.calls),
+                microphone_frames_read=self.calls * mic_hz,
+                speaker_frames_accepted=self.calls * speaker_hz,
+            )
 
     head = Head()
     report = await bench.measure(
@@ -118,7 +144,7 @@ async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor():
     assert report["samples"] >= 2
     assert report["reference_counter_delta"]["reference_underflow_reads"] == 0
     assert report["probe_errors"] == 0
-    assert report["reference_software_integrity_observed"] is True
+    assert report["reference_software_integrity_observed"] is healthy
     assert report["physical_aec_delay_measured"] is False
     assert report["actual_speaker_playback_verified"] is False
     assert report["natural_human_barge_in_verified"] is False

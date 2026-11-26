@@ -251,10 +251,14 @@ reference underflow and ring overwrite counts, stale post cancellation writes,
 `short_output_writes` from incomplete I2S speaker writes, successful PDM
 microphone frames read, and I2S speaker frames accepted. The Mac rejects
 foreign identities, invalid counters, changed boot identities, or decreasing
-counters. Software integrity fails if any fault counter advances, if no microphone
-frames or no speaker frames were handled during the trial, or if the firmware
-reports a sticky integrity fault. Start the consented Xiaozhi listening session
-and make the robot speak while observing the trial. Raw frame progress proves
+counters. Software integrity fails if any fault counter advances, the firmware
+reports a sticky integrity fault, or measured counter throughput differs by
+more than 1% from 16 kHz PDM and 32 kHz I2S, including the 2:1 count ratio.
+Start the consented Xiaozhi listening session and sustain playback throughout
+the trial; idle speech gaps are not a valid rate qualification window. Rates
+are estimates over the first and last valid Mac receipt timestamps, not
+physical LRCLK/PDM clock measurements; scheduling or network jitter can
+invalidate a trial. Raw frame progress proves
 neither AEC alignment nor that the speaker was audible. This endpoint exposes no
 microphone PCM, grants no motor authority and **never** claims physical speaker
 playback, AEC quality, or natural barge in. Do not reset the head in the middle

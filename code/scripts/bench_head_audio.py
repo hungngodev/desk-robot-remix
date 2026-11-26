@@ -99,6 +99,35 @@ COUNTERS = (
 )
 
 
+SAMPLE_RATES_HZ = {"microphone_frames_read": 16000, "speaker_frames_accepted": 32000}
+NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+def _sample_rate_report(deltas: dict | None, interval_ns: int) -> dict:
+    """Measure accepted sample throughput, not physical codec clock or playback."""
+    rates = None
+    within_tolerance = False
+    if deltas is not None and interval_ns > 0:
+        rates = {
+            key: deltas[key] * NANOSECONDS_PER_SECOND / interval_ns
+            for key in SAMPLE_RATES_HZ
+        }
+        # Integer comparisons keep exactly 1% inclusive without float rounding.
+        within_tolerance = all(
+            abs(deltas[key] * NANOSECONDS_PER_SECOND - hz * interval_ns) * 100
+            <= hz * interval_ns
+            for key, hz in SAMPLE_RATES_HZ.items()
+        )
+        mic = deltas["microphone_frames_read"]
+        speaker = deltas["speaker_frames_accepted"]
+        within_tolerance &= mic > 0 and abs(speaker - 2 * mic) * 100 <= 2 * mic
+    return {
+        "counter_interval_s": interval_ns / NANOSECONDS_PER_SECOND,
+        "counter_throughput_hz": rates,
+        "counter_rate_within_tolerance": within_tolerance,
+    }
+
+
 async def measure(head, robot_id: str, *, seconds: float,
                   poll_period_s: float = 0.2) -> dict:
     """Poll the already active codec without altering its audio owner."""
@@ -113,6 +142,7 @@ async def measure(head, robot_id: str, *, seconds: float,
     previous: dict | None = None
     first: dict | None = None
     last: dict | None = None
+    first_receipt_ns = last_receipt_ns = 0
     errors: list[str] = []
     invalid_receipts = 0
     received = 0
@@ -126,6 +156,7 @@ async def measure(head, robot_id: str, *, seconds: float,
                 head.audio_reference_status(),
                 timeout=min(1.0, max(0.05, remaining)),
             )
+            receipt_ns = time.monotonic_ns()
             if (not isinstance(sample, dict)
                     or sample.get("robot_id") != robot_id
                     or type(sample.get("boot")) is not int
@@ -153,7 +184,9 @@ async def measure(head, robot_id: str, *, seconds: float,
             received += 1
             if first is None:
                 first = sample
+                first_receipt_ns = receipt_ns
             last = sample
+            last_receipt_ns = receipt_ns
             integrity_failure_seen |= sample["reference_integrity_failed"]
             privacy_muted_seen |= sample["microphone_privacy_muted"]
         except asyncio.CancelledError:
@@ -168,8 +201,10 @@ async def measure(head, robot_id: str, *, seconds: float,
         {key: last[key] - first[key] for key in COUNTERS}
         if first is not None and last is not None else None
     )
+    rate_report = _sample_rate_report(deltas, last_receipt_ns - first_receipt_ns)
     return {
         "robot_id": robot_id,
+        **rate_report,
         "head_boot": first["boot"] if first is not None else None,
         "elapsed_s": round(time.monotonic() - started, 3),
         "samples": received,
@@ -193,8 +228,7 @@ async def measure(head, robot_id: str, *, seconds: float,
             and deltas["reference_overwrite_reads"] == 0
             and deltas["discarded_stale_writes"] == 0
             and deltas["short_output_writes"] == 0
-            and deltas["microphone_frames_read"] > 0
-            and deltas["speaker_frames_accepted"] > 0
+            and rate_report["counter_rate_within_tolerance"]
         ),
         "raw_pcm_captured": False,
         "physical_aec_delay_measured": False,
