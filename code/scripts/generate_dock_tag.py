@@ -89,7 +89,13 @@ def read_marker_assignments(path: Path = ASSIGNMENTS, *,
 def read_dock_geometry(path: Path = SCAD) -> dict:
     """Read printer dimensions from the SAME SCAD source as the pocket."""
     data = path.read_bytes()
-    source = data.decode("utf-8")
+    # Ignore inactive SCAD comments and quoted text before counting assignments.
+    # Keep strings nonnumeric so a quoted dimension cannot become a literal.
+    source = re.sub(
+        r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: '""' if match[0].startswith('"') else " ",
+        data.decode("utf-8"),
+    )
     values = {}
     for name in (
         "tag_black_side_mm", "tag_white_margin_each_mm",

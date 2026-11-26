@@ -75,3 +75,23 @@ def test_all_five_generated_tags_decode_together(generator):
     assert ids is not None
     assert len(corners) == len(mapping) == 5
     assert sorted(ids.ravel().tolist()) == sorted(mapping.values())
+
+
+@pytest.mark.parametrize("inactive", [
+    "// tag_black_side_mm = 60;",
+    "/* tag_black_side_mm = 60; */",
+    'echo("tag_black_side_mm = 60;");',
+])
+def test_inactive_cad_literal_cannot_supply_dimension(generator, tmp_path, inactive):
+    scad = tmp_path / "dock.scad"
+    scad.write_text(generator.SCAD.read_text().replace("tag_black_side_mm = 60;", inactive))
+    with pytest.raises(ValueError, match="missing or ambiguous"):
+        generator.read_dock_geometry(scad)
+
+
+def test_inactive_cad_examples_do_not_override_dimension(generator, tmp_path):
+    scad = tmp_path / "dock.scad"
+    scad.write_text(generator.SCAD.read_text() + '\n// tag_black_side_mm = 55;\n'
+                    '/* tag_black_side_mm = 50; */\n'
+                    'echo("tag_black_side_mm = 40;");\n')
+    assert generator.read_dock_geometry(scad)["black_mm"] == 60
