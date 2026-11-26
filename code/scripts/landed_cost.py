@@ -11,6 +11,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from typing import NamedTuple
 from urllib.parse import urlsplit
 
 MAX_ACCOUNTING_USD = Decimal("1000000000000")
@@ -172,53 +173,50 @@ def _current_checkout_quote(line: dict, quoted: date) -> None:
         raise ValueError("supplier quote is stale without current price proof")
 
 
-def account_landed_cost(
-    evidence: dict,
-    required_roles: dict[str, int],
-    role_categories: dict[str, str],
-    *,
-    expected_scope: str = "first_robot",
-    cap_cents: int = PROTOTYPE_CAP_CENTS,
-) -> dict:
-    """Compute payable and lifetime prototype spend without authorizing a cart.
+class _QuoteTotals(NamedTuple):
+    buckets: dict[str, int]
+    supplied: defaultdict[str, int]
+    seller_subtotals: defaultdict[str, int]
+    seller_category_goods: defaultdict[str, defaultdict[str, int]]
+    seller_category_units: defaultdict[str, defaultdict[str, int]]
+    quote_packs_by_role: defaultdict[str, list[tuple[int, int, object]]]
 
-    Evidence keys: scope, lines, seller_charges, inventory, paid_in_flight,
-    paid_orders. Every quote has role_key, seller, sku, quantity_packages,
-    units_per_package, package_price_usd, quote_reference, quoted_at,
-    stock_evidence_url. A zero package price additionally requires a separate
-    free_package_evidence_url proving the seller actually quotes a free item.
-    A seller charge has explicit shipping_usd, tax_usd,
-    duties_usd, discount_usd. Inspected inventory must identify acquisition_kind
-    as already_owned or paid_order and include an inspection_receipt_url.
-    Paid-order inventory also needs its order_reference. The same paid order's
-    role allocation must cover inspected AND still-in-flight units together;
-    a paid total alone proves no item.
-    """
-    if not isinstance(evidence, dict):
-        evidence = {}
-    if expected_scope not in {"first_robot", "fleet", "evaluation"}:
-        raise ValueError("Unknown cost scope")
-    if type(cap_cents) is not int or cap_cents <= 0:
-        raise ValueError("Invalid prototype budget")
-    if any(type(qty) is not int or not 0 <= qty <= MAX_ACCOUNTING_UNITS
-           for qty in required_roles.values()):
-        raise ValueError("Invalid canonical requirement count")
-    if set(required_roles) != set(role_categories):
-        raise ValueError("Cost category map differs from canonical requirements")
-    errors: list[str] = []
-    if evidence.get("scope") != expected_scope:
-        errors.append("Missing or mismatched quote scope")
-    if evidence.get("currency") != "USD":
-        errors.append("Quote currency must be USD")
+
+def _parse_quote(
+    line: dict, required_roles: dict[str, int], role_categories: dict[str, str],
+    buckets: dict[str, int], expected_scope: str,
+) -> tuple[str, str, str, str, int, int, str, int]:
+    role = _nonempty(line.get("role_key"), "role_key")
+    if role not in required_roles or required_roles[role] == 0:
+        raise ValueError("unknown or excluded role")
+    seller = _nonempty(line.get("seller"), "seller")
+    sku = _nonempty(line.get("sku"), "sku")
+    quote_ref = _nonempty(line.get("quote_reference"), "quote_reference")
+    quoted = _quote_date(line.get("quoted_at"))
+    if not _url(line.get("stock_evidence_url")):
+        raise ValueError("missing HTTPS stock evidence")
+    if expected_scope in {"first_robot", "fleet"}:
+        _current_checkout_quote(line, quoted)
+    packages = positive_count(line.get("quantity_packages"), "packages")
+    units = positive_count(line.get("units_per_package"), "units")
+    category = role_categories[role]
+    if category not in buckets:
+        raise ValueError("unknown robot, dock or station cost category")
+    price = cents(line.get("package_price_usd"), "package price")
+    if price == 0 and not _url(line.get("free_package_evidence_url")):
+        raise ValueError("zero package price requires explicit free-item evidence")
+    return role, seller, sku, quote_ref, packages, units, category, price
+
+
+def _collect_quotes(
+    evidence: dict, required_roles: dict[str, int], role_categories: dict[str, str],
+    expected_scope: str, errors: list[str],
+) -> _QuoteTotals:
     buckets = {"robot": 0, "dock": 0, "station": 0}
     supplied = defaultdict(int)
-    allocated = defaultdict(int)
-    awaiting = defaultdict(int)
     seller_subtotals = defaultdict(int)
     seller_category_goods = defaultdict(lambda: defaultdict(int))
     seller_category_units = defaultdict(lambda: defaultdict(int))
-    charged_sellers = set()
-    seller_totals = {}
     quote_claims: set[tuple[str, str, str, str]] = set()
     # Keep physical packages distinct from role coverage. A sealed retail
     # multipack can leave explicitly reviewed spare units, never free stock.
@@ -232,25 +230,9 @@ def account_landed_cost(
             errors.append(f"quote {index}: invalid line")
             continue
         try:
-            role = _nonempty(line.get("role_key"), "role_key")
-            if role not in required_roles or required_roles[role] == 0:
-                raise ValueError("unknown or excluded role")
-            seller = _nonempty(line.get("seller"), "seller")
-            sku = _nonempty(line.get("sku"), "sku")
-            quote_ref = _nonempty(line.get("quote_reference"), "quote_reference")
-            quoted = _quote_date(line.get("quoted_at"))
-            if not _url(line.get("stock_evidence_url")):
-                raise ValueError("missing HTTPS stock evidence")
-            if expected_scope in {"first_robot", "fleet"}:
-                _current_checkout_quote(line, quoted)
-            packages = positive_count(line.get("quantity_packages"), "packages")
-            units = positive_count(line.get("units_per_package"), "units")
-            category = role_categories[role]
-            if category not in buckets:
-                raise ValueError("unknown robot, dock or station cost category")
-            price = cents(line.get("package_price_usd"), "package price")
-            if price == 0 and not _url(line.get("free_package_evidence_url")):
-                raise ValueError("zero package price requires explicit free-item evidence")
+            role, seller, sku, quote_ref, packages, units, category, price = _parse_quote(
+                line, required_roles, role_categories, buckets, expected_scope
+            )
             total = packages * price
             claim = (role, seller, sku, quote_ref)
             if claim in quote_claims:
@@ -266,6 +248,15 @@ def account_landed_cost(
             buckets[category] += total
         except (ValueError, KeyError) as exc:
             errors.append(f"quote {index}: {exc}")
+    return _QuoteTotals(
+        buckets, supplied, seller_subtotals, seller_category_goods,
+        seller_category_units, quote_packs_by_role,
+    )
+
+
+def _collect_paid_orders(
+    evidence: dict, errors: list[str],
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
     paid_orders = {}
     paid_order_allocations: dict[str, dict[str, int]] = {}
     if evidence.get("paid_orders_complete") is not True:
@@ -304,6 +295,14 @@ def account_landed_cost(
             paid_order_allocations[reference] = allocations
         except (AttributeError, ValueError) as exc:
             errors.append(f"paid order {index}: {exc}")
+    return paid_orders, paid_order_allocations
+
+
+def _collect_inventory(
+    evidence: dict, required_roles: dict[str, int], paid_orders: dict[str, int],
+    paid_order_allocations: dict[str, dict[str, int]], errors: list[str],
+) -> tuple[defaultdict[str, int], defaultdict[tuple[str, str], int]]:
+    allocated = defaultdict(int)
     inventory_claims: set[tuple[str, str]] = set()
     inspected_from_paid_order: dict[tuple[str, str], int] = defaultdict(int)
     inventory = evidence.get("inventory", [])
@@ -341,6 +340,15 @@ def account_landed_cost(
             allocated[role] += quantity
         except (AttributeError, ValueError) as exc:
             errors.append(f"inventory {index}: {exc}")
+    return allocated, inspected_from_paid_order
+
+
+def _collect_incoming(
+    evidence: dict, required_roles: dict[str, int], paid_orders: dict[str, int],
+    paid_order_allocations: dict[str, dict[str, int]],
+    inspected_from_paid_order: defaultdict[tuple[str, str], int], errors: list[str],
+) -> defaultdict[str, int]:
+    awaiting = defaultdict(int)
     incoming_claims: set[tuple[str, str]] = set()
     incoming_items = evidence.get("paid_in_flight", [])
     if not isinstance(incoming_items, list):
@@ -371,6 +379,15 @@ def account_landed_cost(
             awaiting[role] += quantity
         except (AttributeError, ValueError) as exc:
             errors.append(f"in-flight {index}: {exc}")
+    return awaiting
+
+
+def _check_role_coverage(
+    required_roles: dict[str, int], quotes: _QuoteTotals,
+    allocated: defaultdict[str, int], awaiting: defaultdict[str, int], errors: list[str],
+) -> tuple[list[str], dict[str, int]]:
+    supplied = quotes.supplied
+    quote_packs_by_role = quotes.quote_packs_by_role
     pending_roles = []
     reviewed_pack_surplus_units: dict[str, int] = {}
     for role, needed in required_roles.items():
@@ -412,6 +429,14 @@ def account_landed_cost(
             # A review cannot manufacture a surplus or justify a purchase
             # against inventory that already covers the role.
             errors.append(f"{role}: minimum pack review without genuine surplus")
+    return pending_roles, reviewed_pack_surplus_units
+
+
+def _collect_seller_totals(
+    evidence: dict, seller_subtotals: dict[str, int], errors: list[str],
+) -> dict[str, int]:
+    charged_sellers = set()
+    seller_totals = {}
     charges = evidence.get("seller_charges", [])
     if not isinstance(charges, list):
         errors.append("Seller charges must be a list")
@@ -433,39 +458,44 @@ def account_landed_cost(
             errors.append(f"seller charges {index}: {exc}")
     if set(seller_subtotals) != charged_sellers:
         errors.append("Shipping, taxes, duties or discounts unknown for one or more sellers")
-    if pending_roles:
-        errors.append("Not all canonical roles are priced or accounted for")
-    complete = (not errors and bool(required_roles)
-                and any(q > 0 for q in required_roles.values()))
-    payable = sum(seller_totals.values()) if complete else None
+    return seller_totals
+
+
+def _allocate_landed_subtotals(
+    quotes: _QuoteTotals, seller_totals: dict[str, int],
+) -> dict[str, int]:
     # Shipping, tax, duties and discounts belong to sellers, not specific
     # robot/dock/station roles. For reporting only, apportion each seller's
     # exact payable cents by material value, with stable largest remainders.
-    # If all material is free, use item counts instead. Never show partial
-    # allocated totals or call these allocations direct supplier quotes.
-    allocated_landed_subtotals = None
-    if complete:
-        allocated_landed_subtotals = dict.fromkeys(buckets, 0)
-        for seller, gross in seller_totals.items():
-            weights = seller_category_goods[seller]
-            if sum(weights.values()) == 0:
-                weights = seller_category_units[seller]
-            denominator = sum(weights.values())
-            shares = {
-                category: gross * weight // denominator
-                for category, weight in weights.items()
-            }
-            remainder = gross - sum(shares.values())
-            ranking = sorted(
-                weights,
-                key=lambda category: (
-                    -(gross * weights[category] % denominator), category
-                ),
-            )
-            for category in ranking[:remainder]:
-                shares[category] += 1
-            for category, amount in shares.items():
-                allocated_landed_subtotals[category] += amount
+    # If all material is free, use item counts instead. These allocations
+    # are not direct supplier quotes.
+    allocated_landed_subtotals = dict.fromkeys(quotes.buckets, 0)
+    for seller, gross in seller_totals.items():
+        weights = quotes.seller_category_goods[seller]
+        if sum(weights.values()) == 0:
+            weights = quotes.seller_category_units[seller]
+        denominator = sum(weights.values())
+        shares = {
+            category: gross * weight // denominator
+            for category, weight in weights.items()
+        }
+        remainder = gross - sum(shares.values())
+        ranking = sorted(
+            weights,
+            key=lambda category: (
+                -(gross * weights[category] % denominator), category
+            ),
+        )
+        for category in ranking[:remainder]:
+            shares[category] += 1
+        for category, amount in shares.items():
+            allocated_landed_subtotals[category] += amount
+    return allocated_landed_subtotals
+
+
+def _prior_paid_total(
+    evidence: dict, paid_orders: dict[str, int], errors: list[str],
+) -> int | None:
     # An absent or malformed historical spending register is UNKNOWN, not
     # evidence that the owner has spent zero dollars already.
     prior_spend_known = (
@@ -474,7 +504,22 @@ def account_landed_cost(
         and isinstance(evidence["paid_orders"], list)
         and not any(error.startswith("paid order ") for error in errors)
     )
-    already_paid = sum(paid_orders.values()) if prior_spend_known else None
+    return sum(paid_orders.values()) if prior_spend_known else None
+
+
+def _accounting_result(
+    *, expected_scope: str, cap_cents: int, required_roles: dict[str, int],
+    errors: list[str], quotes: _QuoteTotals, allocated: defaultdict[str, int],
+    awaiting: defaultdict[str, int], pending_roles: list[str],
+    reviewed_pack_surplus_units: dict[str, int], seller_totals: dict[str, int],
+    already_paid: int | None,
+) -> dict:
+    complete = (not errors and bool(required_roles)
+                and any(q > 0 for q in required_roles.values()))
+    payable = sum(seller_totals.values()) if complete else None
+    allocated_landed_subtotals = (
+        _allocate_landed_subtotals(quotes, seller_totals) if complete else None
+    )
     cumulative = (payable + already_paid
                   if payable is not None and already_paid is not None
                   else None)
@@ -491,12 +536,12 @@ def account_landed_cost(
         # These quantities, not retail pack quantities, count toward roles.
         # Spare units remain physical leftovers, never a second free order.
         "quoted_units_applied_to_roles": {
-            role: min(supplied[role], max(
+            role: min(quotes.supplied[role], max(
                 0, need - allocated[role] - awaiting[role]
             )) for role, need in sorted(required_roles.items())
         },
         "awaiting_arrival_roles": sorted(role for role in awaiting if awaiting[role]),
-        "material_subtotals_cents": buckets,
+        "material_subtotals_cents": quotes.buckets,
         "allocated_landed_subtotals_cents": allocated_landed_subtotals,
         "seller_payable_cents": dict(sorted(seller_totals.items())),
         "payable_now_cents": payable,
@@ -511,3 +556,74 @@ def account_landed_cost(
         if cap_applies else None,
         "landed_price_is_a_verified_supplier_checkout": False,
     }
+
+
+def _validate_accounting_request(
+    evidence: dict, required_roles: dict[str, int], role_categories: dict[str, str],
+    expected_scope: str, cap_cents: int,
+) -> list[str]:
+    if expected_scope not in {"first_robot", "fleet", "evaluation"}:
+        raise ValueError("Unknown cost scope")
+    if type(cap_cents) is not int or cap_cents <= 0:
+        raise ValueError("Invalid prototype budget")
+    if any(type(qty) is not int or not 0 <= qty <= MAX_ACCOUNTING_UNITS
+           for qty in required_roles.values()):
+        raise ValueError("Invalid canonical requirement count")
+    if set(required_roles) != set(role_categories):
+        raise ValueError("Cost category map differs from canonical requirements")
+    errors: list[str] = []
+    if evidence.get("scope") != expected_scope:
+        errors.append("Missing or mismatched quote scope")
+    if evidence.get("currency") != "USD":
+        errors.append("Quote currency must be USD")
+    return errors
+
+
+def account_landed_cost(
+    evidence: dict,
+    required_roles: dict[str, int],
+    role_categories: dict[str, str],
+    *,
+    expected_scope: str = "first_robot",
+    cap_cents: int = PROTOTYPE_CAP_CENTS,
+) -> dict:
+    """Compute payable and lifetime prototype spend without authorizing a cart.
+
+    Evidence keys: scope, lines, seller_charges, inventory, paid_in_flight,
+    paid_orders. Every quote has role_key, seller, sku, quantity_packages,
+    units_per_package, package_price_usd, quote_reference, quoted_at,
+    stock_evidence_url. A zero package price additionally requires a separate
+    free_package_evidence_url proving the seller actually quotes a free item.
+    A seller charge has explicit shipping_usd, tax_usd,
+    duties_usd, discount_usd. Inspected inventory must identify acquisition_kind
+    as already_owned or paid_order and include an inspection_receipt_url.
+    Paid-order inventory also needs its order_reference. The same paid order's
+    role allocation must cover inspected AND still-in-flight units together;
+    a paid total alone proves no item.
+    """
+    if not isinstance(evidence, dict):
+        evidence = {}
+    errors = _validate_accounting_request(
+        evidence, required_roles, role_categories, expected_scope, cap_cents
+    )
+    quotes = _collect_quotes(evidence, required_roles, role_categories, expected_scope, errors)
+    paid_orders, paid_order_allocations = _collect_paid_orders(evidence, errors)
+    allocated, inspected_from_paid_order = _collect_inventory(
+        evidence, required_roles, paid_orders, paid_order_allocations, errors
+    )
+    awaiting = _collect_incoming(
+        evidence, required_roles, paid_orders, paid_order_allocations,
+        inspected_from_paid_order, errors,
+    )
+    pending_roles, reviewed_pack_surplus_units = _check_role_coverage(
+        required_roles, quotes, allocated, awaiting, errors
+    )
+    seller_totals = _collect_seller_totals(evidence, quotes.seller_subtotals, errors)
+    if pending_roles:
+        errors.append("Not all canonical roles are priced or accounted for")
+    return _accounting_result(
+        expected_scope=expected_scope, cap_cents=cap_cents, required_roles=required_roles,
+        errors=errors, quotes=quotes, allocated=allocated, awaiting=awaiting,
+        pending_roles=pending_roles, reviewed_pack_surplus_units=reviewed_pack_surplus_units,
+        seller_totals=seller_totals, already_paid=_prior_paid_total(evidence, paid_orders, errors),
+    )
