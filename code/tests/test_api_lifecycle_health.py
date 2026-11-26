@@ -1,6 +1,9 @@
 """Mac lifecycle health is not a physical robot or USB connectivity receipt."""
+import asyncio
+import threading
 from types import SimpleNamespace
 
+import desk_robot.runtime as runtime_module
 from desk_robot.api import create_app
 from fastapi.testclient import TestClient
 
@@ -74,3 +77,35 @@ def test_health_does_not_turn_missing_room_usb_into_simulation(settings, tokens)
         response = client.get("/v1/health", headers=operator)
         assert response.status_code == 503
         assert response.json()["runtime_ready"] is False
+
+
+def test_cold_boot_memory_initialization_does_not_block_loop(settings, tokens, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    original_store = runtime_module.MemoryStore
+
+    def slow_store(root, ids):
+        started.set()
+        assert release.wait(3), "SQLite startup blocked the event loop"
+        return original_store(root, ids)
+
+    monkeypatch.setattr(runtime_module, "MemoryStore", slow_store)
+    app = create_app(settings)
+
+    async def boot():
+        async with app.router.lifespan_context(app):
+            assert app.state.runtime_started
+            assert app.state.runtime.memory.robot_ids == frozenset(
+                robot.id for robot in settings.robots
+            )
+
+    async def run():
+        task = asyncio.create_task(boot())
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            assert not task.done()
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(run())

@@ -44,7 +44,15 @@ async def _bounded_monitor_stop(coro) -> None:
 
 
 class Runtime:
-    def __init__(self, settings: Settings):
+    @classmethod
+    async def create(cls, settings: Settings) -> Runtime:
+        """Initialize durable memory off-loop before constructing async owners."""
+        memory = await asyncio.to_thread(
+            MemoryStore, settings.memory_dir, [r.id for r in settings.robots],
+        )
+        return cls(settings, memory=memory)
+
+    def __init__(self, settings: Settings, *, memory: MemoryStore | None = None):
         self.settings = settings
         # This shared client carries head, voice and model credentials.
         # Ambient system proxies must not intercept private Mac/LAN traffic.
@@ -62,7 +70,10 @@ class Runtime:
             chat = OllamaChat(settings, self.client)
             speaker = KokoroHeadSpeaker(settings, self.client)
             scene = OllamaScene(self.client, url=settings.ollama_url, model=settings.vision_model)
-        self.memory = MemoryStore(settings.memory_dir, [r.id for r in settings.robots])
+        self.memory = (
+            memory if memory is not None
+            else MemoryStore(settings.memory_dir, [r.id for r in settings.robots])
+        )
         self.attention = AttentionLedger([r.id for r in settings.robots])
         self.coordinator = Coordinator(settings, heads, vision)
         self.conversation = Conversation(settings, chat, speaker, memory=self.memory)

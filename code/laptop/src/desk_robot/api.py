@@ -123,7 +123,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def lifespan(app):
         # Separate operator and model credentials: models cannot mint motion permits.
         app.state.operator_token, app.state.tool_token = api_credentials(settings)
-        app.state.runtime = runtime or Runtime(settings)
+        app.state.runtime = runtime if runtime is not None else await Runtime.create(settings)
         app.state.runtime_started = False
         cancelled = False
         try:
