@@ -119,6 +119,55 @@ def _fresh_jaw_sequence(new: int, previous: int) -> bool:
     return 0 < delta < 0x80000000
 
 
+async def verify_grasp_hold(
+    head: "Head", calibration: "Calibration", tactile: dict, *, robot_id: str,
+) -> None:
+    """Refresh same-boot tactile provenance; never retry a lost grasp or move a servo."""
+    if tactile.get("grasped") is not True:
+        raise OperationError("grasp_unverified: no active tactile hold")
+    # Invalid, expired, cancelled or contradictory evidence must not leave
+    # an earlier successful grasp usable by a later phase of this job.
+    tactile["grasped"] = False
+    threshold = calibration.grip_force_delta_raw
+    ceiling = calibration.grip_force_limit_raw
+    if threshold is None or ceiling is None:
+        raise OperationError("grasp_unverified: missing force calibration")
+    try:
+        async with asyncio.timeout(_JAW_FRESH_WAIT_S):
+            for attempt in range(_JAW_MAX_POLLS):
+                started = time.monotonic()
+                sample = await _bounded_head_reply(
+                    head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
+                    timeout_message="ADS1115 hold read timed out",
+                )
+                measured, seq = force_observation(sample)
+                group = sample["force"]
+                age = group.get("jaw_age_ms")
+                boot = group.get("boot_id")
+                if (sample.get("robot_id") != robot_id
+                        or group.get("jaw_valid") is not True
+                        or type(boot) is not int or not 1 <= boot <= 0xffffffff
+                        or boot != tactile["boot_id"]
+                        or type(age) is not int
+                        or time.monotonic() >= started + (500 - age) / 1000):
+                    raise ValueError("Invalid jaw identity or acquisition age")
+                if _fresh_jaw_sequence(seq, tactile["jaw_seq"]):
+                    break
+                if seq != tactile["jaw_seq"] or attempt == _JAW_MAX_POLLS - 1:
+                    raise ValueError("No new ADS1115 hold sample")
+                await asyncio.sleep(_JAW_POLL_INTERVAL_S)
+            else:
+                raise ValueError("No new ADS1115 hold sample")
+    except (KeyError, TypeError, ValueError, TimeoutError) as exc:
+        raise OperationError("grasp_unverified: fresh jaw hold evidence required") from exc
+    delta = (measured - tactile["baseline_raw"]) * calibration.grip_force_sign
+    if delta <= -threshold or delta >= ceiling:
+        raise OperationError("grasp_unverified: contradictory or excessive jaw force")
+    if delta < threshold:
+        raise OperationError("object_lost: jaw contact below threshold; hold unverified")
+    tactile.update(grasped=True, jaw_seq=seq, contact_delta_raw=delta)
+
+
 async def guarded_grasp(
     head: "Head", calibration: "Calibration",
     *, robot_id: str, health: Callable[[], Awaitable[dict]],
@@ -324,6 +373,7 @@ async def guarded_grasp(
                     return {
                         "commanded_angle": angle, "contact_delta_raw": raw_delta,
                         "baseline_raw": baseline, "position_measured": False,
+                        "grasped": True, "jaw_seq": latest_seq, "boot_id": force_boot_id,
                         "force_newtons_measured": False, "physical_acceptance_pass": False,
                     }
         raise GraspLimitation("no confirmed tactile contact within commanded jaw limits")

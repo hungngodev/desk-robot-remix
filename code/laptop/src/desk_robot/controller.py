@@ -23,7 +23,7 @@ from .dock_runtime import (
     verify_selected_dock_frame,
 )
 from .dock_vision import assess_dock
-from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
+from .grasp_feedback import await_commanded_jaw_target, guarded_grasp, verify_grasp_hold
 from .motion_authority import StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
@@ -1836,6 +1836,17 @@ class Coordinator:
                 raise OperationError("Pickup requires WROOM commanded servo telemetry")
             return body
 
+        tactile = None
+
+        async def check_hold() -> None:
+            if tactile is None:
+                return
+            try:
+                await verify_grasp_hold(head, c, tactile, robot_id=job.robot_id)
+            except OperationError as exc:
+                job.events.append(str(exc))
+                raise
+
         if self.settings.mode == "hardware":
             self._require_camera_motion_grant(camera_grant)
             tactile = await guarded_grasp(
@@ -1850,6 +1861,7 @@ class Coordinator:
             self._require_camera_motion_grant(camera_grant)
             await send_command(f"grip {c.grip_closed}")
             await asyncio.sleep(c.servo_settle_seconds)
+        await check_hold()
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_up}")
@@ -1857,6 +1869,7 @@ class Coordinator:
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
         await _bounded_pulse_stop(head, job.robot_id)
+        await check_hold()
         fence_observation()
         a, b, x, y = c.lifted_roi_px
         observed = []
@@ -1866,6 +1879,7 @@ class Coordinator:
                 fence_observation()
             await self._assert_armed_health(job.robot_id)
             detection, _ = await observe()
+            await check_hold()
             px, py = detection.center
             if not (a <= px <= x and b <= py <= y):
                 raise OperationError(
@@ -1894,6 +1908,7 @@ class Coordinator:
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         lowered, _ = await observe()
+        await check_hold()
         lowered_ground = c.ground(lowered.center)
         if (
             not c.within(lowered_ground)
@@ -1907,6 +1922,8 @@ class Coordinator:
         # Release only after observing the object near the table, then raise
         # the empty jaws to distinguish a placed object from one stuck in them.
         self._require_camera_motion_grant(camera_grant)
+        if tactile is not None:
+            tactile["grasped"] = False
         await send_command(f"grip {c.grip_open}")
         if self.settings.mode == "hardware":
             # WROOM opening is limited by fresh jaw conversions, not the
