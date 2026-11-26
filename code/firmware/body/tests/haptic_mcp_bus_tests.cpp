@@ -163,8 +163,41 @@ static void check_failed_deassert_write() {
   CHECK(wire.mcp_iodirb == 0xFB && !wire.unsafe_parallel_mux);
 }
 
+// External shared-bus invalidation must cancel queued work and clear an
+// already asserted latch on the next verified lane 5 pass, never replay it.
+static void check_external_bus_invalidation() {
+  for (bool active : {false, true}) {
+    TwoWire wire;
+    wire.dock_gpioA = 0x0C;
+    wire.optional_gpioB = 0xFB; // unrelated input bits must not enter OLATB
+    desk_robot::AccessorySensors bus;
+    CHECK(bus.begin(wire));
+    CHECK(bus.request_haptic(1));
+    if (active) scan(bus, 0, 48);
+    CHECK(wire.mcp_olatb == (active ? 0x04U : 0U));
+    const auto edges = wire.haptic_rising_edges;
+    bus.invalidate_bus();
+    CHECK(!bus.haptic_ready());
+    CHECK(!bus.readings().dock.valid);
+    CHECK(!bus.readings().optional_inputs.valid);
+    CHECK(!bus.request_haptic(49));
+    // Invalidation itself must not issue unisolated bus transactions.
+    CHECK(wire.ranges == 0 && wire.extras == 0);
+    CHECK(wire.mcp_olatb == (active ? 0x04U : 0U));
+    scan(bus, active ? 60U : 0U, 132);
+    CHECK(bus.readings().dock.valid);
+    CHECK(wire.mcp_olatb == 0);
+    CHECK(wire.haptic_rising_edges == edges);
+    CHECK(wire.mcp_iodirb == 0xFB && !wire.unsafe_parallel_mux);
+    CHECK(!bus.haptic_ready() && !bus.request_haptic(1800));
+    scan(bus, 144, 216);
+    CHECK(wire.mcp_olatb == 0 && wire.haptic_rising_edges == edges);
+  }
+}
+
 int main() {
   try {
+    check_external_bus_invalidation();
     check_boot_configuration();
     check_failed_deassert_write();
     check_dock_masks();
