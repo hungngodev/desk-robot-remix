@@ -6,6 +6,7 @@ receipt handoff. Robot telemetry is read only, never motion authority.
 from __future__ import annotations
 
 import math
+from time import monotonic_ns
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -174,7 +175,9 @@ def register_robot_status_routes(
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
+        started_ns = monotonic_ns()
         data = await getter()
+        elapsed_ms = (monotonic_ns() - started_ns) / 1_000_000
         require_current_voice_tool(request, robot_id, owner)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Auxiliary telemetry robot identity mismatch")
@@ -190,7 +193,7 @@ def register_robot_status_routes(
             climate_key = (robot_id, "climate")
             if (_fresh_aux_acquisition(
                     climate, previous_seq=previous_seq(climate_key, boot),
-                    max_age_ms=1000,
+                    max_age_ms=1000, elapsed_ms=elapsed_ms,
                 )
                 and type(climate.get("temp_centi")) is int
                 and -4500 <= climate["temp_centi"] <= 13000
@@ -206,7 +209,7 @@ def register_robot_status_routes(
             bmp_key = (robot_id, "bmp280")
             if (_fresh_aux_acquisition(
                     bmp, previous_seq=previous_seq(bmp_key, boot),
-                    max_age_ms=2000,
+                    max_age_ms=2000, elapsed_ms=elapsed_ms,
                 )
                 and bmp.get("present") is True
                 and type(bmp.get("chip_id")) is int

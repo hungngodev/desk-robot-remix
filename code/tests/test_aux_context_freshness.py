@@ -331,7 +331,11 @@ def test_uint32_sequence_wrap_and_half_range_boundary(sensor):
 
 
 @pytest.mark.parametrize(("sensor", "max_valid_age"), [("climate", 999), ("bmp280", 1999)])
-def test_positive_max_age_boundaries_are_accepted(sensor, max_valid_age):
+def test_positive_max_age_boundaries_are_accepted(monkeypatch, sensor, max_valid_age):
+    from desk_robot import api_robot_status
+
+    # Isolate the wire age boundary from host request timing.
+    monkeypatch.setattr(api_robot_status, "monotonic_ns", lambda: 0)
     payload = _climate(seq=99, age_ms=max_valid_age) if sensor == "climate" else _bmp(seq=99, age_ms=max_valid_age)
     app, _data, heard, _owner = _route({sensor: payload})
     headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
@@ -339,3 +343,28 @@ def test_positive_max_age_boundaries_are_accepted(sensor, max_valid_age):
         assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
     assert len(heard) == 1
     assert "seq=99" in heard[0][3]
+
+
+@pytest.mark.parametrize("sensor,ttl", [("climate", 1000), ("bmp280", 2000)])
+def test_transport_elapsed_expires_ambient_without_consuming_sequence(monkeypatch, sensor, ttl):
+    from desk_robot import api_robot_status
+
+    payload = _climate(seq=99, age_ms=ttl - 10) if sensor == "climate" else _bmp(
+        seq=99, age_ms=ttl - 10,
+    )
+    app, _data, heard, _owner = _route({sensor: payload})
+    # Exact TTL, then 1 ms below TTL, then a duplicate fresh sample.
+    ticks = iter([0, 10_000_000, 20_000_000, 29_000_000, 30_000_000, 30_000_000])
+    monkeypatch.setattr(api_robot_status, "monotonic_ns", lambda: next(ticks))
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        url = "/v1/robots/robot-01/aux"
+        response = client.get(url, headers=headers)
+        assert response.status_code == 200
+        assert response.json()[sensor]["age_ms"] == ttl - 10
+        assert heard == []
+        assert client.get(url, headers=headers).status_code == 200
+        assert len(heard) == 1
+        assert "seq=99" in heard[0][3]
+        assert client.get(url, headers=headers).status_code == 200
+        assert len(heard) == 1

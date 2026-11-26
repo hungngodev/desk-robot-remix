@@ -44,6 +44,7 @@ def _valid_angle_acquisition(angles: dict[str, Any]) -> bool:
 
 def _fresh_aux_acquisition(
     reading: object, *, previous_seq: int | None, max_age_ms: int,
+    elapsed_ms: float = 0.0,
 ) -> bool:
     """Require a recent, genuinely newer acquisition for spoken tool context.
 
@@ -55,7 +56,10 @@ def _fresh_aux_acquisition(
         return False
     seq, age = reading.get("seq"), reading.get("age_ms")
     if (type(seq) is not int or not 1 <= seq <= 0xffffffff
-            or type(age) is not int or not 0 <= age < max_age_ms):
+            or type(age) is not int or not 0 <= age < max_age_ms
+            or type(elapsed_ms) not in (int, float)
+            or not 0 <= elapsed_ms < max_age_ms
+            or age + elapsed_ms >= max_age_ms):
         return False
     if previous_seq is None:
         return True
