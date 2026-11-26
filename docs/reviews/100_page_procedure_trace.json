@@ -63,7 +63,7 @@
       "title": "Reconcile comments and review threads",
       "phase": "01 Evidence and source control",
       "source_owner": "docs/reviews/PARALLEL_CHAT_HANDOFF.md",
-      "verification_command": "cd code && gh api repos/hungngodev/desk-robot-remix/pulls/17/comments --paginate",
+      "verification_command": "cd code && gh api repos/hungngodev/desk-robot-remix/issues/17/comments --paginate && gh api repos/hungngodev/desk-robot-remix/pulls/17/reviews --paginate && gh api repos/hungngodev/desk-robot-remix/pulls/17/comments --paginate && gh api graphql --paginate -f query='query($endCursor: String) { repository(owner: \"hungngodev\", name: \"desk-robot-remix\") { pullRequest(number: 17) { reviewThreads(first: 100, after: $endCursor) { nodes { id isResolved isOutdated path comments(first: 1) { nodes { databaseId } } } pageInfo { hasNextPage endCursor } } } } }'",
       "gate": "OPEN",
       "last_verified_sha": null,
       "executed_test_receipt": null,

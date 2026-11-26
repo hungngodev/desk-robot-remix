@@ -1,6 +1,7 @@
 """Canonical command admission must agree with the actual procedure ledger."""
 import importlib.util
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -31,3 +32,26 @@ def test_canonical_command_is_admitted(row):
 ])
 def test_wrong_procedure_or_nonexecuting_command_is_rejected(identifier, command):
     assert not POLICY.valid_procedure_command(identifier, command)
+
+
+def test_review_reconciliation_requires_all_surfaces():
+    command = POLICY._REVIEW_RECONCILIATION_COMMAND
+    assert POLICY.valid_procedure_command(4, command)
+    assert not POLICY.valid_procedure_command(5, command)
+    tokens = shlex.split(command)
+    assert tokens.count("--paginate") == 4
+    for endpoint in ("issues/17/comments", "pulls/17/reviews", "pulls/17/comments"):
+        assert f"repos/{POLICY.REPO}/{endpoint}" in tokens
+    for field in ("isResolved", "isOutdated", "hasNextPage", "endCursor", "databaseId"):
+        assert field in tokens[-1]
+
+
+@pytest.mark.parametrize("command", [
+    "cd code && gh api repos/hungngodev/desk-robot-remix/pulls/17/comments --paginate",
+    "cd code && python -m pytest -q tests/test_playbook_command_policy.py",
+    POLICY._REVIEW_RECONCILIATION_COMMAND.replace("isResolved ", ""),
+    POLICY._REVIEW_RECONCILIATION_COMMAND.replace("--paginate", "", 1),
+    POLICY._REVIEW_RECONCILIATION_COMMAND + " && true",
+])
+def test_review_reconciliation_rejects_partial_or_substitute_command(command):
+    assert not POLICY.valid_procedure_command(4, command)

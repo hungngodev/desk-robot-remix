@@ -67,10 +67,22 @@ REQUIRED_PROCEDURE_COMMAND_TOKENS = {
 }
 
 
+_REVIEW_RECONCILIATION_COMMAND = (
+    f"cd code && gh api repos/{REPO}/issues/17/comments --paginate"
+    f" && gh api repos/{REPO}/pulls/17/reviews --paginate"
+    f" && gh api repos/{REPO}/pulls/17/comments --paginate"
+    " && gh api graphql --paginate -f query='query($endCursor: String) { "
+    'repository(owner: "hungngodev", name: "desk-robot-remix") { '
+    "pullRequest(number: 17) { reviewThreads(first: 100, after: $endCursor) { "
+    "nodes { id isResolved isOutdated path comments(first: 1) { nodes { databaseId } } } "
+    "pageInfo { hasNextPage endCursor } } } } }'"
+)
+
+
 _SPECIAL_PROCEDURE_COMMANDS = {
     1: "cd code && git rev-parse HEAD",
     3: "cd code && git diff --name-only origin/codex/initial-remix...HEAD",
-    4: "cd code && gh api repos/hungngodev/desk-robot-remix/pulls/17/comments --paginate",
+    4: _REVIEW_RECONCILIATION_COMMAND,
     2: "cd code && python scripts/verify_system.py --suite python",
     8: "cd code && python scripts/verify_system.py --suite all",
     26: "cd code && python scripts/verify_system.py --suite body",
@@ -92,6 +104,8 @@ def valid_procedure_command(identifier: int, command: object) -> bool:
                 identifier, (),
             ))):
         return False
+    if identifier == 4:
+        return command == _REVIEW_RECONCILIATION_COMMAND
     return (
         command == _SPECIAL_PROCEDURE_COMMANDS.get(identifier)
         or re.search(r"tests/[A-Za-z0-9_./-]+\.py|\bctest\b|\bcmake\b", command) is not None

@@ -19,6 +19,14 @@ describes files, not completed functionality or passing CI. Update it alongside
 module additions, removals and extractions; the coverage test checks the listed
 source paths against the checkout. Historical research below is preserved.
 
+Before editing (DRR-002), cross-check live PR #17 head and recent diffs against
+active claims, submitted reviews, inline comments and resolved/outdated thread
+metadata. Procedure 4 of the [evidence ledger](reviews/100_page_procedure_trace.json)
+lists paginated read-only queries for all four discussion surfaces. Match thread
+roots to inline comment IDs; compare scoped paths and entry points, then recheck
+HEAD before writing. An inventory match or successful query is not an ownership
+claim, manual acceptance receipt, executed test result or physical qualification.
+
 The Mac owns orchestration and private SQLite; Xiaozhi and the XIAO ESP32S3
 Sense retain the single voice/camera path. WROOM32 retains independent latched
 STOP, the 250 ms motion permit, 500 ms watchdog and eight VL53L0X lanes.
