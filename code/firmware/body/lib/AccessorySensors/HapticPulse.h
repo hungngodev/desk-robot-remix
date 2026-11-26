@@ -47,6 +47,10 @@ class HapticPulse {
       queued_ = false;
       last_started_ms_ = now_ms;
     } else {
+      // A late LOW acknowledgment still clears the edge, but a stalled
+      // service loop must not silently restore pulse authority. This is
+      // a software service deadline, NOT the physical one-shot width.
+      if (active_ && now_ms - last_started_ms_ > 250U) ready_ = false;
       active_ = false;
     }
   }

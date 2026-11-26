@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <iostream>
+#include <initializer_list>
 using desk_robot::HapticPulse;
 
 #define CHECK(condition) do { if (!(condition)) throw std::runtime_error(#condition); } while (false)
@@ -49,7 +50,34 @@ static void check_failed_edge_and_reconfigure() {
   CHECK(h.next(2007, true) == Action::None);
 }
 
+// A delayed LOW is still mandatory, but must not restore edge authority.
+static void check_stalled_high(std::uint32_t start) {
+  using Action = HapticPulse::Action;
+  for (std::uint32_t delay : {250U, 251U, 1500U, 5000U}) {
+    HapticPulse h;
+    h.configure(true);
+    CHECK(h.request(start));
+    CHECK(h.next(start, true) == Action::TurnOn);
+    h.completed(Action::TurnOn, true, start);
+    for (std::uint32_t elapsed = 1; elapsed <= delay; ++elapsed) {
+      CHECK(!h.request(start + elapsed));
+    }
+    CHECK(h.next(start + delay, false) == Action::TurnOff);
+    h.completed(Action::TurnOff, true, start + delay);
+    CHECK(!h.active());
+    CHECK(h.ready() == (delay == 250U));
+    CHECK(h.request(start + 6000U) == (delay == 250U));
+    if (delay > 250U) {
+      CHECK(h.next(start + 6001U, true) == Action::None);
+      h.configure(true);
+      CHECK(h.request(start + 6002U));
+    }
+  }
+}
+
 int main() try {
+ check_stalled_high(100U);
+ check_stalled_high(0xffffff80U);
  check_timing_boundaries(100U);
  check_timing_boundaries(0xffffff80U);
  check_failed_edge_and_reconfigure();
