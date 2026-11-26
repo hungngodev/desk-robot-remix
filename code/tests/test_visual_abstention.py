@@ -7,7 +7,6 @@ import pytest
 from desk_robot.vision import OllamaScene
 from PIL import Image
 
-
 ABSTENTION = "I can't tell from my camera right now."
 
 

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-import pytest
 import desk_robot.controller as controller
+import pytest
 from desk_robot.controller import Coordinator, Job
 
 
