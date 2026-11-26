@@ -5,7 +5,6 @@ from dataclasses import replace
 import pytest
 from desk_robot.spatial_grid import CELL_MM, GridEvidenceError, RangeCellBatch, SpatialGrid
 
-
 FAR_CELL = 10**12 // CELL_MM  # One billion metres, converted to cell units.
 
 
