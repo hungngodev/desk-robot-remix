@@ -576,3 +576,42 @@ def test_a5_accepts_real_numeric_measurements():
     rows = trial_rows()
     rows[0].update(mass_g=4.3, lift_mm=11, hold_seconds=4)
     assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]
+
+
+@pytest.mark.parametrize("invalid_prefix", [
+    '"acceptance_state": "rejected", ',
+    '"assembly_id": "other-assembly", ',
+    '"elapsed_ms": NaN, ',
+    '"elapsed_ms": Infinity, ',
+    '"elapsed_ms": -Infinity, ',
+    '"elapsed_ms": 1e309, ',
+])
+def test_a5_cli_rejects_ambiguous_manifest_json(tmp_path, invalid_prefix):
+    import hashlib
+
+    rows = trial_rows()
+    for row in rows:
+        row.update(firmware="wroom-build-rev3", calibration="jaw-profile-rev3",
+                   assembly_id="pet1-revC", notes="Recorded lift and placement")
+    csv_path = tmp_path / "trials.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    manifest = {
+        "run_id": "run-a5-003", "commit_sha": "a" * 40, "robot_id": "robot-01",
+        "assembly_id": "pet1-revC", "firmware": "wroom-build-rev3",
+        "calibration": "jaw-profile-rev3", "calibration_sha": "b" * 40,
+        "objective_evidence_path": "docs/records/runs/a5-003.json",
+        "reviewer": "operator_hana", "acceptance_state": "bench_passed",
+        "trials_csv_sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{" + invalid_prefix + json.dumps(manifest)[1:], encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(csv_path),
+         "--run-manifest", str(manifest_path), "--require-manifest", "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert '"run_manifest_verified": true' not in result.stdout

@@ -50,6 +50,13 @@ def _is_placeholder_label(value: str) -> bool:
     return any(pattern in norm for pattern in _PLACEHOLDER_PATTERNS)
 
 
+def _finite_json_float(raw: str) -> float:
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError("Nonfinite A5 run manifest number")
+    return value
+
+
 def _validate_run_manifest(
     manifest: dict,
     *,
@@ -261,10 +268,16 @@ if __name__ == "__main__":
     canonical = args.file.resolve() == p.get_default("file").resolve()
     raw_bytes = args.file.read_bytes()
     csv_digest = hashlib.sha256(raw_bytes).hexdigest()
-    manifest_data = (
-        json.loads(args.run_manifest.read_text(encoding="utf-8"))
-        if args.run_manifest is not None else None
-    )
+    manifest_data = None
+    if args.run_manifest is not None:
+        from physical_trial_ledger import unique_object
+
+        manifest_data = json.loads(
+            args.run_manifest.read_text(encoding="utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=_finite_json_float,
+            parse_float=_finite_json_float,
+        )
     if args.require_manifest and manifest_data is None:
         raise ValueError("Qualified A5 evidence requires --run-manifest")
     with args.file.open(newline="", encoding="utf-8") as stream:
