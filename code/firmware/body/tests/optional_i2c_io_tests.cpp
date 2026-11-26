@@ -1520,8 +1520,17 @@ int main() {
       sht_accessories.poll(ms);
     const auto failed_climate = sht_accessories.readings().climate;
     CHECK(!failed_climate.valid);
-    for (std::uint32_t ms = 1344; ms < 1680; ms += 12)
+    for (std::uint32_t ms = 1344; ms < 1680; ms += 12) {
+      const auto before = sht_wire.transactions;
       sht_accessories.poll(ms);
+      if (ms % 84U == 24U) {
+        // Two verified mux selections, one failed SHT command, and one
+        // verified close. No same-slice retry or absent BMP280 transfer.
+        CHECK(sht_wire.transactions - before == 7U);
+      }
+      CHECK(sht_wire.ranges == 0 && sht_wire.extras == 0);
+      CHECK(!sht_wire.unsafe_parallel_mux);
+    }
     const auto& current_climate = sht_accessories.readings().climate;
     CHECK(!current_climate.valid);
     CHECK(current_climate.sample_seq == failed_climate.sample_seq);
