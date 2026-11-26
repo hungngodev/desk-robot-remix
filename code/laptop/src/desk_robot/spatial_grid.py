@@ -239,13 +239,16 @@ class SpatialGrid:
         cell = self._cells.get((x, y))
         if cell is None:
             return "unknown"
+        # A later lane can reveal that a previously received conversion was old.
+        best_offset = min((r - s for s, r in self._clock_reference.values()), default=None)
+        return self._cell_state(cell, now_us=now_us, best_offset=best_offset)
+
+    def _cell_state(self, cell: _Cell, *, now_us: int, best_offset: int | None) -> str:
         if (cell.obstacle_calibration and (cell.obstacle_calibration != self.calibration_id
                                            or cell.obstacle_epoch != self.epoch)
                 or cell.floor_calibration and (cell.floor_calibration != self.calibration_id
                                                or cell.floor_epoch != self.epoch)):
             return "out_of_calibration"
-        # A later lane can reveal that a previously received conversion was old.
-        best_offset = min((r - s for s, r in self._clock_reference.values()), default=None)
 
         def stale(received_us: int, sample_us: int) -> bool:
             return received_us != 0 and (
@@ -311,19 +314,20 @@ class SpatialGrid:
     def snapshot(self, *, now_us: int) -> SpatialSnapshot:
         if type(now_us) is not int or now_us < 0:
             raise ValueError("Invalid snapshot clock")
-        states = tuple(
-            self.state(x, y, now_us=now_us)
-            for y in range(self.height) for x in range(self.width)
-        )
-        # Route planner allows only these known support states. Its safe-only
-        # admission translates uncalibrated to unsafe, never to free.
-        route_states = tuple("unsafe" if s == "out_of_calibration" else s for s in states)
+        # Unknown cells need no per-cell lookup. Use the same clock reference
+        # for every populated cell in this synchronous snapshot.
+        route_states = ["unknown"] * (self.width * self.height)
+        best_offset = min((r - s for s, r in self._clock_reference.values()), default=None)
         # A snapshot cannot renew the lifetime of any safe cell's evidence.
         # The planner treats expiry as exclusive, including the TTL boundary.
         expires_at_us = now_us + self.ttl_us
-        for index, state in enumerate(states):
+        for (x, y), cell in self._cells.items():
+            if not self._contains_cell(x, y):
+                continue
+            state = self._cell_state(cell, now_us=now_us, best_offset=best_offset)
+            # Uncalibrated cells remain blocked in the route planner.
+            route_states[y * self.width + x] = "unsafe" if state == "out_of_calibration" else state
             if state == "safe":
-                cell = self._cells[(index % self.width, index // self.width)]
                 expires_at_us = min(
                     expires_at_us,
                     min(cell.floor_received_us, cell.obstacle_received_us) + self.ttl_us,
@@ -332,7 +336,7 @@ class SpatialGrid:
             robot_id=self.robot_id, origin_id=self.origin_id, epoch=self.epoch,
             anchor_id=self.anchor_id, calibration_id=self.calibration_id,
             width=self.width, height=self.height, cell_mm=CELL_MM,
-            support=route_states, observed_at_us=self._last_update_us,
+            support=tuple(route_states), observed_at_us=self._last_update_us,
             expires_at_us=expires_at_us, anchored=self.anchored,
         )
 
