@@ -25,6 +25,7 @@ def bridge(monkeypatch):
         "test_desk_bridge", ROOT / "laptop/server/overlay/desk_robot_bridge.py"
     )
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", module)
     monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "s" * 40)
@@ -4176,3 +4177,29 @@ async def test_peer_reconnect_preserves_active_speaker_lease(bridge, monkeypatch
         assert bridge.interrupt_generation[first.device_id] == 7
         assert bridge.tool_turn_cancel_event(first.device_id) is first_tool
         assert not first_tool.is_set()
+
+
+def test_unmapped_session_replacement_retires_only_its_tool_context(bridge, monkeypatch):
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    old = conn("unmapped")
+    replacement = conn("unmapped")
+    peer = conn("mac-02")
+    bridge.register(old)
+    bridge.register(peer)
+    old_signal = bridge.tool_turn_cancel_event(old.device_id)
+    peer_signal = bridge.tool_turn_cancel_event(peer.device_id)
+    bridge.register(old)
+    assert bridge.tool_turn_cancel_event(old.device_id) is old_signal
+    bridge.register(replacement)
+    assert old_signal.is_set()
+    successor_signal = bridge.tool_turn_cancel_event(replacement.device_id)
+    assert successor_signal is not old_signal and not successor_signal.is_set()
+    bridge.unregister(old)
+    assert bridge.connections[replacement.device_id] is replacement
+    assert bridge.tool_turn_cancel_event(replacement.device_id) is successor_signal
+    assert not successor_signal.is_set()
+    assert bridge.tool_turn_cancel_event(peer.device_id) is peer_signal
+    assert not peer_signal.is_set()
+    bridge.unregister(replacement)
+    assert successor_signal.is_set()
+    assert not peer_signal.is_set()

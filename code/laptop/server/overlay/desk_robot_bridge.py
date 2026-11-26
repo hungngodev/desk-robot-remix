@@ -21,6 +21,7 @@ import time
 import wave
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from io import BytesIO
 
 from aiohttp import web
@@ -77,20 +78,44 @@ voice_turn_generation: dict[str, int] = {}
 # One cancellation signal per authenticated head turn. The existing tool
 # bridge awaits it alongside read-only HTTP requests: obsolete camera/VLM
 # work gets cancelled promptly, not merely rejected after a 50s timeout.
-_tool_turn_cancel: dict[str, asyncio.Event] = {}
+@dataclass
+class SessionContext:
+    """Cancellation state owned by one registered head incarnation."""
+
+    connection: object
+    tool_cancel: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+_session_contexts: dict[str, SessionContext] = {}
+
+
+def _session_context(device: str) -> SessionContext:
+    connection = connections.get(device)
+    if connection is None:
+        raise ValueError("Only a connected Xiaozhi head owns a tool turn")
+    context = _session_contexts.get(device)
+    if context is None or context.connection is not connection:
+        if context is not None:
+            context.tool_cancel.set()
+        context = SessionContext(connection)
+        _session_contexts[device] = context
+    return context
 
 
 def tool_turn_cancel_event(device: str) -> asyncio.Event:
-    if device not in connections:
-        raise ValueError("Only a connected Xiaozhi head owns a tool turn")
-    return _tool_turn_cancel.setdefault(device, asyncio.Event())
+    return _session_context(device).tool_cancel
 
 
 def _invalidate_tool_turn(device: str) -> None:
-    current = _tool_turn_cancel.get(device)
-    if current is not None:
-        current.set()
-    _tool_turn_cancel[device] = asyncio.Event()
+    context = _session_context(device)
+    context.tool_cancel.set()
+    context.tool_cancel = asyncio.Event()
+
+
+def _retire_session_context(device: str) -> None:
+    context = _session_contexts.pop(device, None)
+    if context is not None:
+        context.tool_cancel.set()
 
 
 # Never allow one robot to cancel another's reply based on hearing its speaker.
@@ -435,7 +460,9 @@ def register(conn):
         existing = connections.get(conn.device_id)
         if existing is not None and existing is not conn:
             raise RuntimeError("Duplicate live Xiaozhi device identity")
-        connections[conn.device_id] = conn
+        if connections.get(conn.device_id) is not conn:
+        _retire_session_context(conn.device_id)
+    connections[conn.device_id] = conn
 
 
 def unregister(conn):
@@ -460,9 +487,7 @@ def unregister(conn):
         # No memory, camera or status tool from the detached socket may
         # continue waiting on the old turn. A new connection gets its own
         # current signal, preserving the existing identity generation.
-        pending_tool = _tool_turn_cancel.pop(conn.device_id, None)
-        if pending_tool is not None:
-            pending_tool.set()
+        _retire_session_context(conn.device_id)
         try:
             native = _native_adapter()
             if native is not None:
