@@ -124,3 +124,70 @@ int main() { return 0; }
             input=source, text=True, capture_output=True, check=False, timeout=10,
         )
         assert result.returncode == 0, (section, result.stderr)
+
+def _preprocess_body(config, section, standard, extra=()):
+    """Exercise main.cpp's real profile branches without Arduino SDK headers."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ preprocessor unavailable")
+    source = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    source = "\n".join(line for line in source.splitlines() if not line.startswith("#include "))
+    return subprocess.run(
+        [compiler, f"-std={standard}", "-E", "-P", *_flags(config, section),
+         *extra, "-x", "c++", "-"],
+        input=source, text=True, capture_output=True, check=False, timeout=10,
+    )
+
+
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_raw_paw_collection_is_explicit_per_profile(standard):
+    config = _config()
+    for section in config.sections():
+        if not section.startswith("env:"):
+            continue
+        flags = _defines(config, section)
+        enabled = section == "env:esp32_full_pulse_reversed_lab"
+        assert flags.get("ENABLE_PAW_RAW", "0") == ("1" if enabled else "0"), section
+        result = _preprocess_body(config, section, standard)
+        assert result.returncode == 0, (section, result.stderr)
+        source = result.stdout
+        for operation in (
+            "PulsePad paw_pulse", "paw_pulse.begin(", "paw_pulse.poll(",
+            "paw_pulse.invalidate_bus(", "paw_pulse.mux_present(", "set_paw_pulse(",
+        ):
+            assert (operation in source) == enabled, (section, operation)
+        if flags.get("FULL_SENSORS", flags["STEPPER"]) == "1":
+            for operation in (
+                "cap1188.begin(", "cap1188.poll(", "accessories.begin(",
+                "accessories.poll(", "accessories.mux_present()",
+                "tof.note_optional_mux_present()", "tof.poll(", "berry_imu.poll(",
+            ):
+                assert operation in source, (section, operation)
+
+
+@pytest.mark.parametrize("section", ["env:esp32_full", "env:esp32_dc_full"])
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_raw_paw_red_first_requires_explicit_opt_in(section, standard):
+    result = _preprocess_body(
+        _config(), section, standard, ("-DDESK_ROBOT_ENABLE_PAW_RAW=1",),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "paw_pulse.begin(" in result.stdout
+    assert "paw_pulse.poll(" in result.stdout
+    assert "set_paw_pulse(" in result.stdout
+    assert "max30102_fifo_red_first_compiled_unqualified" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("section", "value", "diagnostic"),
+    [
+        ("env:esp32dev", "1", "requires full sensor infrastructure"),
+        ("env:esp32_full", "2", "flag must be 0 or 1"),
+    ],
+)
+def test_raw_paw_collection_rejects_invalid_flags(section, value, diagnostic):
+    result = _preprocess_body(
+        _config(), section, "c++11", (f"-DDESK_ROBOT_ENABLE_PAW_RAW={value}",),
+    )
+    assert result.returncode != 0
+    assert diagnostic in result.stderr

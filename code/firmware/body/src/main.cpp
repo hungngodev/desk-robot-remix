@@ -10,6 +10,17 @@
 #ifndef DESK_ROBOT_FULL_SENSORS
 #define DESK_ROBOT_FULL_SENSORS DESK_ROBOT_STEPPER
 #endif
+// Raw optical paw acquisition is a separate boot-time opt-in, not a
+// consequence of compiling the safety sensors or qualifying Mac interactions.
+#ifndef DESK_ROBOT_ENABLE_PAW_RAW
+#define DESK_ROBOT_ENABLE_PAW_RAW 0
+#endif
+#if DESK_ROBOT_ENABLE_PAW_RAW != 0 && DESK_ROBOT_ENABLE_PAW_RAW != 1
+#error Raw paw collection flag must be 0 or 1
+#endif
+#if DESK_ROBOT_ENABLE_PAW_RAW && !DESK_ROBOT_FULL_SENSORS
+#error Raw paw collection requires full sensor infrastructure
+#endif
 #if DESK_ROBOT_STEPPER && !DESK_ROBOT_FULL_SENSORS
 #error Stepper backend requires the full sensor guard
 #endif
@@ -59,7 +70,9 @@
 #include "RangeTelemetry.h"
 #include "ExpansionTouch.h"
 #include "TouchDebounce.h"
+#if DESK_ROBOT_ENABLE_PAW_RAW
 #include "PulsePad.h"
+#endif
 #include "AccessorySensors.h"
 #include "McpContactEvidence.h"
 #include "TerminalIr.h"
@@ -83,7 +96,9 @@ desk_robot::StepperDrive right_stepper;
 #endif
 desk_robot::TofBus tof;
 desk_robot::ExpansionTouch cap1188;
+#if DESK_ROBOT_ENABLE_PAW_RAW
 desk_robot::PulsePad paw_pulse;
+#endif
 desk_robot::AccessorySensors accessories;
 desk_robot::TerminalIr terminal_ir; // 2 independent direct RMT inputs, read-only
 desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; shares Wire
@@ -641,6 +656,7 @@ void setup() {
   const bool petting_present = tof.bus_accessible() && cap1188.begin(Wire);
   Serial.println(petting_present ? "INFO cap1188_read_only_available" :
                    "INFO cap1188_missing_or_wrong_id");
+#if DESK_ROBOT_ENABLE_PAW_RAW
   const bool paw_present = tof.bus_accessible() && paw_pulse.begin(Wire);
   Serial.println(paw_present ? "INFO max30102_raw_optical_available" :
                                "INFO max30102_optional_unavailable");
@@ -648,6 +664,9 @@ void setup() {
   Serial.println("INFO max30102_fifo_ir_first_compiled_unqualified");
 #else
   Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
+#endif
+#else
+  Serial.println("INFO max30102_raw_collection_disabled");
 #endif
   const bool accessory_mux = tof.bus_accessible() && accessories.begin(
       Wire, [] { return tof.bus_accessible(); });
@@ -662,7 +681,11 @@ void setup() {
   // A mux ACK proves presence even if downstream configuration/readback
   // fails. Do not use sensor begin() success as the isolation contract.
   // This also protects the five-ranger bench if a later 0x71 probe succeeds.
-  if (cap1188.present() || paw_pulse.mux_present() || accessories.mux_present())
+  if (cap1188.present() ||
+#if DESK_ROBOT_ENABLE_PAW_RAW
+      paw_pulse.mux_present() ||
+#endif
+      accessories.mux_present())
     tof.note_optional_mux_present();
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");
@@ -729,8 +752,10 @@ void invalidate_shared_bus_if_faulted() {
   control.set_imu(berry_imu.reading());
   cap1188.invalidate_bus();
   control.set_cap(false, 0);
+#if DESK_ROBOT_ENABLE_PAW_RAW
   paw_pulse.invalidate_bus();
   control.set_paw_pulse(paw_pulse.sample());
+#endif
   accessories.invalidate_bus();
   control.set_accessories(accessories.readings(), millis());
 }
@@ -817,11 +842,15 @@ void loop() {
       cap1188.invalidate_bus();
       control.set_cap(false, 0);
     }
-  } else {
+  }
+#if DESK_ROBOT_ENABLE_PAW_RAW
+  else {
     if (tof.clients_accessible()) paw_pulse.poll(millis());
     if (!tof.clients_accessible()) paw_pulse.invalidate_bus();
     control.set_paw_pulse(paw_pulse.sample());
   }
+#endif
+  // Keep the existing CAP1188 cadence even without an optical client.
   cap_next = !cap_next;
   service_safety_checkpoint();
 #if DESK_ROBOT_ENABLE_HAPTIC

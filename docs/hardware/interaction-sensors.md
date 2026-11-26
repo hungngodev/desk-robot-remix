@@ -99,6 +99,21 @@ See [canonical wiring](wiring.md) for all eight accessory lanes.
 
 Lane 2 remains ADS1115 force (0x48); lane 4 remains INA226 (0x40) and
 MAX17048 (0x36); lanes 6 and 7 remain isolated AS5600 wheel encoders (0x36).
+Raw MAX30102 collection is disabled by default in WROOM images, including
+`esp32_full` and `esp32_dc_full`. A full-sensor lab build must explicitly set
+`DESK_ROBOT_ENABLE_PAW_RAW=1` to initialize and poll the optical FIFO. The
+`esp32_full_pulse_reversed_lab` image opts in with reversed channel order;
+normal red-first trials use the same explicit collection flag without the
+reversal. Disabled images retain the auxiliary pulse schema for compatibility
+with absent/invalid, zero-valued placeholders, not acquired raw samples.
+This is a boot-time firmware choice, independent of the Mac's runtime
+`paw_contact_interactions_qualified` setting. Enabling raw collection allows
+red/IR readings to travel over auxiliary telemetry even when derived Mac paw
+interactions are disabled; it does not grant physical or medical qualification.
+Do not enable on a person's paw contact without consent. Disabling the firmware
+collection flag is not proof of optical sensor power removal or physical LED
+shutdown after a controller-only reset.
+
 Optional peripheral failure must never bypass local dock or cliff evidence.
 Do not allocate a second sensor for APDS color/light, a second IMU, or a
 second NFC reader just to expose a deferred function. All physical carrier,
