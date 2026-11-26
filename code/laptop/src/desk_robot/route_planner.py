@@ -251,7 +251,7 @@ def plan_route(
         return proposal("at_observation_pose", (request.start,), request.heading)
 
     start_state = (*request.start, request.heading)
-    best = {start_state: 0}
+    best = {start_state: (0, 0)}
     parent: dict[tuple[int, int, int], tuple[int, int, int]] = {}
     queue = [(abs(request.goal[0] - request.start[0])
               + abs(request.goal[1] - request.start[1]), 0, 0, *start_state)]
@@ -260,12 +260,12 @@ def plan_route(
         expired = live()
         if expired:
             return refuse(expired)
-        if expanded >= max_expansions:
-            return refuse("search_budget_exhausted")
         _, cost, turns, x, y, heading = heapq.heappop(queue)
         state = (x, y, heading)
-        if cost != best.get(state):
+        if (cost, turns) != best.get(state):
             continue
+        if expanded >= max_expansions:
+            return refuse("search_budget_exhausted")
         expanded += 1
         if ((x, y) == request.goal and
                 request.goal_heading in (None, heading)):
@@ -292,9 +292,10 @@ def plan_route(
                 continue
             next_state = (nx, ny, new_heading)
             new_cost = cost + 1 + int(turning)
-            if new_cost >= best.get(next_state, math.inf):
+            new_rank = (new_cost, turns + int(turning))
+            if new_rank >= best.get(next_state, (math.inf, math.inf)):
                 continue
-            best[next_state] = new_cost
+            best[next_state] = new_rank
             parent[next_state] = (x, y, heading)
             priority = new_cost + abs(request.goal[0] - nx) + abs(request.goal[1] - ny)
             heapq.heappush(queue, (priority, new_cost, turns + int(turning),
