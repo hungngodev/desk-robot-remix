@@ -1982,6 +1982,8 @@ class MultimodalOrchestrator:
             jpeg = await head.snapshot()
             return jpeg, time.monotonic(), None
 
+        generation = self.hub._generation[robot_id]
+        last_capture = self.hub.last_capture[robot_id]
         task = asyncio.create_task(read_snapshot())
         self._head_snapshot_tasks[robot_id] = task
         # Observe late adapter failures; obsolete frames are never published.
@@ -1999,6 +2001,14 @@ class MultimodalOrchestrator:
                     if source == "proactive" else "Live human camera timed out"
                 ),
             )
+        except Exception:
+            # A failed device read cannot leave a last-good JPEG eligible
+            # for native speech coalescing. Preserve a genuinely newer
+            # receipt or consent generation published while the read waited.
+            if (generation == self.hub._generation[robot_id]
+                    and last_capture == self.hub.last_capture[robot_id]):
+                self.hub.discard_video(robot_id)
+            raise
         finally:
             if self._proactive_snapshots.get(robot_id) is task:
                 self._proactive_snapshots.pop(robot_id, None)

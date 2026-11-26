@@ -593,3 +593,64 @@ async def test_stream_activation_drains_still_and_blocks_fallback(monkeypatch):
         with pytest.raises(HeadError, match="Continuous XIAO camera stream"):
             await head.snapshot()
     assert paths == ["/api/camera.jpg", "/api/camera.mjpg"]
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("newer_receipt", [False, True])
+async def test_failed_http_snapshot_invalidates_only_old_hub_receipts(
+    monkeypatch, newer_receipt,
+):
+    """A failed still must not make a previous JPEG look like a new observation."""
+    import time
+    from io import BytesIO
+
+    from desk_robot.multimodal import MultimodalOrchestrator
+    from PIL import Image
+
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    robot = RobotConfig(
+        id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+        head_url="http://head.example",
+    )
+    settings = SimpleNamespace(
+        robots=[robot], voice_vision_tools_enabled=True, vision_model="local-vlm",
+    )
+    output = BytesIO()
+    Image.new("RGB", (16, 16), "gray").save(output, format="JPEG")
+    jpeg = output.getvalue()
+
+    async def respond(request):
+        assert request.url.path == "/api/camera.jpg"
+        started.set()
+        await release.wait()
+        return httpx.Response(503)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(robot, client)
+        orchestrator = MultimodalOrchestrator(
+            settings, {robot.id: head}, None, asyncio.Lock(),
+        )
+        hub = orchestrator.hub
+        hub.offer(robot.id, jpeg, time.monotonic() - 0.1, source="speech")
+        pending = asyncio.create_task(
+            orchestrator.capture(robot.id, source="voice_question")
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            fresh = None
+            if newer_receipt:
+                fresh = hub.offer(robot.id, jpeg, time.monotonic(), source="speech")
+            release.set()
+            with pytest.raises(HeadError, match="head request failed"):
+                await asyncio.wait_for(pending, timeout=1)
+            if fresh is None:
+                assert not hub.frames[robot.id]
+                assert not hub.selected(robot.id, "What do you see?", time.monotonic())
+            else:
+                assert hub.frames[robot.id][-1] is fresh
+        finally:
+            release.set()
+            await asyncio.gather(pending, return_exceptions=True)
+            await orchestrator.close()
+
