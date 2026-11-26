@@ -75,3 +75,21 @@ def test_demo_sqlite_startup_error_is_actionable(monkeypatch, capsys, tmp_path):
     assert "memory_dir" in output.err
     assert "Traceback" not in output.err
     assert str(tmp_path) not in output.err
+
+
+@pytest.mark.parametrize("missing", [None, "OPERATOR", "TOOLS"])
+def test_doctor_credentials_guidance_preserves_private_values(monkeypatch, capsys, missing):
+    for name in ("OPERATOR", "TOOLS"):
+        if name == missing:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, "private-test-marker" * 3)
+    _invoke(monkeypatch, _settings(), "doctor")
+    output = capsys.readouterr()
+    report = json.loads(output.out)
+    assert report["credentials_present"] is (missing is None)
+    if missing is None:
+        assert "credentials_next_action" not in report
+    else:
+        assert "secrets --add-missing" in report["credentials_next_action"]
+    assert "private-test-marker" not in output.out + output.err

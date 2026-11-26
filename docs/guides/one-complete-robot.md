@@ -78,6 +78,22 @@ The already committed source and host tests cover room SCD40 readiness bus error
 
 Follow [Mac and firmware interfaces](interfaces.md), [live conversation](live-conversation.md), and [multimodal world evidence ownership](multimodal-voice-video-orchestration.md). Keep Xiaozhi as the single realtime microphone, speaker and MCP route. Only consented persistent camera and microphone streams may contribute. Old frames, stale tools and another pet's memory cannot authorize movement. New human speech preempts speech playback while the independent WROOM keeps local safety authority.
 
+**First-minute read-only preflight:** From `code/`, run
+`uv run --no-sync desk-robot --config config/local.toml doctor` after creating
+your local configuration as described in the Mac interfaces guide. The command
+does not arm motors, open USB serial ports or initialize private memory.
+If `credentials_present` is false, use the same configuration (and any custom
+`--secrets` path) with `secrets --add-missing`, then repeat doctor. This
+preserves existing token values; do not print, paste or commit them.
+For an enabled station, `device_unavailable` means connect USB and correct
+`room_station_port` to the direct device node, or leave the optional station
+disabled. `device_present_not_verified` is only a node check, not proof of
+communication, live sensors or qualification. The ordinary doctor JSON report
+is diagnostic rather than a release gate; `physical_test_status` remains
+`not run`. A simulation demo that encounters an unavailable SQLite database
+exits with memory-directory guidance; preserve existing private databases
+rather than deleting them. These checks do not change the physical HOLD.
+
 Quiet mode uses the existing operator-only `POST /v1/pet/{robot_id}/quiet` route. Send `{"quiet": true}` to suppress spontaneous pet speech and activity while keeping user-requested interaction available, and send `{"quiet": false}` through the same operator route to leave quiet mode. The tool token is intentionally not authorized to change quiet mode. Entering quiet cancels current pet speech through the same bounded stop path; it does not arm movement, clear a local WROOM fault or qualify an acoustic stop.
 
 `cli.py` does not define a `quiet` subcommand; use the existing CLI for status and full STOP, and `curl` with your private operator token from `local.env` (never echo or commit token values, and replace `robot-01` with your configured ID from `config/local.toml`) for quiet toggling. Run the following commands from the repository's `code/` directory; issue STOP independently of the status result:

@@ -397,6 +397,11 @@ def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, ob
             for r in settings.robots
         ],
     }
+    if not result["credentials_present"]:
+        result["credentials_next_action"] = (
+            "Run desk-robot with the same config and secrets options and the "
+            "secrets --add-missing command, then rerun doctor. Do not share token values."
+        )
     if args.live or args.look:
         result["live_media"] = asyncio.run(inspect_live_media(
             settings, args.robot or settings.robots[0].id,
