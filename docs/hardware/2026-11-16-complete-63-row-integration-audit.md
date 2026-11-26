@@ -31,7 +31,7 @@ This report deliberately distinguishes a source path from real compatibility. A 
 | Pet or dock | `as5600` | 15 | [source](../../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp) | Raw angle driver | Magnet axial gap and calibrated wheel odometry |
 | Pet or dock | `encoder_magnets` | 15 | [source](../../docs/hardware/full-feature-wiring-and-shopping.md) | Mechanical only | Diametric magnet orientation, shaft alignment, gap |
 | Pet or dock | `ina226` | 5 | [source](../../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp) | Raw power read source | Shunt rating and calibration under loaded current |
-| Pet or dock | `max17048` | 5 | [source](../../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp) | Raw gauge read source | Avoid second gauge if BQ27441 charger selected |
+| Pet or dock | `max17048` | 5 | [source](../../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp) | Raw gauge read source | MAX17048 is the selected optional gauge path; do not add BQ27441 |
 | Pet or dock | `cap_power` | 5 | [source](../../docs/hardware/charging-design-and-validation.md) | No qualified charger circuit | 1S protection, NTC, load sharing, contact isolation |
 | Pet or dock | `sensor_3v3` | 5 | [source](../../code/scripts/power_preflight.py) | Power design only | Measured sensor current and regulator thermal margin |
 | Pet or dock | `switch_power` | 5 | [source](../../docs/hardware/charging-design-and-validation.md) | Power design only | Fuse, rated leads, polarity and connector keying |
@@ -63,8 +63,8 @@ This report deliberately distinguishes a source path from real compatibility. A 
 | Supplementary register entry | Quantity | Parent primary role | Disposition | Pilot shown | Physical blocker |
 | --- | ---: | --- | --- | ---: | --- |
 | N20 100:1 MP 6V motors | 10 | `stepper` | Unselected motor alternative | 0 | Two per pet, 10 fleet; source motor driver option, tracks still to fit; Owned 28BYJ48 must be load tested first; $22.03 premium not selected for purchasing |
-| DRV8833 dual H bridge | 5 | `stepper` | Unselected motor alternative; guarded source profile exists | 0 | Reuse reportedly owned spare DRV8833 first and verify 3.3V logic, driver polarity, 5V/low-cell motor load and real current. Pololu premium carrier not an approved purchase |
-| BQ24075 battery power path and BQ27441 gauge | 5 | `cap_power` | Unselected charger and gauge alternative | 0 | One per pet, bench verify net charge and thermistor; Duplicate with separate MAX17048; select one gauge and verify pack NTC |
+| DRV8833 dual H bridge | 5 | `uln2003` | Unselected motor alternative; guarded source profile exists | 0 | Reuse reportedly owned spare DRV8833 first and verify 3.3V logic, driver polarity, 5V/low-cell motor load and real current. Pololu premium carrier not an approved purchase |
+| BQ24075 power-path source, NO second SoC gauge | 5 | `cap_power` | Selected source architecture; exact carrier unselected | 0 | BQ24075 class load sharing, real connected NTC, separate verified buck/boost; BQ27441 excluded in favor of MAX17048; pack and carrier HOLD |
 | 5V switching regulator | 5 | `cap_power` | Candidate, unselected power subsystem | 0 | One per pet, low cell current/thermal test; Low cell power input and thermal qualification missing |
 | Protected NTC 1S battery pack | 5 | `cap_power` | Needed physical subsystem, exact pack unselected | 0 | Five eventual, order only once fit and load measured |
 | Independent 5V dock adapter | 5 | `dock_fixture` | Needed physical subsystem, connector unselected | 1 | 5 eventual adapters; connector and protective circuit unselected |
@@ -73,9 +73,26 @@ This report deliberately distinguishes a source path from real compatibility. A 
 | True room CO2 sensor | 1 | `scd40` | Already counted in station role | 1 | Exactly one shared station |
 | Room gas/environment sensor | 1 | `bme688` | Already counted in station role | 1 | Exactly one station, raw gas not VOC ppm |
 | Room presence radar | 1 | `ld2410c` | Already counted in station role | 1 | Exactly one station, 256000 baud UART carrier |
-| Room thermal 8x8 array | 1 | `amg8833` | Already counted in station role | 0 | Exactly one station, no identity classification; Shared station optional: cost/added value and exact 3.3V bus must be proven |
-| Optional capacitive soil probe | 1 | `soil_probe` | Already counted in station role | 0 | Shared station optional and disabled in firmware |
+| Room thermal 8x8 array | 1 | `amg8833` | Already counted in station role; conditional optional, not selected | 0 | One visible option only, excluded from default checkout; exact 3.3V bus, cost and physical evidence required |
+| Required shared-station capacitive soil probe | 1 | `soil_probe` | Already counted in station role | 0 | Required role; sampling disabled until exact carrier, isolation and wet/dry calibration are qualified |
 | Optional NFC toy stickers | 10 | `nfc_game_props` | Already counted in station role | 0 | 10 game tokens optional, not access control |
+
+## Firmware pin ownership reconciliation (2026-11-25)
+
+This is a source cross-check, not a replacement harness or physical receipt. The 49 primary and 14 linked role counts remain unchanged. Direct MCU GPIO applies only to a subset of the roles; passive parts, mux peripherals, dock and station roles must not acquire invented WROOM or Sense pins.
+
+| Roles covered by pin owner | Live source contract |
+| --- | --- |
+| `xiao_sense`, `oled`, `amp`, `speaker`, `rgb`, `logic_level` | [Sense config](../../code/firmware/head/sense/config.h): PDM clock/data 42/41 at 16 kHz; I2S BCLK/LRCK/DOUT 4/7/8 at 32 kHz; OLED SDA/SCL 5/6 on I2C1, camera SCCB on I2C0; RGB GPIO9 reserved, opt-in only; SD slot empty. Speaker and external logic buffer are not additional GPIO owners. |
+| `wroom`, `stepper`, `uln2003`, `mg90s`, N20 and DRV8833 linked alternatives | [BodyPins](../../code/firmware/body/include/BodyPins.h): UART RX/TX 16/17 (Sense TX/RX 2/1); stepper phases 13/14/25/26 and 27/32/33/23; exclusive DC inputs 25/26/27/32, guarded heartbeat 23 only in DC profile; lift/grip 18/19, 50 Hz servo channels 4/5 separate from 20 kHz DC channels 0..3. Independent cutoff and actual stopping remain HOLD. |
+| `imu`, `max30102`, `cliff_obstacle`, `i2c_mux`, `cap1188`, `apds9960`, `fsr`, `ads1115`, `as5600`, `ina226`, `max17048`, `bmp280`, `sht41`, `pn532`, `mcp23017` | WROOM SDA/SCL 21/22; mux RESET passively high, no GPIO4 reset. [TofBus](../../code/firmware/body/lib/TofBus/TofBus.h) owns 0x70, eight 0x29 VL53L0X (five critical, three read-only in full profile), separate 0x71 accessory mux. FSRs use ADC inputs, not dedicated MCU pins. Exact peripheral lane and carrier wiring remain in the canonical harness. |
+| `head_touch`, `bumper`, `dock_ir_receivers` | WROOM input-only GPIO34, 35, 36/39 respectively; external bias and physical NC continuity required where applicable. |
+| `reed`, `pir`, `haptic_motor`, `haptic_driver`, `dock_contacts` | MCP23017 on accessory 0x71 lane 5, address 0x20; GPB0/1 read-only reed/PIR, GPB2 optional haptic edge, GPA0/1 seat and GPA2/3 charger status inputs only; guarded DC GPB3 nFAULT. No charger-enable pin or qualified power netlist. |
+| `dock_ir_beacon_controller`, `dock_ir_emitter_channels`, linked transistor channels | Separate Nano reference D3 logic output sends identical NEC frames to two independently aimed external transistor channels; no two independent MCU outputs or charge authority. |
+| `scd40`, `bme688`, `ld2410c`, `soil_probe`, `amg8833`, `room_controller` and six matching shared station linked entries | Separate Feather source: Wire bus, Serial1 at 256000 for radar, A0 for opt-in soil acquisition, thermal 0x69; exact board pins and carrier remain physical HOLD. |
+| `touch_electrodes`, `encoder_magnets`, `cap_power`, `sensor_3v3`, `switch_power`, `dock_fixture`, `assembly`, `nfc_game_props`, linked charger/boost/pack/adapter/NFC entries | Passive or external hardware, power design, CAD or tag roles; no dedicated MCU GPIO to assert. NFC tags use the existing PN532 path. |
+
+The existing [63-role source ownership map](full-63-role-source-ownership.json) names source and host test paths for every role. Those are references, not executed per-role electrical tests. In particular the canonical plan's historical BQ24075 linked display name still mentions BQ27441; the purchase register and selected gauge policy exclude it. Do not interpret that label as a second gauge requirement.
 
 ## Real gaps to close before purchase
 
@@ -89,7 +106,7 @@ This report deliberately distinguishes a source path from real compatibility. A 
 
 ## Verification receipts and next review
 
-The current script `code/scripts/procurement_release.py` refuses fleet release until source and physical evidence receipts are supplied. The new `code/tests/test_full_purchase_register_integrity.py` adds structural checks for all 14 supplement names, parent count, 42 plus 7 primary roles and unselected pilot amounts. Source parsing in this audit was performed against the live GitHub content. Do not claim the host `pytest`, PlatformIO, ESP-IDF, physical charger, source fit or fleet trial passed merely because this table was generated.
+The current script `code/scripts/procurement_release.py` refuses fleet release until source and physical evidence receipts are supplied. The new `code/tests/test_full_purchase_register_integrity.py` adds structural checks for all 14 supplement names, parent count, 42 plus 7 primary roles and unselected pilot amounts. The original source parsing was performed against the live GitHub content on 2026-11-16; subsequent role lineage corrections below remain source evidence only. Do not claim the host `pytest`, PlatformIO, ESP-IDF, physical charger, source fit or fleet trial passed merely because this table was generated.
 
 ## 2026-11-16 price correction for one room thermal sensor
 

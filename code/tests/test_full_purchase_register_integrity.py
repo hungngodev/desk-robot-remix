@@ -344,3 +344,26 @@ def test_first_unit_shopping_scopes_and_pilot_source_links():
         url = pilot[role][3]
         assert url in checklist, role
         assert url in register, role
+
+
+def test_audit_supplemental_lineage_matches_current_register_contract():
+    """The audit must cover all linked roles without reviving retired selections."""
+    audit = HARDWARE / "2026-11-16-complete-63-row-integration-audit.md"
+    text = audit.read_text(encoding="utf-8")
+    section = text.split("## Additional fourteen rows, without duplicate buying", 1)[1]
+    section = section.split("## ", 1)[0]
+    rows = {}
+    for line in section.splitlines():
+        if not line.startswith("| ") or line.startswith(("| ---", "| Supplementary")):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        assert len(cells) == 6, line
+        assert cells[0] not in rows, cells[0]
+        rows[cells[0]] = cells
+    assert set(rows) == set(EXTRA)
+    for name, (_, count, parent, _) in EXTRA.items():
+        assert int(rows[name][1]) == count, name
+        assert rows[name][2] == f"`{parent}`", name
+    assert "BQ27441 excluded" in rows["BQ24075 power-path source, NO second SoC gauge"][5]
+    assert "Required role" in rows["Required shared-station capacitive soil probe"][5]
+    assert "not selected" in rows["Room thermal 8x8 array"][3]
