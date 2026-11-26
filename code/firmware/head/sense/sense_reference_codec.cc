@@ -371,6 +371,9 @@ void SenseReferenceCodec::EnableOutput(bool enable) {
         // Urgent output disable invalidates reference for canceled audio.
         ClearReference();
     }
+    // This controls the inherited digital I2S output only. No SD_MODE GPIO
+    // or amplifier supply switch is wired in this profile. It cannot prove
+    // acoustic silence, pop-free shutdown, or removal of amplifier power.
     NoAudioCodec::EnableOutput(enable);
 }
 

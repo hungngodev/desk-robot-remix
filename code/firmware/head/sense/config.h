@@ -19,6 +19,8 @@
 #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_4
 #define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_7
 #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8
+// No MCU-controlled SD_MODE or switched amplifier supply in this profile.
+#define AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_NC
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 
 #define DISPLAY_SDA_PIN GPIO_NUM_5
@@ -87,6 +89,8 @@ static_assert(AUDIO_I2S_SPK_GPIO_BCLK == GPIO_NUM_4 &&
               AUDIO_I2S_SPK_GPIO_LRCK == GPIO_NUM_7 &&
               AUDIO_I2S_SPK_GPIO_DOUT == GPIO_NUM_8,
               "Sense MAX98357A I2S wiring must remain GPIO4/7/8");
+static_assert(AUDIO_AMP_SD_MODE_GPIO == GPIO_NUM_NC,
+              "Sense amplifier has no qualified MCU shutdown connection");
 static_assert(AUDIO_PDM_MIC_GPIO_SCK == GPIO_NUM_42 &&
               AUDIO_PDM_MIC_GPIO_DIN == GPIO_NUM_41,
               "Sense onboard PDM wiring must remain GPIO42/41");

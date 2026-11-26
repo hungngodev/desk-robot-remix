@@ -159,6 +159,7 @@ add autofocus controls or establish optical/pickup performance.
 | --- | --- | --- |
 | SSD1306 SDA / SCL | 5 / 6 | D4 / D5, head-owned I²C1, 128×64, address0x3C |
 | MAX98357 BCLK / LRC / DIN | 4 / 7 / 8 | D3 / D8 / D9 |
+| MAX98357A SD_MODE | Not connected to MCU | Module-specific enable/channel strap; verify actual carrier |
 | Body UART TX / RX | 2 / 1 | D1 / D0 → WROOM RX16 / TX17, 3.3V1152008N1 |
 | Onboard microphone clock / data | 42 / 41 | PDM, internal expansion connection |
 | Camera D0–D7 | 15,17,18,16,14,12,11,48 | Stock Sense camera |
@@ -257,6 +258,15 @@ of a trial to erase failure evidence. Save the actual bench report and the
 independent acoustic waveform/stop timing trials before A2 approval.
 
 ## Bounded I2S write under urgent speech interruption
+
+`EnableOutput(false)` disables the digital I2S output and invalidates the
+software reference. The selected pin map has no MCU-controlled SD_MODE or
+switched amplifier supply. Do not equate a decoder reset, I2S disable or
+BOOT privacy mute with amplifier rail isolation, pop-free shutdown or
+measured acoustic silence. The [MAX98357A datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX98357A-MAX98357B.pdf)
+identifies SD_MODE as shutdown/channel select; verify the actual carrier
+strap, clock stop/restart behavior, differential speaker output and supply
+current on the bench. Do not allocate another GPIO or change the BOM here.
 
 The exact pinned Xiaozhi `NoAudioCodec::Write` normally calls the ESP-IDF
 `i2s_channel_write` with `portMAX_DELAY` while holding its codec mutex.
