@@ -2965,6 +2965,14 @@ def main() -> int:
                       "receipt manifest", file=sys.stderr)
                 return 2
         try:
+            from check_trials import summarize
+            from physical_trial_ledger import require_recorded_physical_trials
+
+            require_recorded_physical_trials(ROOT, summarize, plan.get("physical_trial_count"))
+        except (OSError, ValueError, TypeError, KeyError, csv.Error) as exc:
+            print("HOLD: canonical physical trial prerequisite: " + str(exc), file=sys.stderr)
+            return 2
+        try:
             from verify_procurement_receipts import (
                 audit_release,
                 checkout_sha,

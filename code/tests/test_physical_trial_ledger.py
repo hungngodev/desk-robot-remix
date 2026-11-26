@@ -148,3 +148,40 @@ def test_archive_metadata_must_remain_both_and_non_claiming(tmp_path, patch, mat
     write_ledger(tmp_path, patch=patch)
     with pytest.raises(ValueError, match=match):
         ledger.validate_canonical_ledger(tmp_path, zero_score)
+
+
+@pytest.mark.parametrize("claim", [0, 1, True, 1.0, "1", None, -1])
+def test_release_requires_positive_canonical_count(tmp_path, claim):
+    write_ledger(tmp_path)
+    with pytest.raises(ValueError, match="positive canonical ledger count"):
+        ledger.require_recorded_physical_trials(tmp_path, zero_score, claim)
+
+
+def test_release_rejects_invented_summary_count(tmp_path):
+    write_ledger(tmp_path, patch={"physical_trial_count": 1})
+    with pytest.raises(ValueError, match="disagrees with CSV: physical_trial_count"):
+        ledger.require_recorded_physical_trials(tmp_path, zero_score, 1)
+
+
+def test_release_count_matches_first_robot_only(tmp_path):
+    def score(rows, robot_id):
+        return zero_score([], robot_id)
+
+    row = dict.fromkeys(ledger.COLUMNS, "recorded")
+    row["robot_id"] = "robot-02"
+    path = write_ledger(tmp_path, rows=[row])
+    with pytest.raises(ValueError, match="positive canonical ledger count"):
+        ledger.require_recorded_physical_trials(tmp_path, score, 1)
+    row["robot_id"] = "robot-01"
+    csv_path = path.parents[1] / "physical-trials.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=ledger.COLUMNS)
+        writer.writeheader()
+        writer.writerow(row)
+    path.write_text(json.dumps({**zero_score([], "robot-01"), "physical_trial_count": 1}),
+                    encoding="utf-8")
+    # A positive matching count is only a prerequisite, never bench approval.
+    ledger.require_recorded_physical_trials(tmp_path, score, 1)
+    for invalid in (0, 2, True, 1.0):
+        with pytest.raises(ValueError, match="positive canonical ledger count"):
+            ledger.require_recorded_physical_trials(tmp_path, score, invalid)

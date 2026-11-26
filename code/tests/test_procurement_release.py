@@ -3074,3 +3074,48 @@ def test_drx723_plan_brand_and_pilot_receipt_cannot_bypass_purchase_policy():
     tof = next(row for row in pilot["roles"] if row["id"] == "cliff_obstacle")
     assert tof["pilot_action"] == "HOLD_UNAPPROVED_NEW_HARDWARE"
     assert tof["pilot_sample_quantity"] == 0
+
+
+@pytest.mark.parametrize(("flag", "fmt"), [
+    ("--require-first-robot", "first-robot-json"),
+    ("--require-first-robot", "first-robot-markdown"),
+    ("--require-release", "json"),
+    ("--require-release", "csv"),
+    ("--require-release", "markdown"),
+])
+def test_strict_cli_cannot_use_custom_plan_to_invent_trials(
+    tmp_path, monkeypatch, capsys, flag, fmt,
+):
+    import csv
+    import json
+
+    from check_trials import summarize
+    from physical_trial_ledger import COLUMNS
+
+    records = tmp_path / "docs/records"
+    (records / "reports").mkdir(parents=True)
+    with (records / "physical-trials.csv").open("w", newline="", encoding="utf-8") as stream:
+        csv.writer(stream).writerow(COLUMNS)
+    summary = {**summarize([], "robot-01"), "physical_trial_count": 0}
+    (records / "reports/physical-summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    plan = tmp_path / "custom.json"
+    plan.write_text('{"physical_trial_count": 1}', encoding="utf-8")
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text('{"system": {"mock": {"result": "pass"}}}', encoding="utf-8")
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    monkeypatch.setattr(mod, "generate", lambda *_: {"order_released": True})
+    monkeypatch.setattr(mod, "first_robot_projection", lambda _: {"purchase_approved": True})
+    monkeypatch.setattr(mod, "cost_quote", lambda *_: {})
+    monkeypatch.setattr(mod, "_confirmed_first_unit_prior_payment_missing", lambda *_: False)
+    monkeypatch.setattr(mod, "_first_unit_paid_history_review_missing", lambda *_: False)
+    # An online receipt or CI check must not override the local count prerequisite.
+    monkeypatch.setitem(sys.modules, "verify_procurement_receipts", None)
+    monkeypatch.setattr(sys, "argv", [
+        "procurement_release.py", "--plan", str(plan), "--evidence", str(evidence),
+        flag, "--format", fmt,
+    ])
+    assert mod.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "HOLD: canonical physical trial prerequisite" in captured.err
+    assert "positive canonical ledger count" in captured.err

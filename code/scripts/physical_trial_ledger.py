@@ -46,7 +46,7 @@ _ARCHIVE_METADATA = {
 }
 
 
-def validate_canonical_ledger(root: Path, summarize):
+def validate_canonical_ledger(root: Path, summarize) -> int:
     records = root / "docs/records"
     with (records / "physical-trials.csv").open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream, strict=True)
@@ -78,3 +78,11 @@ def validate_canonical_ledger(root: Path, summarize):
         # JSON comparison distinguishes booleans, integers and floating-point values.
         if json.dumps(value, sort_keys=True) != json.dumps(expected_value, sort_keys=True):
             raise ValueError(f"Canonical physical summary disagrees with CSV: {key}")
+    return expected["physical_trial_count"]
+
+
+def require_recorded_physical_trials(root: Path, summarize, claimed_count: object) -> None:
+    """Require a positive matching ledger count, not proof of bench acceptance."""
+    recorded = validate_canonical_ledger(root, summarize)
+    if type(claimed_count) is not int or recorded < 1 or claimed_count != recorded:
+        raise ValueError("Plan physical trial count must match positive canonical ledger count")
