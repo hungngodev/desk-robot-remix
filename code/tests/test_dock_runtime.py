@@ -261,7 +261,8 @@ async def test_fake_or_bad_dock_calibration_never_looks_or_drives(tmp_path, chan
 async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
     tmp_path, monkeypatch,
 ):
-    import time
+    now = 100.0
+    monkeypatch.setattr(dock_runtime, "time", SimpleNamespace(monotonic=lambda: now))
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
         "schema_version": 1,
@@ -271,7 +272,9 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
     head = Head()
 
     def slow_detector(image, camera, *, captured_at):
-        time.sleep(0.25)
+        nonlocal now
+        assert captured_at == pytest.approx(100.0)
+        now += 0.25
         return DockPose(0, 0, 450, 0.5, captured_at)
 
     mock_dock_detector(monkeypatch, slow_detector)
@@ -279,6 +282,7 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
         head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
     )
     assert result["phase"] == "hold"
+    assert result["source"] == "head_jpeg_observed_on_mac_receipt"
     assert "stale" in result["reason"].lower()
     assert result["motor_authorized"] is False
     assert result["charging_authorized"] is False
@@ -699,8 +703,8 @@ def test_original_dock_receipt_time_is_not_replaced_after_waiting():
 async def test_dock_detector_delay_expires_original_receipt_without_motion(
     tmp_path, monkeypatch,
 ):
-    import time
-
+    now = 100.0
+    monkeypatch.setattr(dock_runtime, "time", SimpleNamespace(monotonic=lambda: now))
     calibration = tmp_path / "dock.json"
     calibration.write_text(json.dumps({
         "schema_version": 1,
@@ -710,10 +714,12 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
 
     class DelayedFrame(Head):
         async def snapshot_for_dock(self):
-            return b"\xff\xd8\xff\xd9", time.monotonic() - 0.15
+            return b"\xff\xd8\xff\xd9", now - 0.15
 
     def slow_detector(jpeg, cal, *, captured_at):
-        time.sleep(0.08)
+        nonlocal now
+        assert captured_at == pytest.approx(99.85)
+        now += 0.08
         return DockPose(0, 0, 450, 0.5, captured_at)
 
     mock_dock_detector(monkeypatch, slow_detector)
@@ -722,6 +728,7 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
         head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
     )
     assert result["phase"] == "hold"
+    assert result["source"] == "head_jpeg_observed_on_mac_receipt"
     assert "stale" in result["reason"].lower()
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert head.commands == []
