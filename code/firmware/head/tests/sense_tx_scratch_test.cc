@@ -115,6 +115,18 @@ public:
 #include "publish.inc"
 #define CHECK(x) do { if (!(x)) { std::cerr << "FAIL " << #x << '\n'; return 1; } } while(false)
 int main() {
+    desk_robot::ReferenceDecimator decimator;
+    const auto before_filter = allocations;
+    for (int cycle = 0; cycle < 1000; ++cycle) {
+        decimator.Reset();
+        int16_t output = 0;
+        CHECK(decimator.Push(30000, output));
+        decimator.ClearHistory();
+        CHECK(!decimator.Push(0, output));
+        CHECK(decimator.Push(0, output) && output == 0);
+    }
+    CHECK(allocations == before_filter);
+    std::cout << "PASS allocation-free FIR reset and history clearing\n";
     static int16_t pcm[NoAudioCodec::kSenseTxScratchSamples];
     pcm[0] = -32768;
     {
@@ -155,6 +167,8 @@ int main() {
     err = 0;
     SenseReferenceCodec sense;
     std::fill_n(pcm, 64, -32768);
+    const auto sense_allocations = allocations;
+    const auto sense_startup_allocations = startup_allocations;
     change_volume = &sense;
     CHECK(sense.Write(pcm, 64) == 64);
     CHECK(first_sample == INT32_MIN);
@@ -172,5 +186,7 @@ int main() {
     CHECK(sense.n == 96);
     CHECK(sense.ring[95] == -328);
     CHECK(!sense.reference_integrity_failed_);
+    CHECK(allocations == sense_allocations);
+    CHECK(startup_allocations == sense_startup_allocations);
     std::cout << "PASS actual accepted PCM gain across mid-write volume change\n";
 }
