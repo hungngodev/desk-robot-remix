@@ -21,7 +21,7 @@ def _controller():
     pet.memory = Mock()
     pet.memory.remember.return_value = True
     pet.memory.witnessed_episode_revision.return_value = ("A brass key", 0)
-    pet.states = {"robot-01": SimpleNamespace(last_error=None)}
+    pet._states = {"robot-01": SimpleNamespace(last_error=None)}
     pet.max_observation_age = 10.0
     pet._vision_preemption_epoch = 0
     pet.multimodal = None
