@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -75,9 +76,7 @@ def _matching_curated_fact(core: list, query: str | None):
     )
 
 
-def register_memory_routes(
-    app: FastAPI, settings: Settings, *, operator,
-) -> None:
+def _create_memory_mutation_runner(settings: Settings):
     # Serialize only the admission order, not the potentially slow writes.
     # One lock per actual robot keeps different pets independent while a
     # blocked SQLite BEGIN IMMEDIATE stays OFF the Mac audio event loop.
@@ -111,34 +110,50 @@ def register_memory_routes(
         worker.add_done_callback(finished)
         return await asyncio.shield(worker)
 
-    def invalidate_private_prompt(robot_id: str) -> None:
-        """Revoke group prompts that may contain a changed private fact."""
-        conversation = getattr(app.state.runtime, "conversation", None)
-        invalidate = getattr(conversation, "invalidate_private_memory", None)
-        if callable(invalidate):
-            invalidate(robot_id)
-        # The earlier voice-memory receipt can remain in the live timeline
-        # for 30 seconds after its source memory was corrected or forgotten.
-        hub = getattr(getattr(app.state.runtime, "multimodal", None), "hub", None)
-        discard = getattr(hub, "discard_memory_tools", None)
-        if callable(discard):
-            discard(robot_id)
+    return apply_mutation
 
-    def retract_live_asr(robot_id: str, event_id: str) -> None:
-        """Keep an operator correction/deletion out of volatile speech context."""
-        runtime = app.state.runtime
-        visual = getattr(runtime, "multimodal", None)
-        owner = getattr(visual, "hub", None)
-        discard = getattr(owner, "discard_heard", None)
-        if callable(discard):
-            discard(robot_id, event_id)
-        attention = getattr(runtime, "attention", None)
-        discard_attention = getattr(attention, "discard_heard", None)
-        if callable(discard_attention):
-            discard_attention(robot_id, event_id)
-        # Keep an already-composed group prompt from quoting deleted text.
-        invalidate_private_prompt(robot_id)
 
+def _invalidate_private_prompt(app: FastAPI, robot_id: str) -> None:
+    """Revoke group prompts that may contain a changed private fact."""
+    conversation = getattr(app.state.runtime, "conversation", None)
+    invalidate = getattr(conversation, "invalidate_private_memory", None)
+    if callable(invalidate):
+        invalidate(robot_id)
+    # The earlier voice-memory receipt can remain in the live timeline
+    # for 30 seconds after its source memory was corrected or forgotten.
+    hub = getattr(getattr(app.state.runtime, "multimodal", None), "hub", None)
+    discard = getattr(hub, "discard_memory_tools", None)
+    if callable(discard):
+        discard(robot_id)
+
+
+def _retract_live_asr(app: FastAPI, robot_id: str, event_id: str) -> None:
+    """Keep an operator correction/deletion out of volatile speech context."""
+    runtime = app.state.runtime
+    visual = getattr(runtime, "multimodal", None)
+    owner = getattr(visual, "hub", None)
+    discard = getattr(owner, "discard_heard", None)
+    if callable(discard):
+        discard(robot_id, event_id)
+    attention = getattr(runtime, "attention", None)
+    discard_attention = getattr(attention, "discard_heard", None)
+    if callable(discard_attention):
+        discard_attention(robot_id, event_id)
+    # Keep an already-composed group prompt from quoting deleted text.
+    _invalidate_private_prompt(app, robot_id)
+
+
+@contextmanager
+def _mutation_errors(superseded):
+    try:
+        yield
+    except superseded as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _register_memory_read_routes(app: FastAPI, settings: Settings, operator):
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):
         # Explicit operator view of bounded text provenance, never raw media.
@@ -178,24 +193,22 @@ def register_memory_routes(
             ],
         }
 
+
+def _register_core_memory_routes(app: FastAPI, settings: Settings, operator, apply_mutation):
     @app.put("/v1/pet/{robot_id}/core-memory/{slot}",
              dependencies=[Depends(operator)])
     async def set_core_memory(robot_id: str, slot: str,
                               request: CoreMemoryRequest):
         require_configured_robot(settings, robot_id)
-        try:
+        with _mutation_errors(CoreMemoryMutationSuperseded):
             # Record authenticated request order BEFORE dispatch to a worker.
             # A delayed PUT must never restore a completed newer DELETE.
             changed = await apply_mutation(
                 app.state.runtime.memory.reserve_core_fact_mutation,
                 app.state.runtime.memory.set_core_fact,
                 robot_id, slot, request.value,
-                invalidate=lambda: invalidate_private_prompt(robot_id),
+                invalidate=lambda: _invalidate_private_prompt(app, robot_id),
             )
-        except CoreMemoryMutationSuperseded as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "slot": slot, "changed": changed,
                 "operator_curated": True, "motor_authorized": False}
 
@@ -203,36 +216,30 @@ def register_memory_routes(
                 dependencies=[Depends(operator)])
     async def delete_core_memory(robot_id: str, slot: str):
         require_configured_robot(settings, robot_id)
-        try:
+        with _mutation_errors(CoreMemoryMutationSuperseded):
             removed = await apply_mutation(
                 app.state.runtime.memory.reserve_core_fact_mutation,
                 app.state.runtime.memory.forget_core_fact, robot_id, slot,
-                invalidate=lambda: invalidate_private_prompt(robot_id),
+                invalidate=lambda: _invalidate_private_prompt(app, robot_id),
             )
-        except CoreMemoryMutationSuperseded as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "slot": slot, "removed": removed}
 
+
+def _register_episode_memory_routes(app: FastAPI, settings: Settings, operator, apply_mutation):
     @app.patch("/v1/pet/{robot_id}/memories/{event_id}",
                dependencies=[Depends(operator)])
     async def correct_episode(
         robot_id: str, event_id: str, request: EpisodeMemoryCorrectionRequest,
     ):
         require_configured_robot(settings, robot_id)
-        try:
+        with _mutation_errors(EpisodeMemoryMutationSuperseded):
             # Reserve request order before asynchronously scheduling SQLite.
             corrected = await apply_mutation(
                 app.state.runtime.memory.reserve_episode_mutation,
                 app.state.runtime.memory.correct_episode,
                 robot_id, event_id, request.summary,
-                invalidate=lambda: retract_live_asr(robot_id, event_id),
+                invalidate=lambda: _retract_live_asr(app, robot_id, event_id),
             )
-        except EpisodeMemoryMutationSuperseded as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
         return {
             "robot_id": robot_id,
             "event_id": event_id,
@@ -246,22 +253,26 @@ def register_memory_routes(
                 dependencies=[Depends(operator)])
     async def delete_episode(robot_id: str, event_id: str):
         require_configured_robot(settings, robot_id)
-        try:
+        with _mutation_errors(EpisodeMemoryMutationSuperseded):
             # Even a missing episode gets a durable tombstone, so retract
             # the volatile event regardless of the returned row count.
             removed = await apply_mutation(
                 app.state.runtime.memory.reserve_episode_mutation,
                 app.state.runtime.memory.forget_episode, robot_id, event_id,
-                invalidate=lambda: retract_live_asr(robot_id, event_id),
+                invalidate=lambda: _retract_live_asr(app, robot_id, event_id),
                 always_invalidate=True,
             )
-        except EpisodeMemoryMutationSuperseded as exc:
-            raise HTTPException(409, str(exc)) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "event_id": event_id,
                 "removed": removed, "local_only": True}
 
+
+def register_memory_routes(
+    app: FastAPI, settings: Settings, *, operator,
+) -> None:
+    apply_mutation = _create_memory_mutation_runner(settings)
+    _register_memory_read_routes(app, settings, operator)
+    _register_core_memory_routes(app, settings, operator, apply_mutation)
+    _register_episode_memory_routes(app, settings, operator, apply_mutation)
 
 
 @dataclass(frozen=True)
