@@ -20,8 +20,11 @@ def visual_range_caveat(visual: dict, timeline: Sequence[dict]) -> str:
     A range edge does not identify a visual object, and a camera guess cannot
     establish physical clearance. Preserve the WROOM fault independently.
     """
+    content = visual.get("content")
     if (visual.get("channel") != "tool" or visual.get("kind") != "visual_look"
-            or visual.get("source") != "local_vlm_interpretation"):
+            or visual.get("source") != "local_vlm_interpretation"
+            or not isinstance(content, str) or not content.strip()
+            or content == "observation_unavailable"):
         return ""
     visual_age = _fresh_age(visual)
     if visual_age is None:

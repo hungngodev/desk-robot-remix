@@ -1,6 +1,7 @@
 """Receipt-time correlation never converts a camera guess into motor authority."""
-import pytest
+import time
 
+import pytest
 from desk_robot.range_context import visual_range_caveat
 
 
@@ -40,6 +41,9 @@ def test_reject_unrelated_stale_or_untrusted_range(changes):
 @pytest.mark.parametrize("changes", [
     {"age_ms": 8001}, {"age_ms": True}, {"age_ms": None}, {"age_ms": -1},
     {"source": "peer_report"}, {"kind": "memory_recall"}, {"channel": "camera"},
+    {"source": "mac_visual_observation_unavailable"},
+    {"content": "observation_unavailable"}, {"content": None},
+    {"content": ""}, {"content": "  "}, {"content": []},
 ])
 def test_reject_untrusted_visual_receipt(changes):
     assert visual_range_caveat(visual(**changes), [edge()]) == ""
@@ -59,8 +63,6 @@ def test_side_range_is_not_a_forward_obstacle_or_visual_identity():
     ("side_object", None, "camera coverage uncertain"),
 ])
 def test_integration_real_hub_composes_coherent_robot_local_evidence(kind, detail, caveat):
-    import time
-
     from desk_robot.brain_context import compose_brain_context
     from desk_robot.multimodal import CameraFrameHub
 
@@ -88,3 +90,19 @@ def test_integration_real_hub_composes_coherent_robot_local_evidence(kind, detai
     assert "Nothing here" not in physical_only
     assert caveat not in physical_only
     assert kind in physical_only or "latched safety fault" in physical_only
+
+
+def test_integration_unavailable_visual_result_is_not_correlated_as_an_observation():
+    from desk_robot.brain_context import compose_brain_context
+    from desk_robot.multimodal import CameraFrameHub
+
+    robot = "robot-01"
+    hub = CameraFrameHub([robot])
+    now = time.monotonic()
+    hub.notify(robot, "safety_fault", now - 0.7, detail="front_obstacle_ch4")
+    hub.remember_tool(robot, "visual_look", "observation_unavailable", now - 0.2)
+    prompt = compose_brain_context([], [], hub.interaction_timeline(robot, now)).interaction
+    assert prompt.startswith("WROOM reported latched safety fault (front_obstacle_ch4)")
+    assert "Visual observation_unavailable; no current sighting" in prompt
+    assert "no clearance inference" not in prompt
+    assert "Earlier local VLM guess" not in prompt

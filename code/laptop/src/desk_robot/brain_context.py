@@ -529,8 +529,7 @@ def compose_brain_context(
                 )
         elif channel == "tool":
             phrase = _format_tool_receipt(kind, item.get("content"))
-            if (phrase and kind == "visual_look"
-                    and item.get("content") != "observation_unavailable"):
+            if phrase and kind == "visual_look":
                 phrase = visual_range_caveat(item, bounded_timeline) + phrase
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
