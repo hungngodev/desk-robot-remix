@@ -269,6 +269,18 @@ def files(root):
         "            import desk_robot_bridge\n"
         "            tts = initialize_tts(desk_robot_bridge.native_tts_config(self))",
     )
+    # A mapped fleet head must never inherit upstream's unassigned default
+    # voice, even when binding is pending or provider initialization returns None.
+    source = once(
+        source,
+        "        if tts is None:\n"
+        "            tts = DefaultTTS(self.config, delete_audio_file=True)",
+        "        if tts is None:\n"
+        "            import desk_robot_bridge\n"
+        "            if desk_robot_bridge.robot_for_device(self.device_id) is not None:\n"
+        '                raise RuntimeError("Fleet native TTS cannot fall back to DefaultTTS")\n'
+        "            tts = DefaultTTS(self.config, delete_audio_file=True)",
+    )
     changes[path] = source
     path = "core/websocket_server.py"
     source = (root / path).read_text()

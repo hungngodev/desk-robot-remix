@@ -3130,6 +3130,23 @@ async def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voi
         initialize(dot)
     assert len(sent) == 4
 
+    # The pinned initializer must not bypass fleet voice validation through
+    # either of its upstream DefaultTTS branches.
+    namespace["initialize_tts"] = lambda _config: None
+    for need_bind in (False, True):
+        pip.need_bind = need_bind
+        with pytest.raises(RuntimeError, match="Fleet native TTS"):
+            initialize(pip)
+    assert len(sent) == 4
+
+    # Unmapped nonfleet clients retain upstream's default provider behavior.
+    fallback = object()
+    namespace["DefaultTTS"] = lambda *_args, **_kwargs: fallback
+    other = SimpleNamespace(device_id="other-client", config=common, need_bind=True)
+    assert initialize(other) is fallback
+    other.need_bind = False
+    assert initialize(other) is fallback
+
 
 def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp_path):
     """Upstream token bypass settings must never register a private fleet head."""
