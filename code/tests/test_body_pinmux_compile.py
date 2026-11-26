@@ -20,23 +20,73 @@ def compile_header(source, flags):
          "-Wno-unused-const-variable",
          "-x", "c++", "-fsyntax-only", *flags, "-"],
         input=source.replace("#pragma once", ""),
-        text=True, capture_output=True, check=False,
+        text=True, capture_output=True, check=False, timeout=30,
     )
 
 
-def profile_flags(profile):
+def resolve_build_flags(config, section, chain=()):
+    # All current body profiles declare build_flags explicitly. Follow the
+    # PlatformIO ${section.build_flags} references, including lab inheritance.
+    # Fail closed rather than silently dropping a future unsupported option.
+    if section in chain:
+        raise ValueError(f"cyclic build_flags reference: {section}")
+    flags = config[section]["build_flags"]
+    flags = re.sub(
+        r"\$\{([^{}.]+)\.build_flags\}",
+        lambda match: resolve_build_flags(config, match[1], (*chain, section)),
+        flags,
+    )
+    if "${" in flags:
+        raise ValueError(f"unresolved build_flags reference in {section}")
+    return flags
+
+
+CONFIG = configparser.ConfigParser(interpolation=None)
+assert CONFIG.read(HEADER.parent.parent / "platformio.ini", encoding="utf-8")
+PROFILE_FLAGS = {
+    section.removeprefix("env:"): shlex.split(resolve_build_flags(CONFIG, section))
+    for section in CONFIG.sections()
+    if section.startswith("env:")
+}
+assert PROFILE_FLAGS, "no body environments found"
+STEPPER_FLAGS = PROFILE_FLAGS["esp32_full"]
+DC_FLAGS = PROFILE_FLAGS["esp32_dc_full"]
+ALL_PROFILES = [pytest.param(flags, id=name) for name, flags in PROFILE_FLAGS.items()]
+SENSOR_PROFILES = [
+    pytest.param(flags, id=name)
+    for name, flags in PROFILE_FLAGS.items()
+    if "-DDESK_ROBOT_STEPPER=1" in flags or "-DDESK_ROBOT_FULL_SENSORS=1" in flags
+]
+DC_PROFILES = [
+    pytest.param(flags, id=name)
+    for name, flags in PROFILE_FLAGS.items()
+    if "-DDESK_ROBOT_STEPPER=1" not in flags
+]
+
+
+@pytest.mark.parametrize("profile,parent,extra", [
+    ("esp32_full_pulse_reversed_lab", "esp32_full", "-DDESK_ROBOT_MAX30102_FIFO_IR_FIRST=1"),
+    ("esp32_full_interaction_lab", "esp32_full", "-DDESK_ROBOT_ENABLE_PIR=1"),
+    ("esp32_full_haptic_lab", "esp32_full", "-DDESK_ROBOT_ENABLE_HAPTIC=1"),
+    ("esp32_dc_watchdog_lab", "esp32_dc_full", "-DDESK_ROBOT_ENABLE_DC_WATCHDOG=1"),
+    ("esp32_dc_integrated_lab", "esp32_dc_full", "-DDESK_ROBOT_PACK_SHUNT_MOHM=5"),
+])
+def test_lab_profiles_retain_parent_flags(profile, parent, extra):
+    flags = PROFILE_FLAGS[profile]
+    inherited = PROFILE_FLAGS[parent]
+    assert flags[:len(inherited)] == inherited
+    assert extra in flags[len(inherited):]
+
+
+@pytest.mark.parametrize("reference,diagnostic", [
+    ("${env:lab.build_flags}", "cyclic"),
+    ("${env.other_option}", "unresolved"),
+])
+def test_profile_resolver_rejects_invalid_references(reference, diagnostic):
     config = configparser.ConfigParser(interpolation=None)
-    config.read(HEADER.parent.parent / "platformio.ini", encoding="utf-8")
-    flags = config[f"env:{profile}"]["build_flags"]
-    flags = flags.replace("${env.build_flags}", config["env"]["build_flags"])
-    return shlex.split(flags)
-
-
-LEGACY_FLAGS = profile_flags("esp32dev")
-STEPPER_FLAGS = profile_flags("esp32_full")
-DC_FLAGS = profile_flags("esp32_dc_full")
-FULL_PROFILES = [pytest.param(STEPPER_FLAGS, id="stepper"), pytest.param(DC_FLAGS, id="dc")]
-ALL_PROFILES = [pytest.param(LEGACY_FLAGS, id="legacy"), *FULL_PROFILES]
+    config.read_dict({"env:lab": {"build_flags": reference}})
+    with pytest.raises(ValueError, match=diagnostic):
+        resolve_build_flags(config, "env:lab")
 
 
 @pytest.mark.parametrize("flags", ALL_PROFILES)
@@ -45,14 +95,25 @@ def test_pinmux_profiles_compile(flags):
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("flags", FULL_PROFILES)
+@pytest.mark.parametrize("flags", ALL_PROFILES)
+@pytest.mark.parametrize("old,new,diagnostic", [
+    ("kUartRx = 16", "kUartRx = 18", "WROOM GPIO allocation overlaps"),
+    ("kUartTx = 17", "kUartTx = 16", "WROOM GPIO allocation overlaps"),
+    ("kGripServo = 19", "kGripServo = 34", "WROOM output pin not approved"),
+    ("kGripServo = 19", "kGripServo = 12", "WROOM output pin not approved"),
+])
+def test_common_pinmux_mutations_fail(flags, old, new, diagnostic):
+    source = HEADER.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    result = compile_header(source.replace(old, new), flags)
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+
+
+@pytest.mark.parametrize("flags", SENSOR_PROFILES)
 @pytest.mark.parametrize("old,new", [
-    ("kUartRx = 16", "kUartRx = 18"),
     ("kSensorSda = 21", "kSensorSda = 23"),
-    ("kGripServo = 19", "kGripServo = 34"),
-    ("kGripServo = 19", "kGripServo = 12"),
     ("kBumperInput = 35", "kBumperInput = 34"),
-    ("kUartTx = 17", "kUartTx = 16"),
     ("kSensorScl = 22", "kSensorScl = 21"),
     ("kTerminalIrRightInput = 39", "kTerminalIrRightInput = 36"),
     ("kMuxReset = -1", "kMuxReset = 4"),
@@ -110,6 +171,7 @@ def test_servo_pwm_mutations_fail(flags, old, new, diagnostic):
     assert diagnostic in result.stderr
 
 
+@pytest.mark.parametrize("flags", DC_PROFILES)
 @pytest.mark.parametrize("old,new,diagnostic", [
     ("kMotorChannels[] = {0, 1, 2, 3}", "kMotorChannels[] = {0, 1, 2, 4}",
      "DC motor outputs must use isolated LEDC timers 0/1"),
@@ -120,10 +182,10 @@ def test_servo_pwm_mutations_fail(flags, old, new, diagnostic):
     ("kMotorChannels[] = {0, 1, 2, 3}", "kMotorChannels[] = {0, 1, 2, 3, 5}",
      "DC GPIO/channel arrays must match the four PWM owners"),
 ])
-def test_motor_pwm_mutations_fail(old, new, diagnostic):
+def test_motor_pwm_mutations_fail(flags, old, new, diagnostic):
     source = HEADER.read_text(encoding="utf-8")
     assert source.count(old) == 1
-    result = compile_header(source.replace(old, new), DC_FLAGS)
+    result = compile_header(source.replace(old, new), flags)
     assert result.returncode != 0
     assert "static assertion failed" in result.stderr
     assert diagnostic in result.stderr
