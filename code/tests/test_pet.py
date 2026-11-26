@@ -3524,6 +3524,12 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
         async def observe(seq, ir, **kwargs):
             await pet._observe_aux("robot-01", 7, report(seq, ir, **kwargs))
 
+        await observe(1, 1000)
+        await observe(2, 262143)  # raw ADC rail cannot establish contact
+        assert state.last_paw_seq is None
+        await observe(3, 262143)
+        assert state.last_paw_seq is None
+        assert not any(m.kind == "paw_contact" for m in memory.recent("robot-01"))
         await observe(1, 1000)  # initial optical baseline never announces touch
         await observe(2, 30000)
         await observe(2, 30000)  # HTTP replay does not count twice

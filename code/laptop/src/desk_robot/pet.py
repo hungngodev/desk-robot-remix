@@ -1247,7 +1247,7 @@ class PetController:
         received_at = time.monotonic()
         if self.settings.mode != "hardware":
             return
-        validate_aux(data, robot_id)
+        data = validate_aux(data, robot_id)
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation or self._closed:
             return
