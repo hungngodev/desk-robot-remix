@@ -106,6 +106,31 @@ static void check_transport_recovery() {
   }
 }
 
+// Accessory mux addresses and all other noncritical identifiers must never
+// be interpreted as floor/front recovery evidence, even between valid lanes.
+static void check_noncritical_recovery_isolation() {
+  for (bool full_eight : {false, true}) {
+    desk_robot::RangeScanOrder scan(full_eight);
+    scan.transport_fault();
+    for (unsigned sweep = 0; sweep < 2; ++sweep) {
+      for (std::uint8_t lane = 0; lane < 5; ++lane) {
+        for (unsigned id = 5; id <= 255; ++id) {
+          scan.transport_succeeded(static_cast<std::uint8_t>(id));
+          CHECK(scan.degraded());
+        }
+        CHECK(scan.next() == lane);
+        scan.transport_succeeded(lane);
+        CHECK(scan.degraded() == (sweep == 0 || lane < 4));
+      }
+    }
+    for (unsigned id = 5; id <= 255; ++id) {
+      scan.transport_succeeded(static_cast<std::uint8_t>(id));
+      CHECK(!scan.degraded());
+    }
+    CHECK(scan.next() == (full_eight ? 5 : 0));
+  }
+}
+
 // Exercise every optional rotation and every fault phase, including a slow
 // second recovery sweep at the exact half-window boundary across rollover.
 static void check_recovery_budget_and_rotation() {
@@ -169,6 +194,7 @@ int main() {
     check_slow_sweeps();
     check_fault_restart();
     check_transport_recovery();
+    check_noncritical_recovery_isolation();
     check_recovery_budget_and_rotation();
     check_raw_range_word_domain();
     std::cout << "PASS all 5 critical ToF channels sampled before one optional direction\n";
