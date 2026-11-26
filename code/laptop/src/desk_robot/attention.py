@@ -58,6 +58,9 @@ class _Attention:
     asr_order_at: float = -math.inf
     asr_consent_generation: int | None = None
     last_heard_id: str | None = None
+    # One previous ASR fragment, with its original receipt and consent grant.
+    # Only a handling interruption can carry it into the next voice epoch.
+    interrupted_asr: tuple[str, str, float, int | None] | None = None
     heard_ids: deque[str] = field(default_factory=lambda: deque(maxlen=24))
     sent: str = ""
     sent_at: float = -math.inf
@@ -167,6 +170,19 @@ class AttentionLedger:
         state = self._state(robot_id)
         if at <= state.voice_at:
             return
+        state.interrupted_asr = None
+        if (state.asr and state.last_heard_id is not None
+                and 0 <= at - state.asr_at <= 90
+                and any(
+                    max(state.voice_at, state.asr_at - 90) <= stamp <= at
+                    and (kind in {"handling_tilt", "handling_shake"}
+                         or (kind == "safety_fault" and state.sensor_details.get(kind)
+                             == "floor_out_of_range_upright_lift"))
+                    for kind, stamp, _ in state.sensor_edges
+                )):
+            state.interrupted_asr = (
+                state.last_heard_id, state.asr, state.asr_at, state.asr_consent_generation,
+            )
         state.voice_at = at
         state.voice_active = True
         state.human_turns += 1
@@ -215,7 +231,12 @@ class AttentionLedger:
     def discard_heard(self, robot_id: str, event_id: str) -> bool:
         """Retract matching ASR text, retaining replay and ordering fences."""
         state = self._state(robot_id)
-        if not isinstance(event_id, str) or state.last_heard_id != event_id:
+        if not isinstance(event_id, str):
+            return False
+        if state.interrupted_asr is not None and state.interrupted_asr[0] == event_id:
+            state.interrupted_asr = None
+            return True
+        if state.last_heard_id != event_id:
             return False
         state.asr = ""
         state.asr_at = -math.inf
@@ -317,6 +338,11 @@ class AttentionLedger:
                 "Newer uncertain ASR words (not verified command): "
                 + state.asr[:66]
             )
+        if state.interrupted_asr is not None:
+            _, fragment, stamp, grant = state.interrupted_asr
+            if (live_consent_enabled is True and 0 <= now - stamp <= 90
+                    and (live_consent_generation is None or grant == live_consent_generation)):
+                pieces.append("Earlier ASR (uncertain context): " + fragment[:40])
         # A voluntary social topic has lower conversational priority than
         # the recent user's completed/interrupted topic. Preserve that fact
         # as attributed past context, never an active instruction or permit.
