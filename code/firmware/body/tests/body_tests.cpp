@@ -493,6 +493,46 @@ void strict_integer_parser() {
   }
 }
 
+void tokenizer_storage_boundaries() {
+  using desk_robot::body_command::tokenize;
+  char buffer[96]{};
+  char* tokens[5]{};
+  std::size_t count = 0;
+  const auto expect_error = [&](const char* line, std::size_t size,
+                                const char* expected) {
+    count = 5;
+    const auto* error = tokenize(line, size, buffer, tokens, count);
+    CHECK(error != nullptr && std::strcmp(error, expected) == 0);
+    CHECK(count == 0);
+  };
+  // The declared byte span, not a C-string terminator, owns the frame.
+  const char raw[] = {'p', 'i', 'n', 'g', '\0'};
+  for (unsigned cycle = 0; cycle < 32; ++cycle) {
+    expect_error(nullptr, 0, "ERR input empty");
+    expect_error(nullptr, 1, "ERR input invalid_buffer");
+    expect_error(nullptr, std::numeric_limits<std::size_t>::max(),
+                 "ERR input line_too_long");
+    expect_error(raw, 0, "ERR input empty");
+    expect_error(raw, sizeof(raw), "ERR input invalid_ascii");
+    CHECK(!tokenize(raw, sizeof(raw) - 1, buffer, tokens, count));
+    CHECK(count == 1 && std::strcmp(tokens[0], "ping") == 0);
+    const char printable[] = {'!', '~'};
+    CHECK(!tokenize(printable, sizeof(printable), buffer, tokens, count));
+    CHECK(count == 1 && std::strcmp(tokens[0], "!~") == 0);
+    const char del[] = {127};
+    expect_error(del, sizeof(del), "ERR input invalid_ascii");
+    const std::string max_token(95, '~');
+    CHECK(!tokenize(max_token.data(), max_token.size(), buffer, tokens, count));
+    CHECK(count == 1 && tokens[0] == buffer && buffer[95] == '\0');
+    CHECK(std::memcmp(buffer, max_token.data(), max_token.size()) == 0);
+    const std::string oversized(96, '~');
+    expect_error(oversized.data(), oversized.size(), "ERR input line_too_long");
+    CHECK(!tokenize("a b c d e  ", 11, buffer, tokens, count));
+    CHECK(count == 5 && std::strcmp(tokens[4], "e") == 0);
+    expect_error("a b c d e f", 11, "ERR input trailing_tokens");
+  }
+}
+
 void malformed_atomicity() {
   BodyControl body;
   send(body, "arm", 0);
@@ -719,6 +759,39 @@ void serial_total_frame_timeout() {
     CHECK(frame(body, remote, "ar", start + 1002U).empty());
     CHECK(frame(body, remote, "m\n", start + 1501U)[0] == "OK arm");
     CHECK(frame(body, remote, "disarm\n", start + 1501U)[0] == "OK disarm");
+  }
+}
+
+void serial_rejection_recovery_boundaries() {
+  for (const std::uint32_t start : {100U, UINT32_MAX - 250U}) {
+    for (const bool local : {false, true}) {
+      BodyControl body;
+      LineReceiver receiver(local);
+      const auto expect = [&](const std::string& bytes, std::uint32_t now,
+                              const char* reply) {
+        const auto replies = frame(body, receiver, bytes, now);
+        CHECK(replies.size() == 1 && replies[0] == reply);
+      };
+      for (const std::uint32_t age : {499U, 500U, 501U}) {
+        const auto now = start + (age - 499U) * 1000U;
+        // LF is itself subject to the idle deadline, even after invalid data.
+        CHECK(frame(body, receiver, std::string("p\0", 2), now).empty());
+        expect("\n", now + age, age < 500U ? "ERR input invalid_ascii" :
+                                             "ERR input interbyte_timeout");
+        expect("\n", now + age, "ERR input empty");
+        expect("ping\n", now + age, "OK ping");
+      }
+      for (const std::uint32_t age : {499U, 500U, 501U}) {
+        const auto now = start + 3000U + (age - 499U) * 1000U;
+        // A recent final fragment cannot extend the total frame lifetime.
+        CHECK(frame(body, receiver, "p", now).empty());
+        CHECK(frame(body, receiver, "ing", now + 250U).empty());
+        expect("\n", now + age, age < 500U ? "OK ping" :
+                                             "ERR input frame_timeout");
+        expect("\r\n", now + age, "ERR input empty");
+        expect("ping\n", now + age, "OK ping");
+      }
+    }
   }
 }
 
@@ -1216,10 +1289,12 @@ int main(int argc, char** argv) {
       {"watchdog_holds_servos", watchdog_holds_servos},
       {"rollover_timers", rollover_timers}, {"strict_integer_parser", strict_integer_parser},
       {"tokenizer_failure_contract", tokenizer_failure_contract},
+      {"tokenizer_storage_boundaries", tokenizer_storage_boundaries},
       {"malformed_atomicity", malformed_atomicity},
       {"overlong_frame_recovery", overlong_frame_recovery}, {"framing", framing},
       {"serial_idle_frame_timeout", serial_idle_frame_timeout},
       {"serial_total_frame_timeout", serial_total_frame_timeout},
+      {"serial_rejection_recovery_boundaries", serial_rejection_recovery_boundaries},
       {"independent_receivers", independent_receivers}, {"status_honesty", status_honesty},
       {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},
