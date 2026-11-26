@@ -725,63 +725,104 @@ void verify_slow_lift_invalidates_origin_without_low_g() {
           body.wheel_pose_state().origin == 0);
   }
 }
-// Synthetic paired AS5600 jitter, with no commanded motion and fixed gyro yaw.
-// A stopped motor does not prove a stationary wheel: do not discard real counts.
-// Bounded jitter must not walk the reported pose across the desk, nor keep an
-// origin valid forever after its measured-error budget is exhausted.
-void verify_stationary_encoder_jitter() {
+// Synthetic AS5600 samples at both sides of the 12-bit rollover, with no
+// commanded motion and fixed gyro yaw. The motor output is not pose evidence.
+class StationaryEncoderFixture {
+ public:
   using Integrator = desk_robot::WheelPoseIntegrator;
-  Integrator::Calibration geom{};
-  geom.left_nm_per_count = geom.right_nm_per_count = 100000;
-  geom.left_forward_sign = 1; geom.right_forward_sign = -1;
-  geom.track_width_mm = 100; geom.max_pair_step_mm = 25;
-  geom.max_pair_skew_ms = 25; geom.max_imu_skew_ms = 50;
-  geom.max_age_ms = 200; geom.wheel_error_ppm = 10000;
-  geom.imu_alignment_error_urad = 1000;
-  geom.max_wheel_gyro_residual_urad = 50000;
-  geom.max_xy_error_mm = 30; geom.max_yaw_error_urad = 500000;
-  geom.stationary_gyro_step_urad = 500; geom.stationary_pairs_required = 3;
-  Integrator pose;
-  check(pose.configure(geom));
-  const auto observe = [&pose](std::uint32_t seq, int delta) {
+
+  StationaryEncoderFixture() {
+    Integrator::Calibration geom{};
+    geom.left_nm_per_count = geom.right_nm_per_count = 100000;
+    geom.left_forward_sign = 1; geom.right_forward_sign = -1;
+    geom.track_width_mm = 100; geom.max_pair_step_mm = 25;
+    geom.max_pair_skew_ms = 25; geom.max_imu_skew_ms = 50;
+    geom.max_age_ms = 200; geom.wheel_error_ppm = 10000;
+    geom.imu_alignment_error_urad = 1000;
+    geom.max_wheel_gyro_residual_urad = 50000;
+    geom.max_xy_error_mm = 30; geom.max_yaw_error_urad = 500000;
+    geom.stationary_gyro_step_urad = 500; geom.stationary_pairs_required = 3;
+    check(pose.configure(geom));
+    check(left_.configure(4000, 200, 150));
+    check(right_.configure(4000, 200, 150));
+    check(pair_.configure(25));
+    l_.angle = 0;
+    r_.angle = 4095;
+    check(sample(0, 0) == desk_robot::WheelPairCapture::Result::Waiting);
+    for (int i = 0; i < 3; ++i) check(observe(0, 0));
+    check(pose.start_origin(410));
+  }
+
+  bool observe(int left_delta, int right_delta) {
+    check(sample(left_delta, right_delta) == desk_robot::WheelPairCapture::Result::Paired);
     Integrator::Evidence e{};
-    e.wheel = {true, delta, -delta, seq * 100U, seq * 100U,
-               seq, seq, 0, 1, seq};
+    e.wheel = pair_.receipt();
+    check(e.wheel.left_delta == left_delta && e.wheel.right_delta == right_delta);
     e.imu_valid = true;
     e.imu_segment = 1;
-    e.imu_at_ms = seq * 100U;
-    return pose.observe(e, e.imu_at_ms);
-  };
-  for (std::uint32_t seq = 1; seq <= 3; ++seq) check(observe(seq, 0));
-  check(pose.start_origin(300));
+    e.imu_at_ms = l_.at_ms + 5U;
+    return pose.observe(e, r_.at_ms);
+  }
+
+  Integrator pose;
+
+ private:
+  desk_robot::WheelPairCapture::Result sample(int left_delta, int right_delta) {
+    const auto update = [](desk_robot::AngleRaw& angle, int delta, std::uint32_t ms) {
+      angle.present = angle.valid = true;
+      angle.magnet_status = 0x20;
+      angle.angle = static_cast<std::uint16_t>((angle.angle + 4096 + delta) % 4096);
+      angle.at_ms = ms;
+      ++angle.sample_seq;
+    };
+    now_ += 100U;
+    update(l_, left_delta, now_);
+    update(r_, right_delta, now_ + 10U);
+    const auto left = left_.observe(l_, r_.at_ms);
+    const auto right = right_.observe(r_, r_.at_ms);
+    return pair_.observe(left, right, l_, r_, left_.last_delta(),
+                         right_.last_delta(), r_.at_ms);
+  }
+
+  desk_robot::WheelAngleCapture left_, right_;
+  desk_robot::WheelPairCapture pair_;
+  desk_robot::AngleRaw l_{}, r_{};
+  std::uint32_t now_ = 0;
+};
+
+// Bounded jitter must not walk the reported pose across the desk, nor keep an
+// origin valid forever after its conservative error budget is exhausted.
+void verify_stationary_encoder_jitter() {
+  using Quality = desk_robot::WheelPoseIntegrator::Quality;
+  StationaryEncoderFixture fixture;
   bool degraded = false, retired = false;
   constexpr std::uint32_t overnight_pairs = 8U * 60U * 60U * 10U;
   for (std::uint32_t i = 0; i < overnight_pairs; ++i) {
-    // Raw signed increments follow 0 -> +1 -> 0 -> -1 -> 0 counts.
+    // Raw angles fluctuate by one count around their respective baselines.
     const int delta = (i % 4U == 0U || i % 4U == 3U) ? 1 : -1;
-    const bool accepted = observe(i + 4U, delta);
-    const auto& state = pose.state();
+    const bool accepted = fixture.observe(delta, -delta);
+    const auto& state = fixture.pose.state();
     check(state.x_mm == 0 && state.y_mm == 0 && state.yaw_mrad == 0);
     if (!accepted) retired = true;
     if (retired) {
-      check(state.origin == 0 && state.quality == Integrator::Quality::Unavailable);
+      check(state.origin == 0 && state.quality == Quality::Unavailable);
     } else {
       check(state.origin == 1 && state.sample_seq == i + 4U);
       check(state.xy_error_mm > 0);
-      if (state.quality == Integrator::Quality::Degraded) degraded = true;
+      if (state.quality == Quality::Degraded) degraded = true;
     }
   }
   check(degraded && retired);
-  check(!pose.stationary_origin_ready());
+  check(!fixture.pose.stationary_origin_ready());
+}
 
+void verify_slow_external_encoder_motion() {
   // Sustained one-count increments can be real slow external motion, even
   // with zero motor output. A per-delta deadband would erase this travel.
-  pose.reset_for_boot();
-  check(pose.configure(geom));
-  for (std::uint32_t seq = 1; seq <= 3; ++seq) check(observe(seq, 0));
-  check(pose.start_origin(300));
-  for (std::uint32_t seq = 4; seq <= 23; ++seq) check(observe(seq, 1));
-  check(pose.state().x_mm == 2 && pose.state().quality == Integrator::Quality::Valid);
+  StationaryEncoderFixture fixture;
+  for (int i = 0; i < 20; ++i) check(fixture.observe(1, -1));
+  check(fixture.pose.state().x_mm == 2 &&
+        fixture.pose.state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
 }
 }  // namespace
 
@@ -795,6 +836,7 @@ int main() {
   verify_imu_yaw_never_promotes_pose();
   verify_qualified_pose_is_never_implicit_navigation();
   verify_stationary_encoder_jitter();
+  verify_slow_external_encoder_motion();
   verify_commanded_motion_requires_measured_travel(false);
   verify_commanded_motion_requires_measured_travel(true);
   verify_slow_lift_invalidates_origin_without_low_g();
