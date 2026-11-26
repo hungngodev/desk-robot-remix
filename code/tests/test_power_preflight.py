@@ -1561,3 +1561,64 @@ def test_pack_shunt_ina226_nominal_range_requires_selected_shunt(milliohm):
                     dropout_input_v=2.9, regulator_min_input_v=2.5)
     assert result["pack_shunt_peak_within_ina226_nominal_range"] is False
 
+
+
+@pytest.mark.parametrize("overrides, expected", [
+    ({"charge_temperature_sensor_connected": 1, "charger_pgood_routed_on_paper": 1},
+     "Real TS and motor-disarm modes must be explicit booleans"),
+    ({"charger_ts_fixed_resistor_removed": 1, "charger_pgood_routed_on_paper": 1},
+     "Real TS and motor-disarm modes must be explicit booleans"),
+    ({"dock_motors_disarmed": 1, "charger_pgood_routed_on_paper": 1},
+     "Real TS and motor-disarm modes must be explicit booleans"),
+    ({"charger_pgood_routed_on_paper": 1, "pack_mm": (50, 30)},
+     "Charger PGOOD routing evidence must be an explicit boolean"),
+    ({"pack_mm": (50, 30), "charger_input_limit_a": "1.5"},
+     "Require exact assembled pack and tray 3D envelopes"),
+    ({"tray_mm": None, "charger_input_limit_a": "1.5"},
+     "Require exact assembled pack and tray 3D envelopes"),
+    ({"charger_input_limit_a": "1.5", "guaranteed_charge_window_c": (45, 0)},
+     "BQ2407x dock charger input limit must be finite amperes"),
+    ({"charger_input_limit_a": 1.501, "guaranteed_charge_window_c": (45, 0)},
+     "BQ2407x maximum dock charger input is not above 1.5A"),
+    ({"guaranteed_charge_window_c": (45, 0), "ts_open_inhibit_on_paper": 1},
+     "Require ordered finite guaranteed charge window in Celsius"),
+    ({"ts_open_inhibit_on_paper": 1, "active_peak_5v_a": 0},
+     "TS fault inhibit evidence must be explicit booleans"),
+    ({"active_peak_5v_a": 0, "pack_mm": (0, 30, 10)},
+     "Peak/continuous load missing or invalid"),
+    ({"pack_mm": (0, 30, 10), "charger_variant": "BQ24073"},
+     "Actual positive pack/tray dimensions and clearance required"),
+    ({"charger_variant": "BQ24073", "dock_idle_5v_a": 0},
+     "Use a source-reviewed BQ24074 or BQ24075 variant"),
+    ({"dock_idle_5v_a": 0, "pack_shunt_milliohm": 0},
+     "Invalid docked load, cell, SYS or reserve measurement"),
+    ({"pack_shunt_milliohm": 0, "pack_path_fuse_derated_hold_a": 0},
+     "Pack shunt ratings must be positive and finite"),
+])
+def test_stack_preserves_exact_validation_precedence(overrides, expected):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(overrides)
+    with pytest.raises(ValueError) as error:
+        one_stack(**cfg)
+    assert str(error.value) == expected
+
+
+def test_stack_accepts_list_envelopes_and_retains_report_contract():
+    cfg = plausible_hypothetical_one_cell_stack()
+    expected = one_stack(**cfg)
+    for name in ("pack_mm", "tray_mm", "guaranteed_charge_window_c"):
+        cfg[name] = list(cfg[name])
+    expected["guaranteed_charge_window_c"] = [0, 45]
+    result = one_stack(**cfg)
+    assert result == expected
+    assert list(result) == [
+        "source_of_equations", "charger_variant", "charger_battery_discharge_recommended_max_a",
+        "pack_path_fuse_derated_hold_a", "minimum_5v_peak_a_including_margin",
+        "minimum_1s_peak_a_including_margin", "manufacturer_derated_at_3v_boost_amperes_supplied",
+        "checks", "guaranteed_charge_window_c", "all_power_stages_compatible_on_paper",
+        "all_power_stages_physically_verified", "qualified_1s_dock_safe_to_buy",
+        "undocked", "battery_and_harness", "voltage_path", "docked",
+    ]
+    assert result["all_power_stages_compatible_on_paper"] is True
+    assert result["all_power_stages_physically_verified"] is False
+    assert result["qualified_1s_dock_safe_to_buy"] is False

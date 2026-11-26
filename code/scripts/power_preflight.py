@@ -415,6 +415,152 @@ def _pack_shunt_checks(
     }
 
 
+def _validate_stack_inputs(
+    *, charge_temperature_sensor_connected: bool, charger_ts_fixed_resistor_removed: bool,
+    dock_motors_disarmed: bool, charger_pgood_routed_on_paper: bool,
+    pack_mm: tuple[float, float, float], tray_mm: tuple[float, float, float],
+    charger_input_limit_a: float | None,
+    guaranteed_charge_window_c: tuple[float, float] | None,
+) -> bool:
+    """Validate stack inputs in public error order; return charge-window compatibility."""
+    if any(type(v) is not bool for v in (
+            charge_temperature_sensor_connected,
+            charger_ts_fixed_resistor_removed,
+            dock_motors_disarmed)):
+        raise ValueError("Real TS and motor-disarm modes must be explicit booleans")
+    if type(charger_pgood_routed_on_paper) is not bool:
+        raise ValueError("Charger PGOOD routing evidence must be an explicit boolean")
+    if not isinstance(pack_mm, (tuple, list)) or len(pack_mm) != 3 or (
+            not isinstance(tray_mm, (tuple, list)) or len(tray_mm) != 3):
+        raise ValueError("Require exact assembled pack and tray 3D envelopes")
+    if charger_input_limit_a is not None:
+        # Use the same type/finite guard as the standalone dock screen.
+        if not _finite_number(charger_input_limit_a):
+            raise ValueError("BQ2407x dock charger input limit must be finite amperes")
+        if charger_input_limit_a > 1.5:
+            raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
+    if guaranteed_charge_window_c is not None:
+        if (not isinstance(guaranteed_charge_window_c, (tuple, list))
+                or len(guaranteed_charge_window_c) != 2
+                or not all(_finite_number(v) for v in guaranteed_charge_window_c)
+                or guaranteed_charge_window_c[0] >= guaranteed_charge_window_c[1]):
+            raise ValueError("Require ordered finite guaranteed charge window in Celsius")
+    # TI SLUS810N 9.3.6: standard 103AT-2 TS is nominally 0..50 C;
+    # the illustrated resistor network can widen, not narrow, that window.
+    return (guaranteed_charge_window_c is not None
+            and 0 <= guaranteed_charge_window_c[0]
+            and guaranteed_charge_window_c[1] <= 45)
+
+
+def _screen_undocked_stack(
+    *, active_peak_5v_a: float, active_sustained_5v_a: float,
+    boost_efficiency_low_cell: float, boost_input_max_a: float | None,
+    boost_input_continuous_a: float | None, boost_output_at_3v_continuous_a: float | None,
+    pack_mm: tuple[float, float, float], tray_mm: tuple[float, float, float],
+    pack_peak_a: float | None, pack_sustained_a: float | None, pcm_trip_a: float | None,
+    connector_a: float | None, wire_crimp_a: float | None,
+) -> tuple[dict, dict]:
+    """Reuse the supply and protected-pack screens for the undocked path."""
+    # Source of truth: do not silently add a new third power-supply formula.
+    undocked = size_5v_supply(
+        active_peak_5v_a, active_sustained_5v_a,
+        cell_low_v=3.0, measured_boost_efficiency=boost_efficiency_low_cell,
+        boost_max_input_a=boost_input_max_a,
+        boost_continuous_input_a=boost_input_continuous_a,
+        boost_continuous_output_a=boost_output_at_3v_continuous_a,
+        protected_cell_continuous_a=pack_sustained_a)
+    protected = screen_protected_pack(
+        undocked,
+        pack_length_mm=pack_mm[0], pack_width_mm=pack_mm[1],
+        pack_thickness_mm=pack_mm[2],
+        tray_length_mm=tray_mm[0], tray_width_mm=tray_mm[1],
+        tray_height_mm=tray_mm[2],
+        rated_peak_discharge_a=pack_peak_a,
+        rated_continuous_discharge_a=pack_sustained_a,
+        pcm_overcurrent_trip_a=pcm_trip_a,
+        connector_continuous_a=connector_a,
+        wire_and_crimp_continuous_a=wire_crimp_a)
+    return undocked, protected
+
+
+# TI BQ2407x SLUS810N sections 8.1/8.3: BAT discharge and OUT
+# recommended maximum are 4.5 A; 5 A is an absolute stress limit.
+# The entire undocked converter input flows through this charger path.
+_CHARGER_PATH_MAX_A = 4.5
+
+
+def _stack_compatibility_checks(
+    undocked: dict, protected: dict, vpath: dict, docked: dict,
+    *, pack_shunt_milliohm: float | None, pack_shunt_rated_w: float | None,
+    pack_shunt_derated_w: float | None, boost_regulator_min_input_v: float,
+    pack_path_fuse_derated_hold_a: float | None, charger_pgood_routed_on_paper: bool,
+    charge_temperature_sensor_connected: bool, charger_ts_fixed_resistor_removed: bool,
+    charge_window_compatible: bool, ts_fault_checks: dict[str, bool], dock_motors_disarmed: bool,
+) -> dict[str, bool]:
+    """Combine existing stage reports and independent protection gates."""
+    shunt_checks = _pack_shunt_checks(
+        milliohm=pack_shunt_milliohm, rated_w=pack_shunt_rated_w,
+        derated_w=pack_shunt_derated_w,
+        discharge_peak_a=undocked["minimum_rated_cell_and_boost_input_a"],
+        charge_peak_a=docked["minimum_protected_pack_charge_rating_a"],
+        dropout_input_v=vpath["battery_path_dropout_screen_input_v"],
+        regulator_min_input_v=boost_regulator_min_input_v,
+    )
+    return {
+        **shunt_checks,
+        "charger_pgood_routed_on_paper": charger_pgood_routed_on_paper,
+        "pack_path_fuse_covers_peak": _pack_fuse_covers_peak(
+            pack_path_fuse_derated_hold_a,
+            undocked["minimum_rated_cell_and_boost_input_a"]),
+        "charger_battery_discharge_path_covers_peak": (
+            undocked["minimum_rated_cell_and_boost_input_a"] <= _CHARGER_PATH_MAX_A),
+        "charger_out_to_regulated_5v_covers_3v_cell_and_dock": (
+            vpath["regulator_covers_charger_output_on_paper"]),
+        "regulator_current_and_pack_low_cell_budget": (
+            undocked["candidate_electrically_sufficient_on_paper"] is True),
+        "whole_protected_cell_pcm_cable_and_tray": (
+            protected["candidate_usable_on_paper"] is True),
+        "docked_idle_plus_cell_charge_in_same_1_5a_budget": (
+            docked["candidate_docked_load_on_paper"] is True),
+        "charger_ts_is_connected_to_actual_pack_ntc": (
+            charge_temperature_sensor_connected and
+            charger_ts_fixed_resistor_removed),
+        "hardware_charge_window_within_0_to_45_c_on_paper": charge_window_compatible,
+        **ts_fault_checks,
+        "physical_motor_commands_inhibited_on_dock": dock_motors_disarmed,
+    }
+
+
+def _stack_report(
+    undocked: dict, protected: dict, vpath: dict, docked: dict, gates: dict[str, bool],
+    *, charger_variant: str | None, pack_path_fuse_derated_hold_a: float | None,
+    boost_output_at_3v_continuous_a: float | None,
+    guaranteed_charge_window_c: tuple[float, float] | None,
+) -> dict:
+    """Publish arithmetic evidence without granting physical or purchase approval."""
+    return {
+        "source_of_equations": "existing power_preflight.py",
+        "charger_variant": charger_variant,
+        "charger_battery_discharge_recommended_max_a": _CHARGER_PATH_MAX_A,
+        "pack_path_fuse_derated_hold_a": pack_path_fuse_derated_hold_a,
+        "minimum_5v_peak_a_including_margin": (
+            undocked["minimum_rated_5v_output_a"]),
+        "minimum_1s_peak_a_including_margin": (
+            undocked["minimum_rated_cell_and_boost_input_a"]),
+        "manufacturer_derated_at_3v_boost_amperes_supplied": (
+            boost_output_at_3v_continuous_a),
+        "checks": gates,
+        "guaranteed_charge_window_c": guaranteed_charge_window_c,
+        "all_power_stages_compatible_on_paper": all(gates.values()),
+        "all_power_stages_physically_verified": False,
+        "qualified_1s_dock_safe_to_buy": False,
+        "undocked": undocked,
+        "battery_and_harness": protected,
+        "voltage_path": vpath,
+        "docked": docked,
+    }
+
+
 def screen_one_cell_power_stack(
     *,
     active_peak_5v_a: float,
@@ -471,54 +617,23 @@ def screen_one_cell_power_stack(
     Missing evidence fails the integrated paper screen.
     A returned paper pass is NEVER PCB, thermal, protection or dock approval.
     """
-    if any(type(v) is not bool for v in (
-            charge_temperature_sensor_connected,
-            charger_ts_fixed_resistor_removed,
-            dock_motors_disarmed)):
-        raise ValueError("Real TS and motor-disarm modes must be explicit booleans")
-    if type(charger_pgood_routed_on_paper) is not bool:
-        raise ValueError("Charger PGOOD routing evidence must be an explicit boolean")
-    if not isinstance(pack_mm, (tuple, list)) or len(pack_mm) != 3 or (
-            not isinstance(tray_mm, (tuple, list)) or len(tray_mm) != 3):
-        raise ValueError("Require exact assembled pack and tray 3D envelopes")
-    if charger_input_limit_a is not None:
-        # Use the same type/finite guard as the standalone dock screen.
-        if not _finite_number(charger_input_limit_a):
-            raise ValueError("BQ2407x dock charger input limit must be finite amperes")
-        if charger_input_limit_a > 1.5:
-            raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
-    if guaranteed_charge_window_c is not None:
-        if (not isinstance(guaranteed_charge_window_c, (tuple, list))
-                or len(guaranteed_charge_window_c) != 2
-                or not all(_finite_number(v) for v in guaranteed_charge_window_c)
-                or guaranteed_charge_window_c[0] >= guaranteed_charge_window_c[1]):
-            raise ValueError("Require ordered finite guaranteed charge window in Celsius")
-    # TI SLUS810N 9.3.6: standard 103AT-2 TS is nominally 0..50 C;
-    # the illustrated resistor network can widen, not narrow, that window.
-    charge_window_compatible = (guaranteed_charge_window_c is not None
-                                and 0 <= guaranteed_charge_window_c[0]
-                                and guaranteed_charge_window_c[1] <= 45)
+    charge_window_compatible = _validate_stack_inputs(
+        charge_temperature_sensor_connected=charge_temperature_sensor_connected,
+        charger_ts_fixed_resistor_removed=charger_ts_fixed_resistor_removed,
+        dock_motors_disarmed=dock_motors_disarmed,
+        charger_pgood_routed_on_paper=charger_pgood_routed_on_paper,
+        pack_mm=pack_mm, tray_mm=tray_mm, charger_input_limit_a=charger_input_limit_a,
+        guaranteed_charge_window_c=guaranteed_charge_window_c)
     ts_fault_checks = _ts_fault_inhibit_checks(
         ts_open_inhibit_on_paper, ts_short_inhibit_on_paper)
-    # Source of truth: do not silently add a new third power-supply formula.
-    undocked = size_5v_supply(
-        active_peak_5v_a, active_sustained_5v_a,
-        cell_low_v=3.0, measured_boost_efficiency=boost_efficiency_low_cell,
-        boost_max_input_a=boost_input_max_a,
-        boost_continuous_input_a=boost_input_continuous_a,
-        boost_continuous_output_a=boost_output_at_3v_continuous_a,
-        protected_cell_continuous_a=pack_sustained_a)
-    protected = screen_protected_pack(
-        undocked,
-        pack_length_mm=pack_mm[0], pack_width_mm=pack_mm[1],
-        pack_thickness_mm=pack_mm[2],
-        tray_length_mm=tray_mm[0], tray_width_mm=tray_mm[1],
-        tray_height_mm=tray_mm[2],
-        rated_peak_discharge_a=pack_peak_a,
-        rated_continuous_discharge_a=pack_sustained_a,
-        pcm_overcurrent_trip_a=pcm_trip_a,
-        connector_continuous_a=connector_a,
-        wire_and_crimp_continuous_a=wire_crimp_a)
+    undocked, protected = _screen_undocked_stack(
+        active_peak_5v_a=active_peak_5v_a, active_sustained_5v_a=active_sustained_5v_a,
+        boost_efficiency_low_cell=boost_efficiency_low_cell,
+        boost_input_max_a=boost_input_max_a, boost_input_continuous_a=boost_input_continuous_a,
+        boost_output_at_3v_continuous_a=boost_output_at_3v_continuous_a,
+        pack_mm=pack_mm, tray_mm=tray_mm, pack_peak_a=pack_peak_a,
+        pack_sustained_a=pack_sustained_a, pcm_trip_a=pcm_trip_a,
+        connector_a=connector_a, wire_crimp_a=wire_crimp_a)
     vpath = screen_bq2407x_output_path(
         charger_variant,
         regulator_min_input_v=boost_regulator_min_input_v,
@@ -535,62 +650,22 @@ def screen_one_cell_power_stack(
         protected_pack_max_charge_a=pack_charge_max_a,
         motors_confirmed_disarmed=dock_motors_disarmed,
         charger_variant=charger_variant)
-    # TI BQ2407x SLUS810N sections 8.1/8.3: BAT discharge and OUT
-    # recommended maximum are 4.5 A; 5 A is an absolute stress limit.
-    # The entire undocked converter input flows through this charger path.
-    charger_path_max_a = 4.5
-    shunt_checks = _pack_shunt_checks(
-        milliohm=pack_shunt_milliohm, rated_w=pack_shunt_rated_w,
-        derated_w=pack_shunt_derated_w,
-        discharge_peak_a=undocked["minimum_rated_cell_and_boost_input_a"],
-        charge_peak_a=docked["minimum_protected_pack_charge_rating_a"],
-        dropout_input_v=vpath["battery_path_dropout_screen_input_v"],
-        regulator_min_input_v=boost_regulator_min_input_v,
-    )
-    gates = {
-        **shunt_checks,
-        "charger_pgood_routed_on_paper": charger_pgood_routed_on_paper,
-        "pack_path_fuse_covers_peak": _pack_fuse_covers_peak(
-            pack_path_fuse_derated_hold_a,
-            undocked["minimum_rated_cell_and_boost_input_a"]),
-        "charger_battery_discharge_path_covers_peak": (
-            undocked["minimum_rated_cell_and_boost_input_a"] <= charger_path_max_a),
-        "charger_out_to_regulated_5v_covers_3v_cell_and_dock": (
-            vpath["regulator_covers_charger_output_on_paper"]),
-        "regulator_current_and_pack_low_cell_budget": (
-            undocked["candidate_electrically_sufficient_on_paper"] is True),
-        "whole_protected_cell_pcm_cable_and_tray": (
-            protected["candidate_usable_on_paper"] is True),
-        "docked_idle_plus_cell_charge_in_same_1_5a_budget": (
-            docked["candidate_docked_load_on_paper"] is True),
-        "charger_ts_is_connected_to_actual_pack_ntc": (
-            charge_temperature_sensor_connected and
-            charger_ts_fixed_resistor_removed),
-        "hardware_charge_window_within_0_to_45_c_on_paper": charge_window_compatible,
-        **ts_fault_checks,
-        "physical_motor_commands_inhibited_on_dock": dock_motors_disarmed,
-    }
-    return {
-        "source_of_equations": "existing power_preflight.py",
-        "charger_variant": charger_variant,
-        "charger_battery_discharge_recommended_max_a": charger_path_max_a,
-        "pack_path_fuse_derated_hold_a": pack_path_fuse_derated_hold_a,
-        "minimum_5v_peak_a_including_margin": (
-            undocked["minimum_rated_5v_output_a"]),
-        "minimum_1s_peak_a_including_margin": (
-            undocked["minimum_rated_cell_and_boost_input_a"]),
-        "manufacturer_derated_at_3v_boost_amperes_supplied": (
-            boost_output_at_3v_continuous_a),
-        "checks": gates,
-        "guaranteed_charge_window_c": guaranteed_charge_window_c,
-        "all_power_stages_compatible_on_paper": all(gates.values()),
-        "all_power_stages_physically_verified": False,
-        "qualified_1s_dock_safe_to_buy": False,
-        "undocked": undocked,
-        "battery_and_harness": protected,
-        "voltage_path": vpath,
-        "docked": docked,
-    }
+    gates = _stack_compatibility_checks(
+        undocked, protected, vpath, docked,
+        pack_shunt_milliohm=pack_shunt_milliohm, pack_shunt_rated_w=pack_shunt_rated_w,
+        pack_shunt_derated_w=pack_shunt_derated_w,
+        boost_regulator_min_input_v=boost_regulator_min_input_v,
+        pack_path_fuse_derated_hold_a=pack_path_fuse_derated_hold_a,
+        charger_pgood_routed_on_paper=charger_pgood_routed_on_paper,
+        charge_temperature_sensor_connected=charge_temperature_sensor_connected,
+        charger_ts_fixed_resistor_removed=charger_ts_fixed_resistor_removed,
+        charge_window_compatible=charge_window_compatible, ts_fault_checks=ts_fault_checks,
+        dock_motors_disarmed=dock_motors_disarmed)
+    return _stack_report(
+        undocked, protected, vpath, docked, gates, charger_variant=charger_variant,
+        pack_path_fuse_derated_hold_a=pack_path_fuse_derated_hold_a,
+        boost_output_at_3v_continuous_a=boost_output_at_3v_continuous_a,
+        guaranteed_charge_window_c=guaranteed_charge_window_c)
 
 
 def main() -> None:
