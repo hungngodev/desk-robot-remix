@@ -129,7 +129,48 @@ static void check_safety_suppression(std::uint32_t start) {
   CHECK(h.next(start + 1504U, true) == Action::None);
 }
 
+// Simulate continuous local requests without host traffic. Each acknowledged
+// edge consumes the full cooldown; suppressing a queued edge or disconnect
+// fault must not enable an extra edge. This is not a physical duty-cycle test.
+static void check_request_storm(std::uint32_t start) {
+  using Action = HapticPulse::Action;
+  HapticPulse h;
+  h.configure(true);
+  std::uint32_t edges = 0;
+  for (std::uint32_t elapsed = 0; elapsed < 60000U; ++elapsed) {
+    const auto now = start + elapsed;
+    const bool expected_start = elapsed % 1500U == 0;
+    CHECK(h.request(now) == expected_start);
+    const auto action = h.next(now, true);
+    if (expected_start) {
+      CHECK(action == Action::TurnOn);
+      h.completed(action, true, now);
+      ++edges;
+    } else if (elapsed % 1500U == 1U) {
+      h.cancel_pending();
+      CHECK(action == Action::TurnOff);
+      CHECK(h.next(now, false) == Action::TurnOff);
+      h.completed(action, true, now);
+    } else {
+      CHECK(action == Action::None);
+    }
+  }
+  CHECK(edges == 40U && !h.active());
+  CHECK(h.request(start + 60000U));
+  h.fault();
+  for (std::uint32_t elapsed = 60000U; elapsed < 65000U; ++elapsed) {
+    const auto now = start + elapsed;
+    CHECK(!h.request(now));
+    CHECK(h.next(now, true) == Action::None);
+  }
+  // A late successful LOW retry cannot rearm a faulted scheduler.
+  h.completed(Action::TurnOff, true, start + 65000U);
+  CHECK(!h.ready() && !h.request(start + 65001U));
+}
+
 int main() try {
+ check_request_storm(100U);
+ check_request_storm(0xfffffff0U);
  check_safety_suppression(100U);
  check_safety_suppression(0xfffffffeU);
  check_active_fault(100U);
