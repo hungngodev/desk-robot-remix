@@ -993,7 +993,7 @@ class Conversation:
             # Attention is optional telemetry, not part of the audio receipt.
             # A broken callback must not turn transmitted speech into failure
             # or cancel the next legitimate group turn.
-            if robot_id not in attention_tokens:
+            if consent.room_generation is not None or robot_id not in attention_tokens:
                 return
             try:
                 sent = getattr(attention, "sent", None)
@@ -1294,11 +1294,16 @@ class Conversation:
                             )
                             # The full receipt worker owns this turn even
                             # if the caller is cancelled during its SQLite IO.
-                            full_receipt_started = True
-                            await self._persist_spoken_turn(
-                                robot, text, recipients,
-                                private_context_current=private_memory_current,
-                            )
+                            # Room consent permits transient shared context, not
+                            # retention of its generated derivatives in private
+                            # SQLite. The admission fence stays set for the whole
+                            # session because relayed peer words can carry it.
+                            if consent.room_generation is None:
+                                full_receipt_started = True
+                                await self._persist_spoken_turn(
+                                    robot, text, recipients,
+                                    private_context_current=private_memory_current,
+                                )
                             # SQLite writes yield to other tasks. Revocation
                             # during persistence must not publish a completed
                             # turn or authorize another peer response.
@@ -1365,6 +1370,7 @@ class Conversation:
                                 pass  # Preserve the original turn failure.
                         if (current_robot is not None and completed_segments
                                 and private_memory_current()
+                                and consent.room_generation is None
                                 and not full_receipt_started):
                             # Never write a second receipt for a turn whose
                             # completed transmission already has a write owner.
@@ -1418,6 +1424,10 @@ class Conversation:
                         revoked = consent.revoked(
                             private_memory_current=private_memory_current(),
                         )
+                        if consent.room_generation is not None:
+                            # Session-local generated speech can repeat shared
+                            # station facts even after the raw sample expires.
+                            self.histories.pop(robot.id, None)
                         if revoked:
                             record["topic"] = ""
                             # The model may already have read private SQLite

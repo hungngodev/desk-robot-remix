@@ -3560,10 +3560,7 @@ class PetController:
             and self.settings.voice_vision_tools_enabled
             and bool(timeline)
         )
-        room_context_used = (
-            self.settings.mode == "hardware"
-            and any(item.get("channel") == "room_station" for item in timeline)
-        )
+        room_context_used = any(item.get("channel") == "room_station" for item in timeline)
         context = compose_brain_context(
             memory, core_memory, timeline,
             topical_event_id=(
@@ -4220,17 +4217,22 @@ class PetController:
                 state.recent_optional_transmissions.append((text, now))
                 if scheduled_activity:
                     state.last_activity_decision = "speak"
-                if self.multimodal is not None:
-                    remember_spoken = getattr(
-                        self.multimodal.hub, "remember_spoken", None
+                # Shared station consent is context-only. A generated line
+                # can paraphrase an anonymous reading as a personal fact.
+                # Keep transmission accounting, but do not promote its text
+                # into either private SQLite or another model's speech cues.
+                if not room_context_used:
+                    if self.multimodal is not None:
+                        remember_spoken = getattr(
+                            self.multimodal.hub, "remember_spoken", None
+                        )
+                        if callable(remember_spoken):
+                            remember_spoken(robot_id, text, now)
+                    await asyncio.to_thread(
+                        self.memory.remember, robot_id, uuid.uuid4().hex, text[:300],
+                        kind="own_utterance", source_robot=robot_id, witnessed=True,
+                        confidence=1.0,
                     )
-                    if callable(remember_spoken):
-                        remember_spoken(robot_id, text, now)
-                await asyncio.to_thread(
-                    self.memory.remember, robot_id, uuid.uuid4().hex, text[:300],
-                    kind="own_utterance", source_robot=robot_id, witnessed=True,
-                    confidence=1.0,
-                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

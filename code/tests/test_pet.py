@@ -5273,8 +5273,9 @@ async def test_proactive_physical_sensor_excludes_revoked_live_asr_context(
         await pet.close()
 
 
+@pytest.mark.parametrize("revoke", [False, True])
 async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_speech(
-    fleet, tmp_path,
+    fleet, tmp_path, revoke,
 ):
     """A room USB opt-out fences its cached fact without silencing touch."""
     from types import SimpleNamespace
@@ -5298,7 +5299,8 @@ async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_spe
         async def reply(self, history):
             prompts.append(history)
             assert "PRIVATE ROOM" in str(history)
-            fleet.room_station_context_enabled = False
+            if revoke:
+                fleet.room_station_context_enabled = False
             return "I noticed the room has changed."
 
     memory = MemoryStore(tmp_path, ids)
@@ -5318,13 +5320,19 @@ async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_spe
             "robot-01", change, 81, offered_at=time.monotonic(),
         )
         assert len(prompts) == 1
-        assert speaker.spoken == []
-        assert state.spoken == 0
-        fresh = await pet._load_proactive_context("robot-01", change)
-        assert fresh is not None
-        assert "PRIVATE ROOM" not in fresh[1].interaction
-        assert "touch_tap" in fresh[1].interaction
-        assert fresh[4] is False
+        assert memory.count("robot-01") == 0
+        assert not hub.spoken_history["robot-01"]
+        if revoke:
+            assert speaker.spoken == []
+            assert state.spoken == 0
+            fresh = await pet._load_proactive_context("robot-01", change)
+            assert fresh is not None
+            assert "PRIVATE ROOM" not in fresh[1].interaction
+            assert "touch_tap" in fresh[1].interaction
+            assert fresh[4] is False
+        else:
+            assert len(speaker.spoken) == 1
+            assert state.spoken == 1
     finally:
         state.enabled = False
         await pet.close()

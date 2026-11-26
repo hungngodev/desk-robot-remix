@@ -1136,3 +1136,51 @@ def test_five_pet_motion_fence_requires_each_missing_stop_receipt():
     assert tracker.fleet_block_reason(None) is not None
     tracker.finish(second, recovery, acknowledged=True)
     assert tracker.fleet_block_reason(None) is None
+
+async def test_shared_room_group_speech_stays_out_of_all_five_private_databases(
+    fleet, tmp_path,
+):
+    import time
+
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import ROOM_OBSERVATION_SOURCE, RoomObservation
+
+    fleet.mode = "hardware"
+    fleet.fleet_text_sharing_enabled = True
+    fleet.room_station_context_enabled = True
+    fleet.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(IDS, room_settings=fleet)
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="Station CO2 630 ppm",
+    ))
+    for robot_id in IDS:
+        cue = hub.interaction_timeline(robot_id, time.monotonic())[0]
+        assert cue["channel"] == "room_station"
+        assert cue["source"] == ROOM_OBSERVATION_SOURCE
+        assert cue["identity_verified"] is False
+
+    class EchoRoomChat:
+        async def reply(self, history):
+            if "630 ppm" in str(history):
+                # The first turn sees the station; later turns may only
+                # receive its derivative through digitally relayed speech.
+                hub.invalidate_room()
+                return "The shared station reported 630 ppm."
+            return "A new unrelated topic."
+
+    memory = MemoryStore(tmp_path, IDS)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, EchoRoomChat(), speaker, memory=memory)
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    transcript = await conversation.run(IDS, "Discuss the room", 5)
+    assert len(transcript) == 5
+    assert all("630 ppm" in item["text"] for item in transcript)
+    assert len(speaker.spoken) == 5
+    assert conversation.histories == {}
+    assert all(memory.count(robot_id) == 0 for robot_id in IDS)
+
+    # A fresh unrelated session still retains ordinary consented speech.
+    ordinary = await conversation.run(IDS, "Play a word game", 1)
+    assert ordinary[0]["text"] == "A new unrelated topic."
+    assert all(memory.count(robot_id) == 1 for robot_id in IDS)
