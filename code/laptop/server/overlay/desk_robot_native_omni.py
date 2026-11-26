@@ -2745,10 +2745,22 @@ class NativeOmniSession:
         events = await self._invalidate_head_first(force_flush=True)
         await self._cancel_remote(events)
 
+    async def _run_model_receiver(self) -> None:
+        """Fence playback at model EOF, before the supervisor is rescheduled."""
+        try:
+            await self._receive_model()
+        finally:
+            if not self.closed:
+                self.closed = True
+                self.connected = False
+                self._mac_context_verified = False
+                self._request_worker_cancellation()
+
     def _request_worker_cancellation(self) -> list[asyncio.Task]:
         workers = [*self._tasks, *self._pending_cancels]
+        current = asyncio.current_task()
         for task in workers:
-            if not task.done():
+            if task is not current and not task.done() and not task.cancelling():
                 task.cancel()
         return workers
 
@@ -2801,7 +2813,7 @@ class NativeOmniSession:
             _retry_after.pop(self.device, None)
             self._tasks = [
                 asyncio.create_task(self._send_mic()),
-                asyncio.create_task(self._receive_model()),
+                asyncio.create_task(self._run_model_receiver()),
                 asyncio.create_task(self._play()),
                 asyncio.create_task(self._camera_stream(http)),
             ]

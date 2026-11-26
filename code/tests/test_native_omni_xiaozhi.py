@@ -10306,3 +10306,70 @@ async def test_native_defers_while_expired_mac_lease_still_transmits(
         assert calls == []
     assert module.route_audio(conn, b"\0" * 1920, True) is True
     assert calls == ["pcm" if existing_session else "start"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("clean_close", [True, False])
+async def test_native_model_disconnect_fences_playback_before_supervisor(native, clean_close):
+    """Model EOF or failure revokes media before the run supervisor wakes."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+    conn.client_is_speaking = True
+    session.connected = True
+    session._tool_speech_turn = (0, 0)
+    session.outgoing.put_nowait(("response", b"pcm"))
+    playing = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    async def playback():
+        playing.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+
+    async def receiver():
+        await playing.wait()
+        if not clean_close:
+            raise ConnectionError("Model disconnected")
+
+    session._receive_model = receiver
+    player = asyncio.create_task(playback())
+    model = asyncio.create_task(session._run_model_receiver())
+    session._tasks = [player, model]
+    try:
+        if clean_close:
+            await model
+        else:
+            with pytest.raises(ConnectionError):
+                await model
+        assert session.closed and not session.connected
+        assert not session._mac_context_verified
+        assert module.status(conn.device_id)["native_backend_connected"] is False
+        assert player.cancelling() == 1
+        await asyncio.wait_for(cancelled.wait(), 1)
+        session._request_worker_cancellation()
+        assert player.cancelling() == 1
+        release.set()
+        await session._shutdown()
+        assert session.outgoing.empty()
+        assert session._tool_speech_turn is None
+        assert conn.device_id not in module._sessions
+        assert not conn.client_is_speaking
+        assert module._output_owner is None
+        stop = json.loads(packets[-1])
+        assert stop["state"] == "stop" and stop["flush"] is True
+    finally:
+        release.set()
+        if not player.cancelling():
+            player.cancel()
+        await asyncio.gather(player, model, return_exceptions=True)
