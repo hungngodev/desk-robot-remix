@@ -4,6 +4,8 @@ Captured 22 tabs at source revision fingerprint `bc7ea51bbe34b2f1`. The private 
 
 The source has **75 audited to-do rows**, **33 packet IDs**, **96 procedures**, and **200 original feature entries**. The task links below are work or review destinations. A mapped row does not claim that implementation or physical verification passed.
 
+The task dispositions in this crosswalk are the historical [catalog snapshot](catalog.md), not live implementation or acceptance states. In particular, `Already verified` on DRR-001, DRR-005 or DRR-045 applies to the recorded source revision only. Refresh [PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17), its exact-SHA checks and the [verification record](../docs/records/verification.md) before making a current claim. The [96-procedure evidence ledger](../docs/reviews/100_page_procedure_trace.json) governs acceptance; a route or task disposition cannot promote a procedure or authorize physical release.
+
 ## Conflicts and recurring instructions
 
 | Source | How to apply it |
@@ -230,7 +232,7 @@ Task routes · [DRR-001](tasks/repository/001-pin-the-current-pr-and-base-revisi
 
 ## Historical audit actions
 
-| ID | Source and priority | Original action | Current task disposition |
+| ID | Source and priority | Original action | Task disposition at catalog snapshot |
 | --- | --- | --- | --- |
 | <a id="audit-doc-01"></a>DOC-01 | T09 p60 · P0 | Repair two BME688 host regression assertions. | [DRR-132](tasks/power-dock-station/132-reconcile-historical-bme688-assertions.md) · Already verified |
 | <a id="audit-doc-02"></a>DOC-02 | T09 p61 · P0 | Give tested source and evidence artifacts independent identities. | [DRR-006](tasks/repository/006-separate-tested-source-from-receipt-identity.md) · Ready |
