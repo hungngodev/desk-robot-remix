@@ -63,6 +63,9 @@ def decode_tool_completion(result: object) -> tuple[bytes, str]:
     encoded = base64.b64decode(wav_text, validate=True)
     if len(encoded) > 1_200_000:
         raise ValueError("Model audio exceeds duration limit")
+    # wave may stop at the PCM chunk without checking the full RIFF extent.
+    if len(encoded) < 12 or int.from_bytes(encoded[4:8], "little") != len(encoded) - 8:
+        raise ValueError("Incomplete or inconsistent model WAV container")
     try:
         with wave.open(BytesIO(encoded), "rb") as wav:
             if (wav.getnchannels() != 1 or wav.getsampwidth() != 2

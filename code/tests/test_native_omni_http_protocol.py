@@ -93,3 +93,21 @@ def test_decode_rejects_invalid_or_incomplete_pcm(protocol, raw):
 def test_decode_accepts_exact_twenty_second_pcm_limit(protocol):
     pcm = b"\x01\x00" * (24000 * 20)
     assert protocol.decode_tool_completion({"choices": [_audio(_wav(pcm))]}) == (pcm, "")
+
+
+@pytest.mark.parametrize("delta", [-2, 2])
+def test_decode_rejects_inconsistent_riff_length(protocol, delta):
+    raw = _wav(b"\x01\x00" * 240)
+    declared = int.from_bytes(raw[4:8], "little") + delta
+    malformed = raw[:4] + declared.to_bytes(4, "little") + raw[8:]
+    with pytest.raises(ValueError):
+        protocol.decode_tool_completion({"choices": [_audio(malformed)]})
+
+
+def test_decode_accepts_complete_trailing_metadata(protocol):
+    pcm = b"\x01\x00" * 240
+    raw = _wav(pcm) + b"JUNK\x02\x00\x00\x00ab"
+    raw = raw[:4] + (len(raw) - 8).to_bytes(4, "little") + raw[8:]
+    assert protocol.decode_tool_completion({"choices": [_audio(raw)]}) == (pcm, "")
+    with pytest.raises(ValueError):
+        protocol.decode_tool_completion({"choices": [_audio(raw[:-1])]})
