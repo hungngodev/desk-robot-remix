@@ -1230,6 +1230,10 @@ def first_robot_pilot_samples(report: dict) -> dict:
     for part in one["roles"]:
         ident, remaining = part["id"], part["conditional_remaining"]
         source = PILOT_SAMPLE_PRODUCTS.get(ident)
+        source_identity = {
+            "name": source[0], "vendor": source[1], "sku": source[2],
+            "product_url": source[3], "brand": PILOT_IDENTIFIED_BRANDS.get(ident),
+        } if source is not None else {}
         if not remaining:
             if part["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY":
                 action = "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
@@ -1241,13 +1245,12 @@ def first_robot_pilot_samples(report: dict) -> dict:
         elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
             action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
         elif "no_new_adafruit_hardware" in part["missing_part_evidence"] or (
-            source is not None and _ad_fruit_new_hardware({
-                "name": source[0], "vendor": source[1], "sku": source[2],
-                "product_url": source[3], "brand": PILOT_IDENTIFIED_BRANDS.get(ident),
-            }, remaining)
+            _ad_fruit_new_hardware(source_identity, remaining)
         ):
             action = "HOLD_UNAPPROVED_NEW_HARDWARE"
-        elif "unapproved_selected_sensor_identity" in part["missing_part_evidence"]:
+        elif "unapproved_selected_sensor_identity" in part["missing_part_evidence"] or (
+            not selected_sensor_identity_matches(ident, part["name"], source_identity)
+        ):
             action = "HOLD_CHANGED_PART_IDENTITY"
         elif source is not None:
             if part["name"] != source[0]:
