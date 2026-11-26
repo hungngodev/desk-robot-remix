@@ -58,14 +58,14 @@ the original README files, including noncommercial and share alike restrictions.
 
 | Fusion component | Existing repo file | Basis |
 | --- | --- | --- |
-| Main chassis | docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl | ~58.0 by 86.2 by 41.6 mm source extents, verify units |
-| Stepper output wheel | docs/cad/originals/smars-stepper/SMARS_28BYJ-48-RearWheel.stl | ~21.0 by 32.5 by 32.5 mm |
-| Tracks, compatible slave wheels | docs/cad/originals/smars/mechanical_track.stl and slave_wheel_SL.stl | verify mating axle, do not mix original N20 motor wheel |
-| Forklift mounting/lift | docs/cad/originals/forklift/fork_lift_e.stl, fork_lift_f.stl | alignment to stepper chassis not proven |
-| Jaw servo case/rack/pinion | docs/cad/originals/gripper/servo_case_arm.stl, arm_rack.stl, pinion_gear.stl | Bluino rack and pinion preserved |
-| Rounded shell | docs/cad/originals/sparky-head/sparky_shell.stl | ~56.0 by 52.0 by 54.0 mm |
-| Head collar/lid, if used | docs/cad/originals/sparky-head/sparky_collar.stl, sparky_lid.stl | their separate mesh origins are not assembly transforms |
-| Servo clearance gauge | docs/cad/remixes/mg90s_pocket_fit_gauges.scad | print once before altering jaw servo mount |
+| Main chassis | [SMARS_2BJY8-Chassis.stl](originals/smars-stepper/SMARS_2BJY8-Chassis.stl) | ~58.0 by 86.2 by 41.6 mm source extents, verify units |
+| Stepper output wheel | [SMARS_28BYJ-48-RearWheel.stl](originals/smars-stepper/SMARS_28BYJ-48-RearWheel.stl) | ~21.0 by 32.5 by 32.5 mm |
+| Tracks, compatible slave wheels | [mechanical_track.stl](originals/smars/mechanical_track.stl), [slave_wheel_SL.stl](originals/smars/slave_wheel_SL.stl) | verify mating axle, do not mix original N20 motor wheel |
+| Forklift mounting/lift | [fork_lift_e.stl](originals/forklift/fork_lift_e.stl), [fork_lift_f.stl](originals/forklift/fork_lift_f.stl) | alignment to stepper chassis not proven |
+| Jaw servo case/rack/pinion | [servo_case_arm.stl](originals/gripper/servo_case_arm.stl), [arm_rack.stl](originals/gripper/arm_rack.stl), [pinion_gear.stl](originals/gripper/pinion_gear.stl) | Bluino rack and pinion preserved |
+| Rounded shell | [sparky_shell.stl](originals/sparky-head/sparky_shell.stl) | ~56.0 by 52.0 by 54.0 mm |
+| Head collar/lid, if used | [sparky_collar.stl](originals/sparky-head/sparky_collar.stl), [sparky_lid.stl](originals/sparky-head/sparky_lid.stl) | their separate mesh origins are not assembly transforms |
+| Servo clearance gauge | [mg90s_pocket_fit_gauges.scad](remixes/mg90s_pocket_fit_gauges.scad) | print once before altering jaw servo mount |
 
 ## Step-by-step in Fusion
 

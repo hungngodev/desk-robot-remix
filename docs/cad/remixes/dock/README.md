@@ -31,7 +31,7 @@ backstop, contacts, or charging function; passing does not qualify docking.
 The default `part="dock_passive_fit"` still renders the full cradle.
 `code/scripts/export_fit_kit.py` exports both models.
 
-Source: dock_passive_fit.scad in the same directory. Change
+Source: [dock_passive_fit.scad](dock_passive_fit.scad) in the same directory. Change
 track_outer_width_mm and side_clearance_each_mm to measured values in
 OpenSCAD or Fusion. A 96 mm example outer track width plus 2 mm
 clearance per side creates a 100 mm final channel and a flared entry.
@@ -203,7 +203,7 @@ The same read only seat switch program also checks whether the original
 **nonconductive** 54 by 25 by 9 mm contact fit coupon can even sit in the
 unpowered dock channel without crossing the backstop or the physically
 measured robot underside. The source is
-`docs/cad/remixes/remaining_fit_gauges.scad` and its
+[remaining_fit_gauges.scad](../remaining_fit_gauges.scad) and its
 `dock_contact_recess_gauge` part. Provide the exact
 `contact_cad_source_sha256` of that file with the actual measured
 `contact_center_y_mm`, `robot_underside_z_at_stop_mm` (relative to
