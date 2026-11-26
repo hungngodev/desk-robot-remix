@@ -289,6 +289,13 @@ class SpatialRuntime:
         state = self.states[robot_id]
         if evidence.robot_id != robot_id:
             raise ValueError("Object evidence robot identity mismatch")
+        # No live producer yet proves camera exposure against a stationary
+        # motion bracket. Reject both positive and negative camera claims;
+        # an unproven frame must not enter the route cache or episode store.
+        if self.settings.mode == "hardware" and evidence.source in (
+            "camera_seen", "camera_not_seen",
+        ):
+            return False
         state.observations.append(evidence)
         if len(state.observations) > 64:
             state.observations = state.observations[-64:]
@@ -465,6 +472,11 @@ class SpatialRuntime:
         safety_clear,
         request_is_current,
     ) -> DetectorReceipt:
+        # Match the controller's hardware capture hold at the runtime owner.
+        # A fresh JPEG receipt and current body status cannot establish that
+        # the original exposure avoided wheel motion or camera mount slew.
+        if self.settings.mode == "hardware":
+            return DetectorReceipt("rejected", "camera_stationarity_unproven")
         state = self.states[frame.robot_id]
         now_us = self.now_us()
         owner = self.make_owner(frame.robot_id, session_id=session_id, turn_id=turn_id)
@@ -488,6 +500,7 @@ class SpatialRuntime:
             # job can still be running while its camera/map/grant was replaced.
             return (
                 request_is_current() is True
+                and self.settings.mode != "hardware"
                 and self.states.get(frame.robot_id) is state
                 and self.make_owner(
                     frame.robot_id, session_id=session_id, turn_id=turn_id,
