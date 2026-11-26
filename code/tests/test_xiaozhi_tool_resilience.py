@@ -142,6 +142,8 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
     assert "error" in result and result["retried"] is False
     assert "SECRET" not in str(result)
     assert "private host" not in str(result)
+    if failure == "http_error":
+        assert result["error_code"] == "observation_unavailable"
 
 
 @pytest.mark.parametrize("unsafe", [

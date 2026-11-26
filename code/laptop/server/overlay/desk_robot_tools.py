@@ -321,10 +321,13 @@ async def call(conn, route, payload=None):
     if turn_superseded:
         return {"_desk_robot_turn_superseded": True}
     if response.status_code >= 400:
-        return {
+        result = {
             "error": f"Robot Mac rejected request ({response.status_code})",
             "retried": False,
         }
+        if route == "look":
+            result["error_code"] = "observation_unavailable"
+        return result
     try:
         result = response.json()
         # Python's decoder accepts NaN/Infinity and overflowing exponents.

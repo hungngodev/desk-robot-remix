@@ -53,6 +53,8 @@ def _format_tool_receipt(kind: object, content: object) -> str:
     """Format only known tool evidence, retaining its authority and clipping limits."""
     if type(kind) is not str or not isinstance(content, str) or not content.strip():
         return ""
+    if kind == "visual_look" and content == "observation_unavailable":
+        return "Visual observation_unavailable; no current sighting. Do not infer objects."
     spec = _TOOL_RECEIPT_FORMATS.get(kind)
     if spec is None:
         return ""

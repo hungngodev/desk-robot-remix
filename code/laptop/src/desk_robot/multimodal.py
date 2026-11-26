@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from typing import TYPE_CHECKING
 
+import httpx
 from PIL import Image, ImageOps
 
 if TYPE_CHECKING:
@@ -573,7 +574,8 @@ class CameraFrameHub:
                       received_at: float) -> None:
         """Accept only completed current-turn read-only tool interpretations.
 
-        Failed/cancelled tool outputs must never enter the next interaction.
+        Failed/cancelled output text must never enter the next interaction.
+        A fixed observation_unavailable status is not a visual interpretation.
         Visual answers are model guesses; status/job receipts are read-only
         Mac observations. None proves physical acceptance or grants motion.
         Visual guesses expire after eight seconds; status after thirty.
@@ -617,6 +619,8 @@ class CameraFrameHub:
                 "summary": summary,
                 "age_ms": round(1000 * (now - observed)),
                 "source": (
+                    "mac_visual_observation_unavailable"
+                    if kind == "visual_look" and summary == "observation_unavailable" else
                     "local_vlm_interpretation_not_physical_measurement"
                     if kind == "visual_look" else
                     "private_opt_in_memory_retrieval_not_current_observation"
@@ -885,7 +889,9 @@ class CameraFrameHub:
                     "kind": kind,
                     "age_ms": round(1000 * (now - stamp)),
                     "source": (
-                        "local_vlm_interpretation" if kind == "visual_look"
+                        "mac_visual_observation_unavailable"
+                        if kind == "visual_look" and summary == "observation_unavailable"
+                        else "local_vlm_interpretation" if kind == "visual_look"
                         else "private_opt_in_memory_tool_receipt"
                         if kind == "memory_recall" else "mac_read_only_tool_receipt"
                     ),
@@ -2174,6 +2180,9 @@ class MultimodalOrchestrator:
         turn = self._turn_epoch[robot_id]
         self._question_epoch[robot_id] += 1
         question_epoch = self._question_epoch[robot_id]
+        # A new question must not borrow the previous answer while inference
+        # is pending or if the provider never returns an observation.
+        self.hub.discard_visual_tools(robot_id)
         current = asyncio.current_task()
         pending_sensor = self._sensor_tasks.get(robot_id)
         if pending_sensor is not None and not pending_sensor.done():
@@ -2286,6 +2295,17 @@ class MultimodalOrchestrator:
                     raise RuntimeError(
                         "Live visual analysis timed out; do not describe old scene"
                     ) from exc
+                except (httpx.HTTPError, OSError) as exc:
+                    if not admit_answer():
+                        raise RuntimeError(
+                            "Visual question or camera evidence invalidated"
+                        ) from exc
+                    self.hub.remember_tool(
+                        robot_id, "visual_look", "observation_unavailable", time.monotonic()
+                    )
+                    raise RuntimeError(
+                        "observation_unavailable: local vision provider failed"
+                    ) from exc
             if not current_turn():
                 raise RuntimeError("Visual answer superseded by new speech")
             if not self.settings.voice_vision_tools_enabled:
@@ -2310,7 +2330,9 @@ class MultimodalOrchestrator:
             # epoch and real Mac JPEG. It is a short-lived interpretation,
             # never a second camera/VLM agent or evidence of motion success.
             self.hub.remember_tool(
-                robot_id, "visual_look", answer, completed_at
+                robot_id, "visual_look",
+                "observation_unavailable" if answer == "I can't tell from my camera right now."
+                else answer, completed_at,
             )
             return {
                 "robot_id": robot_id,

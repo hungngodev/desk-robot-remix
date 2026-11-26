@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from desk_robot.brain_context import compose_brain_context
 from desk_robot.multimodal import (
     CameraFrameHub,
     MultimodalOrchestrator,
@@ -2577,6 +2578,62 @@ async def test_readonly_vision_tool_interpretation_is_ephemeral_per_pet_and_fenc
         visual.voice_transport_unavailable()
         assert visual.hub.recent_tool_context("robot-01", now + 0.1) == []
         assert not visual.hub.frames["robot-01"]
+    finally:
+        await visual.close()
+
+
+@pytest.mark.parametrize("failure", [httpx.ConnectError, httpx.ReadTimeout, OSError, None])
+async def test_unavailable_visual_model_retires_prior_sighting_and_reaches_brain(failure):
+    class IntermittentVision(Vision):
+        unavailable = False
+
+        async def answer(self, question, frames):
+            if self.unavailable:
+                if failure is None:
+                    return "I can't tell from my camera right now."
+                raise failure("private provider detail")
+            return await super().answer(question, frames)
+
+    scene = IntermittentVision()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()}, scene, asyncio.Lock(),
+    )
+    robot = "robot-01"
+    try:
+        await visual.look(robot, "What is on the table?")
+        stamp = time.monotonic()
+        visual.hub.remember_tool("robot-02", "visual_look", "peer book", stamp)
+        visual.hub.remember_tool(robot, "robot_status", "battery reading", stamp)
+        scene.unavailable = True
+        if failure is None:
+            reply = await visual.look(robot, "What is visible now?")
+            assert reply["answer"] == "I can't tell from my camera right now."
+        else:
+            with pytest.raises(RuntimeError, match="observation_unavailable"):
+                await visual.look(robot, "What is visible now?")
+        now = time.monotonic()
+        cues = visual.hub.recent_tool_context(robot, now)
+        visual_cue = next(cue for cue in cues if cue["kind"] == "visual_look")
+        assert visual_cue["summary"] == "observation_unavailable"
+        assert visual_cue["source"] == "mac_visual_observation_unavailable"
+        assert visual_cue["motor_authorized"] is False
+        assert any(cue["kind"] == "robot_status" for cue in cues)
+        assert visual.hub.recent_tool_context("robot-02", now)[0]["summary"] == "peer book"
+        timeline = visual.hub.interaction_timeline(robot, now)
+        context = compose_brain_context([], [], timeline).interaction
+        assert "observation_unavailable" in context and "no current sighting" in context
+        assert "dark square" not in context and "private provider detail" not in context
+        assert not any(
+            cue["kind"] == "visual_look"
+            for cue in visual.hub.recent_tool_context(robot, now + 9)
+        )
+        scene.unavailable = False
+        await visual.look(robot, "What is visible now?")
+        recovered = visual.hub.recent_tool_context(robot, time.monotonic())
+        assert any(
+            cue["kind"] == "visual_look" and "dark square" in cue["summary"]
+            for cue in recovered
+        )
     finally:
         await visual.close()
 
