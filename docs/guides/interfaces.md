@@ -61,11 +61,20 @@ access; reject oversized bodies and commands. Never auto-arm from an MCP tool.
 - `GET /api/aux`: raw body sensor data with independent dock seat GPIOA, no net battery charging assertion.
 - `GET /api/ir`: WROOM two-channel read-only RMT NEC evidence; 34-symbol classic NEC, code checksum and fresh per-side sequences. A matched code never authorizes movement or charging.
 - `GET /api/pose`: authenticated, bounded read-only WROOM pose v1. Old body firmware returns HTTP 501, not guessed coordinates.
-- `GET /api/camera.jpg`: fresh JPEG using the existing camera implementation and
-  image-to-JPEG helpers. No new sensor driver. Return failure if capture fails.
+- `GET /api/camera.jpg`: standalone fresh JPEG using the existing camera implementation and
+  image-to-JPEG helpers. Return failure if capture fails or the camera is busy.
+- `GET /api/camera.mjpg`: persistent authenticated multipart JPEG stream; the Mac
+  owns one remote reader per robot and reuses fresh stream frames for snapshot consumers.
+  A competing camera acquisition is refused. Enable continuous perception only with
+  operator consent; a disconnected stream is not live perception.
+- `GET /api/camera.identity`: read-only initialized sensor PID and head boot nonce;
+  Mac docking calibration checks these against the accepted frame identity.
 
-The active modular implementation uses `desk-robot-modular-s3` and an
-`Esp32Camera` snapshot adapter; the previous `desk-robot-core-s3` reference remains
+The active modular implementation uses `desk-robot-modular-s3` and the existing
+`Esp32Camera` capture adapter for both snapshot and continuous MJPEG routes;
+see [head bridge](../../code/firmware/head/overlay/robot_bridge.cc) and
+[Mac transport](../../code/laptop/src/desk_robot/transport.py).
+The previous `desk-robot-core-s3` reference remains
 separate. The modular board uses its own audio/display pins and camera I²C0 versus
 OLED I²C1, with a camera-driver Kconfig guard. Token/robot ID go in private build
 configuration. Both variants retain the same API and shared camera lock. Existing
@@ -81,8 +90,8 @@ silently maintains an abandoned movement. Manual operator arming via HTTP/USB.
 
 ## Laptop
 
-Python package `desk_robot` under `laptop/src/desk_robot`, project-level
-`pyproject.toml`, tests under `tests/`. No real movement by default. A simulated
+Python package `desk_robot` under [code/laptop/src/desk_robot](../../code/laptop/src/desk_robot/), project-level
+[code/pyproject.toml](../../code/pyproject.toml), tests under [code/tests](../../code/tests/). No real movement by default. A simulated
 head/body transport must exercise the same coordinator logic in tests.
 
 Per-robot configuration: ID, display name/persona, head URL, environment-token
@@ -103,14 +112,16 @@ two-to-five-robot conversation. Default localhost. Use the existing Xiaozhi serv
 an overlay/plugin to route spoken pickup requests to the right robot/coordinator.
 Keep model/vision/speech imports optional so base tests run without model weights.
 Measured calibration is a private JSON file; human physical trials are recorded
-in the CSV and summarized by `scripts/check_trials.py`, separately from the API.
+in the CSV and summarized by [code/scripts/check_trials.py](../../code/scripts/check_trials.py), separately from the API.
 Operator `/enable` grants a 30-second one-use permit for one bounded job.
 For hardware mode, the coordinator first fetches the existing authenticated
 Sense `/api/status` response and refuses a permit unless the actual WROOM
 reports the per-robot configured guarded motor backend (`stepper_28byj48` or
 `dc_pwm_guarded`), correct robot identity, disarmed state,
 unpressed touch, clear local five-channel safety and five present, valid,
-recent readings. It checks **again immediately before the job arms**; a touch,
+recent readings, and recognized fresh six-axis IMU telemetry (age at most 200 ms).
+These raw IMU samples do not prove a calibrated attitude. It checks **again
+immediately before the job arms**; a touch,
 disconnect, stale reading or fault between permit and execution therefore
 fails the job without requesting motor power. Missing fields fail closed.
 The body itself remains the sole safety authority and rechecks sensors before
