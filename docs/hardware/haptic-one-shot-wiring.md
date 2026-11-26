@@ -67,8 +67,13 @@ haptic power **OFF** by default until hardware acceptance.
    Duplicate, boot baseline, and network speech requests cannot trigger it.
 3. The next optional mux lane 5 pass first collects fresh required dock
    contact/status data. A docked, stale or invalid record rejects vibration.
-4. At most one positive GPB2 edge is generated after cooldown; the next mux
-   lane 5 pass deasserts GPB2. The edge and deassert are each read back.
+4. At most one positive GPB2 edge is generated after cooldown: `OLATB`
+   0x04 (HIGH) starts the edge; 0x00 (LOW) deasserts it on the next
+   verified mux lane 5 pass, even if dock contact changes. Both writes
+   require matching latch readback. A LOW acknowledgment more than 250 ms
+   after HIGH disables further requests until reinitialization. This is a
+   software service deadline, not a physical pulse width; channel 1 Q
+   remains independently timed.
 5. A failed mux transfer or GPIO readback disables haptic requests and
    invalidates cached optional/dock evidence. A later verified lane 5 pass
    attempts to drive OLATB low, but the **physical one-shot** is still required

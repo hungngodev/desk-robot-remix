@@ -343,3 +343,25 @@ def test_manifest_rejects_divergent_motor_and_servo_initialization_arrays():
         assert before in body
         with pytest.raises(ValueError, match=message):
             generator.verify(plan, body.replace(before, after), head)
+
+
+def test_haptic_edge_polarity_and_shared_timer_guard_match_wiring():
+    source = (FW / "lib/AccessorySensors/AccessorySensors.cpp").read_text()
+    pulse = (FW / "lib/AccessorySensors/HapticPulse.h").read_text()
+    pins = (FW / "include/BodyPins.h").read_text()
+    docs = (HARDWARE / "haptic-one-shot-wiring.md").read_text()
+    step = source.split("void AccessorySensors::haptic_step", 1)[1].split("#endif", 1)[0]
+    assert "Action::TurnOn ? 0x04U : 0x00U" in " ".join(step.split())
+    assert "write8(0x20, 0x15, expected)" in step
+    assert "readback == expected" in step
+    assert "haptic_needs_low_" in step and "Action::TurnOff" in step
+    assert "if (active_) return Action::TurnOff;" in pulse
+    assert "now_ms - last_started_ms_ > 250U) ready_ = false;" in pulse
+    assert "constexpr int kRightStepperPins[] = {27, 32, 33, 23};" in pins
+    assert "constexpr int kDcHeartbeatPin = 23;" in pins
+    assert "1A pin 1 held LOW for positive-edge B triggering" in docs
+    assert "Active-HIGH 1Q pin 13" in docs
+    assert "| Unused inverse Q | Pin 4 no load |" in docs
+    assert "Do not connect it simultaneously to a STEP phase GPIO23" in docs
+    assert "0x04 (HIGH)" in docs and "0x00 (LOW)" in docs
+    assert "not a physical pulse width" in docs
