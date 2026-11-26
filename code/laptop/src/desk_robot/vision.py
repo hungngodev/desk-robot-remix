@@ -14,6 +14,8 @@ from typing import Callable, Protocol, TypeGuard
 
 from PIL import Image
 
+from .scene_motion import scene_change_mask
+
 
 def valid_visual_text(value: object, min_chars: int, max_chars: int) -> TypeGuard[str]:
     """Require bounded, encodable text before it crosses a model or speech boundary."""
@@ -242,7 +244,6 @@ class VisualChangeGate:
         # Reuse the existing low-cost Frigate-style motion score. Global
         # exposure/lighting drift does not justify another expensive VLM
         # comparison for every camera in a five-pet fleet.
-        from .multimodal import scene_change_mask
         mask = scene_change_mask(self._pixel_baseline, current, threshold=18)
         changed = len(mask) - mask.count(0)
         if changed / len(mask) < self.min_changed_fraction:
