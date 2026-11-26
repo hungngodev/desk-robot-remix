@@ -290,19 +290,20 @@ class AttentionLedger:
             return False
         if state.sensor_edges and at < state.sensor_edges[-1][1]:
             return False
-        if (state.sensor_edges and state.sensor_edges[-1][0] == kind
-                and state.sensor_edges[-1][2] == state.generation
-                and state.sensor_details.get(kind) == detail
-                and at - state.sensor_edges[-1][1] < 2.0):
-            # Suppress duplicate callbacks during the same short physical
-            # interaction, not every subsequent authentic touch of that kind.
-            # A later contact remains optional context, never forced speech.
-            return False
-        # Repeated low-value gestures must not evict the one meaningful
-        # handling or local safety cue during a longer conversation.
         previous = next(
             (edge for edge in state.sensor_edges if edge[0] == kind), None
         )
+        if (previous is not None
+                and previous[2] == state.generation
+                and state.sensor_details.get(kind) == detail
+                and at - previous[1] < 2.0
+                and (kind != "safety_fault" or previous == state.sensor_edges[-1])):
+            # Interleaved routine callbacks must not renew the same cue.
+            # Preserve the existing adjacent-only fault debounce: an intervening
+            # observation may represent a separate fault episode.
+            return False
+        # Repeated low-value gestures must not evict the one meaningful
+        # handling or local safety cue during a longer conversation.
         if previous is not None:
             state.sensor_edges.remove(previous)
         if len(state.sensor_edges) == state.sensor_edges.maxlen:

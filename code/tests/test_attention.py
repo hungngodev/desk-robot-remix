@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from desk_robot.attention import AttentionLedger
 from desk_robot.brain_context import compose_brain_context
+from desk_robot.habituation import HabituationWindow
 from desk_robot.pet import PetController
 from desk_robot.runtime import Runtime
 
@@ -997,3 +998,57 @@ def test_simulated_day_attention_preserves_distinct_fault_causes(monkeypatch):
     assert ledger.timeline("peer", 22) == []
     # 20. Sleep/idle expiry clears bounded historical attention.
     assert ledger.timeline(pet, 200) == []
+
+
+def test_interleaved_handling_burst_preserves_context_and_independent_decay(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    habituation = HabituationWindow[str](window_s=10)
+    generation = ledger.begin_topic("pet", "Find the key", 10)
+    assert ledger.sensor("pet", "safety_fault", 11, detail="floor_out_of_range_ch0")
+    for index in range(8):
+        for offset, kind in ((0, "handling_tilt"), (0.0625, "touch_tap")):
+            stamp = 12 + index * 0.125 + offset
+            assert habituation.record(kind, stamp)
+            assert ledger.sensor("pet", kind, stamp) is (index == 0)
+    assert habituation.recent_repeats(13) == {"handling_tilt": 8, "touch_tap": 8}
+    cue = ledger.timeline("pet", 13)[0]
+    assert "Find the key" in cue["content"]
+    assert "WROOM safety_fault" in cue["content"]
+    assert "handling_tilt" in cue["content"]
+    assert "historical, not current telemetry" in cue["content"]
+    assert "Earlier speech transmitted" not in cue["content"]
+    assert cue["motor_authorized"] is False
+    assert cue["physical_action_verified"] is False
+    assert ledger.timeline("peer", 13) == []
+    # The debounce uses the admitted edge, not the last rejected callback.
+    assert ledger.sensor("pet", "handling_tilt", 14)
+    assert habituation.record("handling_tilt", 14)
+    assert ledger.finish_topic("pet", generation, 15, interrupted=False)
+    # Repeat counts disappear monotonically after the last actual observation.
+    assert habituation.recent_repeats(22.875) == {
+        "handling_tilt": 9, "touch_tap": 8,
+    }
+    assert habituation.recent_repeats(22.9375) == {"handling_tilt": 9}
+    assert habituation.recent_repeats(24) == {}
+
+
+def test_debounce_preserves_new_generation_and_distinct_fault_receipts(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "First topic", 10)
+    assert ledger.sensor("pet", "handling_tilt", 11)
+    assert ledger.sensor("pet", "touch_tap", 11.125)
+    assert not ledger.sensor("pet", "handling_tilt", 11.25)
+    ledger.begin_topic("pet", "Next topic", 11.5)
+    assert ledger.sensor("pet", "handling_tilt", 11.625)
+    assert ledger.sensor("pet", "safety_fault", 12, detail="floor_out_of_range_ch0")
+    assert ledger.sensor("pet", "stable_putdown", 12.125)
+    # A reported intervening event must not hide an independent fault.
+    assert ledger.sensor("pet", "safety_fault", 12.25, detail="floor_out_of_range_ch0")
+    assert ledger.sensor("pet", "safety_fault", 12.375, detail="floor_out_of_range_ch1")
+    assert not ledger.sensor("pet", "safety_fault", 12.5, detail="floor_out_of_range_ch1")
+    cue = ledger.timeline("pet", 13)[0]
+    assert "Next topic" in cue["content"]
+    assert "floor_out_of_range_c" in cue["content"]
+    assert cue["motor_authorized"] is False

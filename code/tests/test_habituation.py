@@ -120,3 +120,21 @@ def test_expired_candidate_cannot_be_revived_by_a_regressing_query():
     model.record("mug", 10)
     assert not model.refresh_if_repeated("mug", 20)
     assert not model.refresh_if_repeated("mug", 19)
+
+
+def test_rapid_alternating_bursts_decay_monotonically_without_queries_refreshing():
+    model = HabituationWindow[str](window_s=10)
+    for index in range(128):
+        stamp = 100 + index / 128
+        assert model.record("handling_tilt", stamp)
+        assert model.record("touch_tap", stamp + 1 / 256)
+    last_tilt = 100 + 127 / 128
+    last_touch = last_tilt + 1 / 256
+    assert not model.record("handling_tilt", last_tilt - 0.125)
+    for now in (last_touch, last_touch + 1, last_tilt + 9.999):
+        assert model.recent_repeats(now) == {"handling_tilt": 128, "touch_tap": 128}
+    assert model.recent_repeats(last_tilt + 10) == {"touch_tap": 128}
+    assert model.recent_repeats(last_touch + 10) == {}
+    assert model.recent_repeats(last_touch + 11) == {}
+    assert model.record("handling_tilt", last_touch + 11)
+    assert model.recent_repeats(last_touch + 11) == {}
