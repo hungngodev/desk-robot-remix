@@ -200,3 +200,55 @@ def test_status_retains_reported_wroom_fault_code(fault):
     assert result.json()["armed"] is False
     assert result.json()["health"]["physical_acceptance_pass"] is False
     assert heard[0][-1].endswith(f"safety_fault={fault}")
+
+
+@pytest.mark.parametrize(("failure", "head_state", "body_state"), [
+    (httpx.ConnectError("offline"), "unreachable", "unconfirmed"),
+    (httpx.ConnectTimeout("offline"), "unreachable", "unconfirmed"),
+    (httpx.ReadTimeout("no response"), "unconfirmed", "unconfirmed"),
+    (TimeoutError("deadline"), "unconfirmed", "unconfirmed"),
+])
+def test_status_disconnect_never_reuses_previous_sensor_receipt(failure, head_state, body_state):
+    first = {"robot_id": "robot-01", "armed": True,
+             "imu": {"valid": True, "age_ms": 0},
+             "safety": {"ready": True, "fault": "none"}}
+    recovered = {"robot_id": "robot-01", "armed": False,
+                 "imu": {"valid": False, "age_ms": 500},
+                 "safety": {"ready": False, "fault": "stale_sample"}}
+    readings = iter((first, failure, recovered))
+
+    async def status():
+        reading = next(readings)
+        if isinstance(reading, TimeoutError):
+            raise reading
+        if isinstance(reading, Exception):
+            raise HeadError("head request failed") from reading
+        return reading
+
+    client, heard = _status_client({"robot-01": SimpleNamespace(status=status)})
+    with client:
+        before = client.get("/v1/robots/robot-01/status")
+        assert before.status_code == 200
+        assert before.json()["imu"] == first["imu"]
+        assert len(heard) == 1
+
+        offline = client.get("/v1/robots/robot-01/status")
+        assert offline.status_code == 503
+        assert offline.json() == {
+            "robot_id": "robot-01", "error": "Robot status unavailable",
+            "health": {"head": head_state, "body": body_state,
+                       "room_station": "disabled", "state": "degraded",
+                       "physical_acceptance_pass": False},
+        }
+        assert len(heard) == 1
+
+        after = client.get("/v1/robots/robot-01/status")
+        assert after.status_code == 200
+        assert after.json() == {
+            **recovered,
+            "health": {"head": "responded", "body": "status_received",
+                       "room_station": "disabled", "state": "reported",
+                       "physical_acceptance_pass": False},
+        }
+        assert len(heard) == 2
+        assert heard[-1][-1].endswith("safety_fault=stale_sample")
