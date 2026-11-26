@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 from typing import Awaitable, Callable, TypeVar
 
-from .command_framing import command_ack_matches, expected_ack
+from .command_framing import MAX_DRIVE_DURATION_MS, command_ack_matches, expected_ack
 
 _T = TypeVar("_T")
 
@@ -22,19 +23,25 @@ async def dispatch_job_command(
 ) -> dict:
     """Recheck authority and require a matching command receipt from every adapter."""
     expected = expected_ack(command)
+    # A queued drive must not gain a fresh body pulse after host scheduling stalls.
+    # The WROOM independently enforces the duration of commands it receives.
+    deadline = (
+        monotonic() + MAX_DRIVE_DURATION_MS / 1000 if command.startswith("drive ") else None
+    )
 
     def at_dispatch() -> None:
         check()
         if dispatch_check is not None:
             dispatch_check()
+        if deadline is not None and monotonic() >= deadline:
+            raise OperationError("Drive dispatch expired before transport send")
 
     check()
     if getattr(head, "supports_dispatch_check", False):
         reply = await head.command(command, dispatch_check=at_dispatch)
     else:
         # Legacy adapters expose no queue boundary; check before handing off.
-        if dispatch_check is not None:
-            dispatch_check()
+        at_dispatch()
         reply = await head.command(command)
     check()
     if not command_ack_matches(reply, robot_id, expected):
