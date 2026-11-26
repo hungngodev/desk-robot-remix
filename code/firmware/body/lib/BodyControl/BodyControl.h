@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "CliffGuard.h"
+#include "ServoStepClock.h"
 #include "BerryImu.h"
 #include "OpticalRaw.h"
 #include "AccessoryReadings.h"
@@ -25,7 +26,6 @@ constexpr std::uint32_t kMaxDriveMs = 250;
 constexpr int kSpeedLimitPercent = 40;
 constexpr int kServoMinDegrees = 60;
 constexpr int kServoMaxDegrees = 120;
-constexpr std::uint32_t kServoStepMs = 20;  // at most 50 commanded degrees/sec
 
 // Raw 9.7 fixed-point VL53L0X Mcps words, read-only. This does not
 // extend cliff safety permission or imply optical calibration.

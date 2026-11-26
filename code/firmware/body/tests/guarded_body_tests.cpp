@@ -3851,6 +3851,30 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
 
 
 
+static void servo_step_clock_discards_physical_time_credit() {
+  using desk_robot::take_servo_steps;
+  for (const auto start : {100U, 0xfffffff0U}) {
+    auto last = start;
+    CHECK(take_servo_steps(start + 19U, last, true) == 0);
+    CHECK(last == start);
+    // An irregular delay must discard both whole and partial intervals.
+    CHECK(take_servo_steps(start + 179U, last, true) == 1);
+    CHECK(last == start + 179U);
+    CHECK(take_servo_steps(start + 179U, last, true) == 0);
+    CHECK(take_servo_steps(start + 180U, last, true) == 0);
+    CHECK(take_servo_steps(start + 198U, last, true) == 0);
+    CHECK(take_servo_steps(start + 199U, last, true) == 1);
+    CHECK(last == start + 199U);
+
+    // Simulation only: retain complete intervals and fractional remainder.
+    last = start;
+    CHECK(take_servo_steps(start + 179U, last, false) == 8);
+    CHECK(last == start + 160U);
+    CHECK(take_servo_steps(start + 180U, last, false) == 1);
+    CHECK(last == start + 180U);
+  }
+}
+
 static void guarded_lift_never_replays_missed_servo_steps_in_one_pwm_write() {
   auto cfg = config();
   cfg.freshness_ms = 200U; // a valid allowed window longer than the slow loop
@@ -4187,6 +4211,7 @@ int main() {
     mpu_slow_lift_stops_before_drive_lease_expires();
     guarded_startup_never_attaches_unmeasured_jaw_pwm();
     full_profile_lift_requires_measured_startup_and_travel();
+    servo_step_clock_discards_physical_time_credit();
     guarded_lift_never_replays_missed_servo_steps_in_one_pwm_write();
     imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
