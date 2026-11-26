@@ -68,6 +68,12 @@ async def ollama_speech_segments(
         message = packet.get("message", {})
         if not isinstance(message, dict):
             raise RuntimeError("Ollama streaming message invalid")
+        # Scheduling belongs to the Mac conversation owner, not the model.
+        # Reject foreign provider control metadata before yielding any words.
+        scheduling_fields = {"scheduling", "functionResponseScheduling",
+                             "function_response_scheduling"}
+        if scheduling_fields.intersection(packet) or scheduling_fields.intersection(message):
+            raise RuntimeError("Ollama streaming foreign scheduling metadata rejected")
         # The speech channel owns assistant words, NOT tool output or
         # untrusted user/system frames. A model tool request needs the
         # separately authorized completed-tool path before speech synthesis.
