@@ -44,9 +44,10 @@ async def _bounded_speaker_abort(
     finally:
         if not task.done():
             task.cancel()
-            task.add_done_callback(
-                lambda done: None if done.cancelled() else done.exception()
-            )
+        # Cancellation can race a failed child that is already done.
+        task.add_done_callback(
+            lambda done: None if done.cancelled() else done.exception()
+        )
 
 
 def _validate_head_drain_receipt(
