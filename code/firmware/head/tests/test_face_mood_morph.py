@@ -20,6 +20,7 @@ def test_face_mood_morph_native(tmp_path):
     source.write_text(r"""
 #include "face_mood_morph.hpp"
 #include "face_presence.hpp"
+#include <algorithm>
 #include <cassert>
 #include <initializer_list>
 using desk_robot::FaceMoodMorph;
@@ -102,7 +103,34 @@ static void CheckStatusPriority(uint32_t start) {
     }
 }
 
+// Exhaust every integer millisecond and supported directed mood pair.
+static void CheckAllTransitions(uint32_t start) {
+    const struct { const char* mood; uint8_t aperture; } moods[] = {
+        {"happy", 8}, {"surprised", 14}, {"sleepy", 2}, {"neutral", 10},
+        {"thinking", 9}, {"sad", 6}, {"angry", 5},
+    };
+    for (const auto& from : moods) {
+        for (const auto& to : moods) {
+            FaceMoodMorph face;
+            assert(face.Step(start, from.mood, true, true) == from.aperture);
+            assert(face.Step(start + 1, to.mood, true, true) == from.aperture);
+            auto previous = from.aperture;
+            for (uint32_t age = 0; age <= FaceMoodMorph::kDurationMs; ++age) {
+                const auto value = face.Step(start + 1 + age, to.mood, true, true);
+                assert(value >= std::min(from.aperture, to.aperture));
+                assert(value <= std::max(from.aperture, to.aperture));
+                assert(from.aperture <= to.aperture ? value >= previous : value <= previous);
+                previous = value;
+            }
+            assert(previous == to.aperture);
+            assert(face.Step(start + 301, to.mood, true, false) == 0);
+        }
+    }
+}
+
 int main() {
+    CheckAllTransitions(0U);
+    CheckAllTransitions(0xffffff00U);
     for (uint32_t start : {0U, 0xffffff00U}) {
         CheckStatusPriority(start);
         CheckGesturePriority(start);

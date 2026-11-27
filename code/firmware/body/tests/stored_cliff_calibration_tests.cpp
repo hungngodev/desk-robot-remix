@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -10,6 +11,32 @@ using namespace desk_robot;
 #define CHECK(expression) do { \
   if (!(expression)) throw std::runtime_error(#expression); \
 } while (false)
+
+void check_byte_helper_boundaries() {
+  std::array<std::uint8_t, 5> bytes{{0x11, 0x22, 0x33, 0x44, 0x55}};
+  const auto original = bytes;
+  for (const auto width : {5U, std::numeric_limits<unsigned>::max()}) {
+    CHECK(read_calibration_le(bytes, 0, width) == 0U);
+    write_calibration_le(bytes, 0, width, 0xffffffffU);
+    CHECK(bytes == original);
+  }
+  for (const auto offset : {std::size_t{2}, std::size_t{5},
+                            std::numeric_limits<std::size_t>::max()}) {
+    CHECK(read_calibration_le(bytes, offset, 4) == 0U);
+    write_calibration_le(bytes, offset, 4, 0xffffffffU);
+    CHECK(bytes == original);
+  }
+  CHECK(read_calibration_le(bytes, 5, 0) == 0U);
+  write_calibration_le(bytes, 5, 0, 0xffffffffU);
+  CHECK(bytes == original);
+  write_calibration_le(bytes, 1, 4, 0x89abcdefU);
+  const std::array<std::uint8_t, 5> expected{{0x11, 0xef, 0xcd, 0xab, 0x89}};
+  CHECK(bytes == expected);
+  CHECK(read_calibration_le(bytes, 1, 4) == 0x89abcdefU);
+  std::array<std::uint8_t, 0> empty{};
+  CHECK(read_calibration_le(empty, 0, 1) == 0U);
+  write_calibration_le(empty, 0, 1, 0xffU);
+}
 
 CliffConfig measured_config() {
   CliffConfig config{};
@@ -152,6 +179,7 @@ void bound_record_refuses_other_wroom_and_corruption() {
 
 int main() {
   try {
+    check_byte_helper_boundaries();
     corrupt_header_and_checksum();
     corrupt_thresholds_with_valid_checksum();
     valid_legacy_record_still_requires_rearm();

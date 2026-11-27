@@ -18,6 +18,9 @@ constexpr std::uint32_t kCalibrationVersion = 1U;
 template <std::size_t N>
 inline std::uint32_t read_calibration_le(const std::array<std::uint8_t, N>& bytes,
                                          std::size_t offset, unsigned width) noexcept {
+  // Reject invalid spans before indexing or shifting; subtract only after
+  // checking offset so even SIZE_MAX cannot wrap the bounds check.
+  if (width > 4U || offset > N || width > N - offset) return 0;
   std::uint32_t value = 0;
   for (unsigned i = 0; i < width; ++i)
     value |= static_cast<std::uint32_t>(bytes[offset + i]) << (8U * i);
@@ -27,6 +30,7 @@ inline std::uint32_t read_calibration_le(const std::array<std::uint8_t, N>& byte
 template <std::size_t N>
 inline void write_calibration_le(std::array<std::uint8_t, N>& bytes, std::size_t offset,
                                  unsigned width, std::uint32_t value) noexcept {
+  if (width > 4U || offset > N || width > N - offset) return;
   for (unsigned i = 0; i < width; ++i)
     bytes[offset + i] = static_cast<std::uint8_t>(value >> (8U * i));
 }
