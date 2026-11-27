@@ -126,3 +126,29 @@ def test_detector_warm_backoff_includes_exact_retry_boundary(monkeypatch):
         await pool.close()
 
     asyncio.run(scenario())
+
+
+class _DerivedInt(int):
+    pass
+
+
+class _DerivedFloat(float):
+    pass
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [True, False, None, "0", math.nan, math.inf, -math.inf, -1,
+     10**1000, _DerivedInt(0), _DerivedFloat(0)],
+    ids=["true", "false", "none", "text", "nan", "inf", "negative_inf",
+         "negative", "huge", "int_subclass", "float_subclass"],
+)
+def test_malformed_dock_age_or_limit_fails_closed(bad):
+    assert dock_age_is_fresh(bad, 0.2) is False
+    assert dock_age_is_fresh(0.0, bad) is False
+    assert dock_time_remaining(bad) == 0.0
+
+
+def test_dock_age_rejects_infinite_limit_even_for_infinite_age():
+    assert not dock_age_is_fresh(math.inf, math.inf)
+    assert dock_age_is_fresh(200, 200)

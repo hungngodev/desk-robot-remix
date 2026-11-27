@@ -622,9 +622,9 @@ class MemoryStore:
             invalid_character_message="Invalid description",
         )
         when = time.time() if observed_at is None else observed_at
-        if not isinstance(when, (int, float)) or isinstance(when, bool) or not 0 <= when < 1e12:
+        if type(when) not in (int, float) or not 0 <= when < 1e12:
             raise ValueError("Invalid observation clock")
-        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+        if type(confidence) not in (int, float):
             raise ValueError("Confidence outside [0,1]")
         # NaN does not compare within any numeric interval. Report it as
         # nonfinite before the finite [0,1] range check so invalid data

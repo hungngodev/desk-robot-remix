@@ -203,3 +203,40 @@ def test_prompt_rejects_invalid_episode_numeric_before_deduplication(field, bad)
         result = compose_brain_context(order, [], [], topical_event_id="same").recent
         assert "valid observation" in result
         assert "corrupt observation" not in result
+
+
+class _DerivedInt(int):
+    pass
+
+
+class _DerivedFloat(float):
+    pass
+
+
+@pytest.mark.parametrize("field", ["observed_at", "confidence"])
+@pytest.mark.parametrize(
+    "bad",
+    [_DerivedInt(1), _DerivedFloat(0.5), True, False,
+     float("nan"), float("inf"), -float("inf"), -1, 10**1000],
+    ids=["int_subclass", "float_subclass", "true", "false",
+         "nan", "inf", "negative_inf", "negative", "huge"],
+)
+def test_episode_rejects_non_native_or_invalid_numbers(tmp_path, field, bad):
+    store = MemoryStore(tmp_path, ["pet1"])
+    with pytest.raises(ValueError):
+        store.remember(
+            "pet1", "numeric-boundary", "Observed a touch", kind="touch",
+            source_robot="pet1", witnessed=True, **{field: bad},
+        )
+    assert store.recent("pet1") == []
+
+
+@pytest.mark.parametrize("field", ["observed_at", "confidence"])
+@pytest.mark.parametrize("number", [0, 1, 0.5])
+def test_episode_preserves_valid_native_numbers(tmp_path, field, number):
+    store = MemoryStore(tmp_path, ["pet1"])
+    assert store.remember(
+        "pet1", "numeric-boundary", "Observed a touch", kind="touch",
+        source_robot="pet1", witnessed=True, **{field: number},
+    )
+    assert getattr(store.recent("pet1")[0], field) == number
