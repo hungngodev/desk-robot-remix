@@ -251,9 +251,9 @@ def plan_route(
     if expired:
         return refuse(expired)
     if not clear(*request.start, radius):
-        return refuse("unsafe_start")
+        return refuse(live() or "unsafe_start")
     if not clear(*request.goal, radius):
-        return refuse("unsafe_goal")
+        return refuse(live() or "unsafe_goal")
     if (request.start == request.goal and
             request.goal_heading in (None, request.heading)):
         # A long clearance scan may outlive the request or its map epoch.
@@ -277,7 +277,7 @@ def plan_route(
         if (cost, turns) != best.get(state):
             continue
         if expanded >= max_expansions:
-            return refuse("search_budget_exhausted")
+            return refuse(live() or "search_budget_exhausted")
         expanded += 1
         if ((x, y) == request.goal and
                 request.goal_heading in (None, heading)):

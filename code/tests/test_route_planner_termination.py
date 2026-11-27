@@ -134,3 +134,67 @@ def test_isolated_start_final_expansion_rechecks_liveness(monkeypatch, invalidat
     }[invalidate]
     assert_refused(result, reason)
     assert pops == 1
+
+
+@pytest.mark.parametrize("exit_path", ["unsafe_start", "unsafe_goal", "search_budget_exhausted"])
+@pytest.mark.parametrize(("failure", "reason"), [
+    ("cancel", "request_invalidated"),
+    ("guard_error", "request_invalidated"),
+    ("clock_error", "invalid_clock"),
+    ("deadline", "deadline_or_map_expired"),
+    ("map_expiry", "deadline_or_map_expired"),
+])
+def test_terminal_refusals_preserve_liveness_failure(monkeypatch, exit_path, failure, reason):
+    grid, request, envelope = fixtures()
+    if failure == "map_expiry":
+        request = replace(request, deadline_us=5000)
+    invalidated = False
+    if exit_path != "search_budget_exhausted":
+        blocked = request.start if exit_path == "unsafe_start" else request.goal
+        blocked_index = blocked[1] * grid.width + blocked[0]
+
+        class InvalidatingSupport(tuple):
+            def __getitem__(self, index):
+                nonlocal invalidated
+                if isinstance(index, slice) and index.start == blocked_index:
+                    invalidated = True
+                return super().__getitem__(index)
+
+        support = list(grid.support)
+        support[blocked_index] = "unknown"
+        grid = replace(grid, support=InvalidatingSupport(support))
+    else:
+        original_pop = planner.heapq.heappop
+        pops = 0
+
+        def pop(queue):
+            nonlocal invalidated, pops
+            pops += 1
+            item = original_pop(queue)
+            if pops == 2:
+                invalidated = True
+            return item
+
+        monkeypatch.setattr(planner.heapq, "heappop", pop)
+
+    def current():
+        if invalidated and failure == "guard_error":
+            raise RuntimeError("private guard diagnostic")
+        return not (invalidated and failure == "cancel")
+
+    def clock():
+        if invalidated:
+            if failure == "clock_error":
+                raise TimeoutError("private clock diagnostic")
+            if failure == "deadline":
+                return request.deadline_us
+            if failure == "map_expiry":
+                return grid.expires_at_us
+        return 1000
+
+    result = plan_route(
+        grid, request, envelope, now_us=1000, max_expansions=1,
+        clock_us=clock, request_is_current=current,
+    )
+    assert invalidated
+    assert_refused(result, reason)
