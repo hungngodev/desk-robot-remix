@@ -10,7 +10,7 @@ HEAD = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize(
     ("variant", "standard"),
-    [("waveshare", "c++17"), ("modular", "c++17"),
+    [("waveshare", "c++17"), ("modular", "c++17"), ("modular", "c++11"),
      ("sense", "c++17"), ("sense", "c++11")],
 )
 def test_secondary_gpio_contract(tmp_path, variant, standard):
@@ -65,6 +65,12 @@ def test_secondary_gpio_contract(tmp_path, variant, standard):
          else "ROBOT_UART_TX GPIO_NUM_45", "Body UART mapping"),
         (f"DISPLAY_I2C_PORT {display_port}", f"DISPLAY_I2C_PORT {wrong_port}", "separate"),
     ]
+    if variant == "modular":
+        mutations += [
+            ("CAMERA_PIN_D7 GPIO_NUM_16", "CAMERA_PIN_D7 GPIO_NUM_17", "GPIO collision"),
+            ("CAMERA_PIN_D7 GPIO_NUM_16", "CAMERA_PIN_D7 GPIO_NUM_NC", "reserved GPIO"),
+            ("CAMERA_PIN_D7 GPIO_NUM_16", "CAMERA_PIN_D7 49", "reserved GPIO"),
+        ]
     if variant == "sense":
         mutations += [
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_9", "GPIO collision"),

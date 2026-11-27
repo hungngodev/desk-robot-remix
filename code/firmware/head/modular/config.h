@@ -1,5 +1,6 @@
 #pragma once
 #include "sdkconfig.h"
+#include <cstddef>
 #include <driver/gpio.h>
 #include <driver/i2c_types.h>
 
@@ -54,46 +55,52 @@
 #define ROBOT_UART_RX GPIO_NUM_1
 
 // Keep all active peripherals distinct and off reserved S3 pins.
-static_assert([] {
-    constexpr int pins[] = {
-        AUDIO_I2S_MIC_GPIO_WS,
-        AUDIO_I2S_MIC_GPIO_SCK,
-        AUDIO_I2S_MIC_GPIO_DIN,
-        AUDIO_I2S_SPK_GPIO_DOUT,
-        AUDIO_I2S_SPK_GPIO_BCLK,
-        AUDIO_I2S_SPK_GPIO_LRCK,
-        BOOT_BUTTON_GPIO,
-        DISPLAY_SDA_PIN,
-        DISPLAY_SCL_PIN,
-        CAMERA_PIN_D0,
-        CAMERA_PIN_D1,
-        CAMERA_PIN_D2,
-        CAMERA_PIN_D3,
-        CAMERA_PIN_D4,
-        CAMERA_PIN_D5,
-        CAMERA_PIN_D6,
-        CAMERA_PIN_D7,
-        CAMERA_PIN_XCLK,
-        CAMERA_PIN_PCLK,
-        CAMERA_PIN_VSYNC,
-        CAMERA_PIN_HREF,
-        CAMERA_PIN_SIOC,
-        CAMERA_PIN_SIOD,
-        ROBOT_UART_TX,
-        ROBOT_UART_RX,
-    };
-    for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
-        const int pin = pins[i];
-        if (pin < 0 || pin > 48 || pin == 3 || pin == 19 || pin == 20 ||
-            (pin >= 22 && pin <= 37) || pin == 43 || pin == 44 || pin == 48) {
-            return false;
-        }
-        for (unsigned j = 0; j < i; ++j) {
-            if (pin == pins[j]) return false;
-        }
-    }
-    return true;
-}(), "Head peripheral GPIO collision or reserved GPIO");
+namespace desk_robot_modular_config {
+// Match the Sense configuration's single-return C++11 constexpr checks.
+constexpr bool valid_pin(int pin) {
+    return pin >= 0 && pin <= 48 && pin != 3 && pin != 19 && pin != 20 &&
+           !(pin >= 22 && pin <= 37) && pin != 43 && pin != 44 && pin != 48;
+}
+constexpr bool unique_before(const int* pins, int pin, std::size_t count) {
+    return count == 0 ||
+           (pins[count - 1] != pin && unique_before(pins, pin, count - 1));
+}
+constexpr bool valid_pins(const int* pins, std::size_t count) {
+    return count == 0 ||
+           (valid_pin(pins[count - 1]) &&
+            unique_before(pins, pins[count - 1], count - 1) &&
+            valid_pins(pins, count - 1));
+}
+constexpr int pins[] = {
+    AUDIO_I2S_MIC_GPIO_WS,
+    AUDIO_I2S_MIC_GPIO_SCK,
+    AUDIO_I2S_MIC_GPIO_DIN,
+    AUDIO_I2S_SPK_GPIO_DOUT,
+    AUDIO_I2S_SPK_GPIO_BCLK,
+    AUDIO_I2S_SPK_GPIO_LRCK,
+    BOOT_BUTTON_GPIO,
+    DISPLAY_SDA_PIN,
+    DISPLAY_SCL_PIN,
+    CAMERA_PIN_D0,
+    CAMERA_PIN_D1,
+    CAMERA_PIN_D2,
+    CAMERA_PIN_D3,
+    CAMERA_PIN_D4,
+    CAMERA_PIN_D5,
+    CAMERA_PIN_D6,
+    CAMERA_PIN_D7,
+    CAMERA_PIN_XCLK,
+    CAMERA_PIN_PCLK,
+    CAMERA_PIN_VSYNC,
+    CAMERA_PIN_HREF,
+    CAMERA_PIN_SIOC,
+    CAMERA_PIN_SIOD,
+    ROBOT_UART_TX,
+    ROBOT_UART_RX,
+};
+static_assert(valid_pins(pins, sizeof(pins) / sizeof(pins[0])),
+              "Head peripheral GPIO collision or reserved GPIO");
+}  // namespace desk_robot_modular_config
 static_assert(CAMERA_PIN_PWDN == GPIO_NUM_NC &&
               CAMERA_PIN_RESET == GPIO_NUM_NC,
               "Unused head pins must remain disconnected");

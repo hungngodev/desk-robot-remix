@@ -5,18 +5,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 HEAD = Path(__file__).resolve().parents[1]
 
 
-def test_camera_explain_configuration_is_atomic(tmp_path):
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_camera_explain_configuration_is_atomic(tmp_path, standard):
     compiler = shutil.which("c++")
-    assert compiler is not None, "A native C++17 compiler is required"
+    assert compiler is not None, "A native C++ compiler is required"
     executable = tmp_path / "camera-explain-config"
     pie_flags = ["-fno-pie", "-no-pie"] if sys.platform.startswith("linux") else []
     subprocess.run(
         [
             compiler,
-            "-std=c++17",
+            f"-std={standard}",
             "-Wall",
             "-Wextra",
             "-Wconversion",
