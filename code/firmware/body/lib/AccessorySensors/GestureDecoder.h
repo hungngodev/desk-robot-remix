@@ -43,6 +43,7 @@ class GestureDecoder {
     return PollAction::Read;
   }
   void begin_batch(std::uint32_t now_ms) {
+    if (discarding_) return;
     if (!collecting_) {
       reset();
       started_ms_ = now_ms;
@@ -55,7 +56,7 @@ class GestureDecoder {
             std::uint8_t left, std::uint8_t right) {
     // A clipped quadrant has lost directional information. Do not splice
     // valid samples across a saturated record in the same FIFO session.
-    if (clipped_) return;
+    if (discarding_ || clipped_) return;
     if (up == 255 || down == 255 || left == 255 || right == 255) {
       clipped_ = true;
       return;
@@ -78,7 +79,7 @@ class GestureDecoder {
 
   std::uint8_t finish() {
     std::uint8_t direction = 0;
-    if (!clipped_ && samples_ >= 3) {
+    if (!discarding_ && !clipped_ && samples_ >= 3) {
       const int ud = final_ud_ - initial_ud_;
       const int lr = final_lr_ - initial_lr_;
       const int abs_ud = ud < 0 ? -ud : ud;

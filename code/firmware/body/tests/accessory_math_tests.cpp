@@ -293,7 +293,11 @@ static void check_gesture_session_recovery() {
         CHECK(g.poll_status(3, start + 100U, direction) == Action::Clear);
       if (fault == 2)
         CHECK(g.poll_status(1, start + 701U, direction) == Action::Clear);
+      // Even direct batch/sample calls cannot bypass FIFO quarantine.
+      batch(g, start + 701U);
+      CHECK(g.finish() == 0);
       CHECK(g.poll_status(1, start + 702U, direction) == Action::Clear && direction == 0);
+      batch(g, start + 702U);
       CHECK(g.poll_status(0, start + 703U, direction) == Action::None && direction == 0);
       CHECK(g.poll_status(1, start + 704U, direction) == Action::Read && direction == 0);
       batch(g, start + 704U);
