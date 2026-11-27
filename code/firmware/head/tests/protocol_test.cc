@@ -242,6 +242,13 @@ int main() {
         assert(!ControlQueueFresh(verb, 100000, 99999));
         assert(!ControlQueueFresh(verb, -1, std::numeric_limits<std::int64_t>::max()));
         assert(!ControlQueueFresh(verb, 0, std::numeric_limits<std::int64_t>::max()));
+        const auto latest = std::numeric_limits<std::int64_t>::max();
+        const auto earliest = std::numeric_limits<std::int64_t>::min();
+        assert(ControlQueueFresh(verb, latest, latest));
+        assert(ControlQueueFresh(verb, latest - 199999, latest));
+        assert(!ControlQueueFresh(verb, latest - 200000, latest));
+        assert(!ControlQueueFresh(verb, earliest, latest));
+        assert(!ControlQueueFresh(verb, latest, earliest));
     }
     for (const auto verb : {"stop", "halt", "disarm", "status", "pose", "ir",
                             "optics", "aux", "ping"}) {
@@ -357,13 +364,23 @@ int main() {
             const auto& args = parsed.args;
             assert(verb != "rearm" && verb != "calcommit");
             if (!op) assert(verb != "arm" && verb != "disarm" && verb != "keepalive");
+            // Compare the entire receipt, not just its verb prefix: a wrong
+            // wheel, duration or angle is not the requested action.
+            std::string expected = "OK " + verb;
             if (verb == "drive") {
                 assert(args.size() == 2 || args.size() == 3);
                 assert(args[0] >= -100 && args[0] <= 100);
                 assert(args[1] >= -100 && args[1] <= 100);
                 if (args.size() == 3) assert(args[2] >= 1 && args[2] <= 250);
+                const auto bounded = [](int wheel) {
+                    return wheel < -40 ? -40 : (wheel > 40 ? 40 : wheel);
+                };
+                expected += " left=" + std::to_string(bounded(args[0])) +
+                            " right=" + std::to_string(bounded(args[1])) +
+                            " ms=" + std::to_string(args.size() == 3 ? args[2] : 250);
             } else if (verb == "lift" || verb == "grip") {
                 assert(args.size() == 1 && args[0] >= 60 && args[0] <= 120);
+                expected += " angle=" + std::to_string(args[0]);
             } else {
                 assert(args.empty());
                 assert(verb == "arm" || verb == "disarm" || verb == "keepalive" ||
@@ -371,7 +388,7 @@ int main() {
                        verb == "aux" || verb == "ir" || verb == "optics" ||
                        verb == "pose" || verb == "ping");
             }
-            assert(ExpectedAck(parsed).rfind("OK " + verb, 0) == 0);
+            assert(ExpectedAck(parsed) == expected);
         }
     };
     for (const auto& seed : seeds) {
