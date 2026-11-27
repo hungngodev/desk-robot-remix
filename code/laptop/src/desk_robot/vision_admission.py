@@ -13,6 +13,15 @@ class FrameAdmissionDropped(RuntimeError):
     """An optional frame lost admission; no native work was submitted."""
 
 
+def _remaining_frame_budget(received: float, now: float) -> float:
+    """Validate native timestamps before subtracting or reserving capacity."""
+    if is_finite_number(received) and is_finite_number(now):
+        age = now - received
+        if 0 <= age < 1.0:
+            return 1.0 - age
+    raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
+
+
 class LatestFrameAdmission:
     """One pending ticket per robot; replacement never changes fleet order."""
 
@@ -33,8 +42,9 @@ class LatestFrameAdmission:
         self, robot_id: str, received: float, *, clock: Callable[[], float],
         reserve: Callable[[], bool], admit: Callable[[], bool],
     ) -> None:
-        if self._closed or not admit() or not 0 <= clock() - received < 1.0:
+        if self._closed or not admit():
             raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
+        _remaining_frame_budget(received, clock())
         previous = self._pending.get(robot_id)
         if previous is not None and received <= previous[1]:
             raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
@@ -45,11 +55,11 @@ class LatestFrameAdmission:
             while True:
                 if self._pending.get(robot_id) is not ticket:
                     raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
-                remaining = 1.0 - (clock() - received)
-                if self._closed or not admit() or not 0 < remaining <= 1.0:
+                if self._closed or not admit():
                     raise FrameAdmissionDropped(
                         "Camera preprocessing admission invalidated or expired"
                     )
+                remaining = _remaining_frame_budget(received, clock())
                 if next(iter(self._pending)) == robot_id and reserve():
                     return
                 self._changed.clear()
