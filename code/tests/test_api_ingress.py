@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 def guarded_app():
     app = FastAPI()
     app.state.calls = []
+    app.state.stop_calls = 0
     app.add_middleware(APIIngress, tokens=lambda: ("operator-secret", "tool-secret"))
 
     @app.post("/v1/action")
@@ -20,6 +21,7 @@ def guarded_app():
 
     @app.post("/v1/stop")
     async def stop():
+        app.state.stop_calls += 1
         return {"stopped": True}
 
     return app
@@ -29,8 +31,26 @@ def guarded_app():
 def test_both_roles_and_empty_stop(guarded_app, token):
     headers = {"Authorization": f"Bearer {token}"}
     with TestClient(guarded_app) as client:
-        assert client.post("/v1/action", headers=headers, json={"ok": True}).status_code == 200
-        assert client.post("/v1/stop", headers=headers).json() == {"stopped": True}
+        payload = {"ok": True}
+        response = client.post("/v1/action", headers=headers, json=payload)
+        assert response.status_code == 200
+        assert response.json() == payload
+        assert guarded_app.state.calls == [payload]
+        assert guarded_app.state.stop_calls == 0
+
+        response = client.post("/v1/stop", headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"stopped": True}
+        assert guarded_app.state.stop_calls == 1
+        assert guarded_app.state.calls == [payload]
+
+
+def test_unauthenticated_empty_stop_does_not_dispatch(guarded_app):
+    with TestClient(guarded_app) as client:
+        response = client.post("/v1/stop")
+        assert response.status_code == 401
+        assert guarded_app.state.stop_calls == 0
+        assert guarded_app.state.calls == []
 
 
 def test_auth_precedes_json_and_length_validation(guarded_app):
