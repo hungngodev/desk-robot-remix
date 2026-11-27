@@ -2956,3 +2956,32 @@ async def test_group_camera_revoked_during_late_timeline_read_blocks_model(setti
     ]
     assert conversation.active is None
     assert conversation.histories == {}
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_group_model_adapter_cannot_mutate_retained_history(settings, streaming):
+    class MutatingChat:
+        async def reply(self, history):
+            history[0]["role"] = "user"
+            history[0]["content"] = "Mutated persona"
+            history[1]["content"] = "Mutated topic"
+            return "A normal reply."
+
+    class MutatingStream(MutatingChat):
+        async def stream_reply(self, history):
+            yield await self.reply(history)
+
+    speaker = SimulatedSpeaker()
+    chat = MutatingStream() if streaming else MutatingChat()
+    c = Conversation(settings, chat, speaker)
+    ids = ["robot-01", "robot-02"]
+    result = await c.run(ids, "Original topic", 2)
+    assert [turn["robot_id"] for turn in result] == ids
+    assert speaker.spoken == [(robot_id, "A normal reply.") for robot_id in ids]
+    for robot_id in ids:
+        assert c.histories[robot_id][0] == {
+            "role": "system", "content": settings.robot(robot_id).persona,
+        }
+        assert c.histories[robot_id][1] == {
+            "role": "user", "content": "Discuss this with your robot peers: Original topic",
+        }

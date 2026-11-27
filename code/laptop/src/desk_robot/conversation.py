@@ -1209,7 +1209,10 @@ class Conversation:
                                 # keeps its topic and delivered words, not an
                                 # expired sensor or VLM snapshot. Repeat live
                                 # context only as temporary task data.
-                                turn_history = list(self.histories[robot.id])
+                                # Model adapters receive independent message records.
+                                turn_history = [
+                                    message.copy() for message in self.histories[robot.id]
+                                ]
                                 latest_cues = self._group_live_cues(
                                     robot.id, consent, sharing_at_start=sharing_at_start,
                                 )

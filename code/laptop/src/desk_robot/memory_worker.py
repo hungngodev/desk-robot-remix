@@ -21,6 +21,8 @@ class OptionalMemoryWriter:
     """
 
     def __init__(self, workers: int):
+        if type(workers) is not int or workers < 1:
+            raise ValueError("Memory worker capacity must be a positive integer")
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pet-memory")
         self._slots = BoundedSemaphore(workers)
         self._pending: set[Future[None]] = set()

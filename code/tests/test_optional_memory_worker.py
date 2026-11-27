@@ -122,3 +122,23 @@ def test_failed_transaction_rolls_back_and_releases_slot(tmp_path):
             assert db.execute("SELECT value FROM memory").fetchall() == []
     finally:
         writer.close()
+
+
+@pytest.mark.parametrize(
+    "workers",
+    [True, False, 0, -1, 1.0, 1.5, float("nan"), float("inf"), float("-inf"), "1", None],
+)
+def test_memory_writer_requires_positive_integer_capacity(workers):
+    with pytest.raises(ValueError, match="positive integer"):
+        writer = OptionalMemoryWriter(workers)
+        writer.close()
+
+
+def test_memory_writer_accepts_integer_capacity_and_executes_write():
+    writer = OptionalMemoryWriter(1)
+    written = []
+    try:
+        asyncio.run(writer.run(lambda: written.append("saved")))
+        assert written == ["saved"]
+    finally:
+        writer.close()
