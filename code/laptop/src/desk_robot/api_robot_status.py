@@ -158,6 +158,9 @@ def _power_diagnostics(data: dict) -> dict:
     return data
 
 
+_MAX_RETIRED_AUX_BOOTS = 128
+
+
 class _AuxReceiptCursor:
     def __init__(self) -> None:
         # Dashboard polling never consumes an acquisition's conversational provenance.
@@ -173,7 +176,17 @@ class _AuxReceiptCursor:
                  remember_tool_context) -> None:
         # Only an authenticated, explicit tool request may publish sensor receipts.
         boot = _aux_boot_epoch(data)
-        if owner is None or boot is None or boot in self.retired_aux_boots.get(robot_id, set()):
+        retired = self.retired_aux_boots.get(robot_id, set())
+        if owner is None or boot is None or boot in retired:
+            return
+        prior_boot = self.active_aux_boot.get(robot_id)
+        if (
+            prior_boot is not None
+            and prior_boot != boot
+            and len(retired) >= _MAX_RETIRED_AUX_BOOTS
+        ):
+            # Fail closed when replay-fence capacity is exhausted rather than
+            # growing unboundedly or promoting an unfenced new boot epoch.
             return
         cues = []
         pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
@@ -192,7 +205,6 @@ class _AuxReceiptCursor:
         )
         # Advance all source cursors only after admission; no await separates commit.
         if admitted is True:
-            prior_boot = self.active_aux_boot.get(robot_id)
             if prior_boot is not None and prior_boot != boot:
                 self.retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
             self.active_aux_boot[robot_id] = boot

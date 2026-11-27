@@ -957,3 +957,157 @@ async def test_raw_seat_current_agreement_requires_both_independent_evidence_str
                  "charging_authorized", "motor_authorized"):
         assert result[flag] is False
     assert head.commands == []
+
+
+def _dwell_sample(
+    dock_seq: int,
+    pack_seq: int,
+    *,
+    boot_id: int = 11,
+    dock_age_ms: int = 20,
+    pack_age_ms: int = 25,
+    pack_ma: int = 180,
+    pack_valid: bool = True,
+    left_seated: bool = True,
+    right_seated: bool = True,
+    input_good: bool = True,
+    charge_indicated: bool = True,
+) -> dict:
+    base = fresh_samples()[0]
+    base["force"]["boot_id"] = boot_id
+    base["proximity"]["boot_id"] = boot_id
+    base["dock"].update(
+        present=True,
+        valid=True,
+        left_seated=left_seated,
+        right_seated=right_seated,
+        input_good=input_good,
+        charge_indicated=charge_indicated,
+        seq=dock_seq,
+        age_ms=dock_age_ms,
+    )
+    base["power"].update(
+        shunt_uv=pack_ma * 5 if pack_valid else 0,
+        pack_ma=pack_ma if pack_valid else 0,
+        pack_valid=pack_valid,
+        monitor_valid=pack_valid,
+        pack_seq=pack_seq,
+        pack_age_ms=pack_age_ms,
+    )
+    return base
+
+
+async def test_continuous_two_second_charging_dwell_confirms_without_granting_authority(
+    monkeypatch,
+):
+    clock = [100.0]
+
+    async def advance_sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", advance_sleep)
+    samples = [_dwell_sample(i, i, pack_ma=150) for i in range(1, 10)]
+    head = FakeHead(samples)
+    report = await observe_dock_evidence(
+        head, "robot-01", gap=0.30, dwell_s=2.0, clock=lambda: clock[0],
+    )
+    assert report["software_charging_confirmed"] is True
+    assert report["state"] == "software_charging_dwell_confirmed"
+    assert report["dwell_elapsed_s"] >= 2.0
+    assert report["charging_authorized"] is False
+    assert report["charger_electrically_qualified"] is False
+    assert report["charging_verified"] is False
+    assert report["motor_authorized"] is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "stale_dock",
+        "stale_pack",
+        "replay_dock",
+        "replay_pack",
+        "invalid_pack",
+        "pin_left_open",
+        "pin_pgood_lost",
+        "pin_chg_off",
+        "epoch_changed",
+        "zero_current",
+        "negative_current",
+    ],
+)
+def test_charging_dwell_resets_on_every_continuity_fault_and_requires_full_rewindow(fault):
+    from desk_robot.dock_evidence import DockChargingDwell
+
+    dwell = DockChargingDwell(required_dwell_s=2.0, max_gap_s=0.5)
+    # Build up 1.6 s of clean charging dwell across 5 samples (0.0 -> 1.6 s).
+    for idx in range(5):
+        res = dwell.observe_sample(
+            _dwell_sample(idx + 1, idx + 1), "robot-01", received_at=10.0 + idx * 0.4,
+        )
+        assert res["software_charging_confirmed"] is False
+    assert dwell.dwell_started_at == pytest.approx(10.0)
+
+    # Inject the continuity fault at t = 11.9 s (just before 2.0 s would elapse).
+    bad = _dwell_sample(6, 6)
+    if fault == "stale_dock":
+        bad["dock"]["age_ms"] = 500
+    elif fault == "stale_pack":
+        bad["power"]["pack_age_ms"] = 500
+    elif fault == "replay_dock":
+        bad["dock"]["seq"] = 5
+    elif fault == "replay_pack":
+        bad["power"]["pack_seq"] = 5
+    elif fault == "invalid_pack":
+        bad["power"]["pack_valid"] = False
+    elif fault == "pin_left_open":
+        bad["dock"]["left_seated"] = False
+    elif fault == "pin_pgood_lost":
+        bad["dock"]["input_good"] = False
+        bad["dock"]["charge_indicated"] = False
+    elif fault == "pin_chg_off":
+        bad["dock"]["charge_indicated"] = False
+    elif fault == "epoch_changed":
+        bad["force"]["boot_id"] = 12
+        bad["proximity"]["boot_id"] = 12
+    elif fault == "zero_current":
+        bad["power"]["pack_ma"] = 0
+        bad["power"]["shunt_uv"] = 0
+    elif fault == "negative_current":
+        bad["power"]["pack_ma"] = -45
+        bad["power"]["shunt_uv"] = -225
+
+    failed = dwell.observe_sample(bad, "robot-01", received_at=11.9)
+    assert failed["software_charging_confirmed"] is False
+    assert failed["dwell_elapsed_s"] == 0.0
+    assert dwell.dwell_started_at is None
+
+    # Next healthy sample at t = 12.1 s (>= 2.0 s since 10.0, only 0.0 s since recovery)
+    # MUST NOT confirm until another full 2.0 s window completes at t = 14.1 s.
+    boot = 12 if fault == "epoch_changed" else 11
+    seq_base = 1 if fault == "epoch_changed" else 10
+    restarted = dwell.observe_sample(
+        _dwell_sample(seq_base, seq_base, boot_id=boot), "robot-01", received_at=12.1,
+    )
+    assert restarted["software_charging_confirmed"] is False
+    assert restarted["dwell_elapsed_s"] == 0.0
+
+    for step in range(1, 5):
+        mid = dwell.observe_sample(
+            _dwell_sample(seq_base + step, seq_base + step, boot_id=boot),
+            "robot-01",
+            received_at=12.1 + step * 0.4,
+        )
+        assert mid["software_charging_confirmed"] is False
+
+    confirmed = dwell.observe_sample(
+        _dwell_sample(seq_base + 5, seq_base + 5, boot_id=boot),
+        "robot-01",
+        received_at=14.1,
+    )
+    assert confirmed["software_charging_confirmed"] is True
+    assert confirmed["dwell_elapsed_s"] == pytest.approx(2.0)
+    assert confirmed["charging_authorized"] is False
+    assert confirmed["charger_electrically_qualified"] is False
+    assert confirmed["charging_verified"] is False

@@ -1127,6 +1127,40 @@ class Runtime:
         # Audio STOP must never wait on SQLite. Drain only at runtime
         # shutdown, after speech and the optional memory producers stop.
         from .memory_worker import optional_memory_writer
-        await step("Optional memory writes", optional_memory_writer.drain, 4.0)
+        memory_drain = getattr(self, "_unsettled_memory_drain", None)
+        if optional_memory_writer.has_pending() or (
+            memory_drain is not None and not memory_drain.done()
+        ):
+            if memory_drain is None or memory_drain.done():
+                memory_drain = asyncio.create_task(optional_memory_writer.drain())
+                self._unsettled_memory_drain = memory_drain
+                memory_drain.add_done_callback(
+                    lambda done: None if done.cancelled() else done.exception()
+                )
+
+            async def wait_memory_drain() -> None:
+                await asyncio.shield(memory_drain)
+
+            self.process_shutdown_confirmed = False
+            await step("Optional memory writes", wait_memory_drain, 4.0)
+            if memory_drain.done() and not optional_memory_writer.has_pending():
+                self._unsettled_memory_drain = None
+                self.process_shutdown_confirmed = not errors
+            else:
+                for idx, err in enumerate(errors):
+                    if isinstance(err, TimeoutError) and str(err) == (
+                        "Optional memory writes shutdown unconfirmed"
+                    ):
+                        errors[idx] = TimeoutError(
+                            "Optional memory writes shutdown unconfirmed; "
+                            "process shutdown unconfirmed while SQLite worker finishes"
+                        )
+        else:
+            await step("Optional memory writes", optional_memory_writer.drain, 4.0)
+            if optional_memory_writer.has_pending():
+                self.process_shutdown_confirmed = False
+            else:
+                self._unsettled_memory_drain = None
+                self.process_shutdown_confirmed = not errors
         if errors:
             raise errors[0]

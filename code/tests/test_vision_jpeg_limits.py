@@ -49,3 +49,19 @@ def test_camera_bomb_warning_has_same_error_contract(monkeypatch):
     with pytest.raises(ValueError, match="Camera dimensions invalid"):
         with _open_camera_jpeg(frame, max_bytes=len(frame)):
             pytest.fail("Decoder error did not reject frame")
+
+
+def test_corrupt_huffman_scan_passes_envelope_then_raises_oserror_on_decode():
+    from desk_robot.vision import _check_camera_jpeg
+
+    valid = BytesIO()
+    Image.new("RGB", (96, 96), (120, 40, 200)).save(valid, "JPEG")
+    raw = valid.getvalue()
+    sos = raw.find(b"\xff\xda")
+    assert sos > 0
+    sos_len = int.from_bytes(raw[sos + 2:sos + 4], "big")
+    corrupt = raw[:sos + 2 + sos_len] + b"\xff\xc4\x00\x05\x00\xff\xd9"
+    assert corrupt.startswith(b"\xff\xd8") and corrupt.endswith(b"\xff\xd9")
+    assert _check_camera_jpeg(corrupt, max_bytes=len(corrupt), decode=False) == (96, 96)
+    with pytest.raises(OSError):
+        _check_camera_jpeg(corrupt, max_bytes=len(corrupt), decode=True)

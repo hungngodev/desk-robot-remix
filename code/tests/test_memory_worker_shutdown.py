@@ -167,3 +167,73 @@ def test_runtime_close_drains_after_urgent_owners(monkeypatch):
                 await asyncio.gather(shutdown, return_exceptions=True)
 
     asyncio.run(run())
+
+
+def test_runtime_close_retains_and_reports_outliving_memory_writer(monkeypatch):
+    """A write outliving the shutdown deadline stays owned and marks shutdown unconfirmed."""
+    from threading import Lock
+    from types import SimpleNamespace
+
+    from desk_robot import memory_worker
+    from desk_robot.runtime import Runtime
+
+    writer = OptionalMemoryWriter(1)
+    monkeypatch.setattr(memory_worker, "optional_memory_writer", writer)
+    entered, release, finished = Event(), Event(), Event()
+
+    def blocked_persist():
+        entered.set()
+        assert release.wait(5), "Test did not release blocked SQLite write"
+        finished.set()
+
+    async def run():
+        async def noop():
+            return None
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(mode="simulation", robots=[])
+        runtime.coordinator = SimpleNamespace(close=noop, shutdown_stop_failures={})
+        runtime.pet = SimpleNamespace(close=noop)
+        runtime.conversation = SimpleNamespace(stop=noop)
+        runtime.client = SimpleNamespace(aclose=noop)
+        runtime.multimodal = None
+        runtime._voice_task = None
+        runtime._room_dispatch_lock = Lock()
+        runtime._room_dispatch_pending = None
+
+        real_wait = asyncio.wait
+
+        async def fast_memory_deadline(fs, *, timeout=None, **kwargs):
+            if timeout == 4.0 and getattr(runtime, "_unsettled_memory_drain", None) is not None:
+                timeout = 0.05
+            return await real_wait(fs, timeout=timeout, **kwargs)
+
+        monkeypatch.setattr("desk_robot.runtime.asyncio.wait", fast_memory_deadline)
+        pending = asyncio.create_task(writer.run(blocked_persist))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            with pytest.raises(
+                TimeoutError,
+                match="Optional memory writes shutdown unconfirmed; process shutdown unconfirmed",
+            ):
+                await runtime.close()
+            assert runtime.process_shutdown_confirmed is False
+            assert writer.has_pending() is True
+            retained = runtime._unsettled_memory_drain
+            assert retained is not None and not retained.done()
+
+            # Release the underlying SQLite write; retry close joins the retained worker
+            # and keeps the shared executor reusable.
+            release.set()
+            await runtime.close()
+            assert finished.is_set()
+            assert runtime.process_shutdown_confirmed is True
+            assert runtime._unsettled_memory_drain is None
+            assert writer.has_pending() is False
+            await writer.run(lambda: None)
+        finally:
+            release.set()
+            await asyncio.to_thread(writer.close)
+            await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(run())

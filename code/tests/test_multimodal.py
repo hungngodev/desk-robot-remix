@@ -323,7 +323,9 @@ async def test_stream_frame_aging_out_during_jpeg_decode_is_not_published():
         await visual.close()
 
 
-@pytest.mark.parametrize("size", [None, 5000, 65535, "empty", "truncated", "trailing"])
+@pytest.mark.parametrize(
+    "size", [None, 5000, 65535, "empty", "truncated", "trailing", "corrupt_scan"],
+)
 async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(size):
     """Malformed bytes and deceptive JPEG dimensions must not break video."""
     bad_frame = b"not a JPEG"
@@ -333,6 +335,12 @@ async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(si
         bad_frame = image()[:-2]
     elif size == "trailing":
         bad_frame = image() + b"\r\n"
+    elif size == "corrupt_scan":
+        raw = image()
+        sos = raw.find(b"\xff\xda")
+        assert sos > 0
+        sos_len = int.from_bytes(raw[sos + 2:sos + 4], "big")
+        bad_frame = raw[:sos + 2 + sos_len] + b"\xff\xc4\x00\x05\x00\xff\xd9"
     elif size is not None:
         oversized = bytearray(image())
         sof = oversized.find(b"\xff\xc0")

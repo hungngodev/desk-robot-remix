@@ -543,12 +543,12 @@ async def test_camera_off_on_blocks_regranted_vlm_overlap_until_revoked_call_exi
             try:
                 if question == "First question":
                     entered_first.set()
-                    try:
-                        await asyncio.Event().wait()
-                    except asyncio.CancelledError:
-                        cancelled_first.set()
-                        await release_first.wait()
-                        return "stale uncooperative answer"
+                    while not release_first.is_set():
+                        try:
+                            await release_first.wait()
+                        except asyncio.CancelledError:
+                            cancelled_first.set()
+                    return "stale uncooperative answer"
                 return "fresh authorized answer"
             finally:
                 active_calls -= 1

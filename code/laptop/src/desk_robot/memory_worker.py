@@ -57,6 +57,10 @@ class OptionalMemoryWriter:
         )
         return wrapped
 
+    def has_pending(self) -> bool:
+        with self._pending_lock:
+            return any(not future.done() for future in self._pending)
+
     async def drain(self) -> None:
         """Wait off the audio path for admitted writes after producers stop.
 

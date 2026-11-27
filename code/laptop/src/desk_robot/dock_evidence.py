@@ -7,14 +7,23 @@ diagnostic, not electrical qualification.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import monotonic
 
 from .aux import validate_aux
 from .operations import bounded_head_reply
+from .sensor_event_contract import is_finite_number
 
 _DOCK_READ_TIMEOUT_S = 2.0
 _DOCK_SAMPLE_MAX_AGE_MS = 500
+_DOCK_DEFAULT_DWELL_S = 2.0
+_MAX_RETIRED_DOCK_BOOTS = 128
+
+
+def _newer_u32(new: int, old: int) -> bool:
+    delta = (new - old) & 0xffffffff
+    return 0 < delta < 0x80000000
 
 
 @dataclass
@@ -84,6 +93,228 @@ class DockContactInhibit:
         return True
 
 
+@dataclass
+class DockChargingDwell:
+    """Continuous >=2 s monotonic software confirmation for dock charging evidence.
+
+    Requires both independent seat switches closed, valid PGOOD+CHG active state,
+    fresh advancing MCP23017 dock and INA226 positive pack-current conversions,
+    and one stable nonzero WROOM boot epoch throughout. Any stale, replayed, or
+    invalid sample, pin transition, epoch change, or non-charging/negative pack
+    current immediately resets the dwell. Separate from charging authorization
+    and physical charger qualification, which remain False.
+    """
+
+    required_dwell_s: float = _DOCK_DEFAULT_DWELL_S
+    min_charge_ma: int = 21
+    max_gap_s: float = 1.0
+    boot_id: int | None = None
+    retired_boots: set[int] = field(default_factory=set)
+    last_dock_seq: int | None = None
+    last_pack_seq: int | None = None
+    dwell_started_at: float | None = None
+    last_sample_at: float | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not is_finite_number(self.required_dwell_s)
+            or not 0.5 <= self.required_dwell_s <= 60.0
+            or type(self.min_charge_ma) is not int
+            or self.min_charge_ma < 1
+            or not is_finite_number(self.max_gap_s)
+            or not 0.1 <= self.max_gap_s <= 5.0
+        ):
+            raise ValueError("Invalid dock charging dwell configuration")
+
+    def reset_dwell(self) -> None:
+        self.dwell_started_at = None
+        self.last_sample_at = None
+
+    def _status(self, robot_id: str, state: str, *, confirmed: bool, elapsed: float) -> dict:
+        return {
+            "robot_id": robot_id,
+            "state": state,
+            "software_charging_confirmed": confirmed,
+            "dwell_elapsed_s": round(max(0.0, elapsed), 6),
+            "required_dwell_s": self.required_dwell_s,
+            "charger_electrically_qualified": False,
+            "charging_verified": False,
+            "charging_authorized": False,
+            "motor_authorized": False,
+        }
+
+    def observe_sample(
+        self,
+        raw_sample: object,
+        robot_id: str,
+        *,
+        received_at: float,
+        request_ms: float = 0.0,
+    ) -> dict:
+        if (
+            not isinstance(robot_id, str)
+            or not robot_id
+            or not is_finite_number(received_at)
+            or not is_finite_number(request_ms)
+            or not 0.0 <= request_ms < _DOCK_SAMPLE_MAX_AGE_MS
+        ):
+            self.reset_dwell()
+            return self._status(
+                str(robot_id), "dock_dwell_invalid_clock", confirmed=False, elapsed=0.0,
+            )
+        if self.last_sample_at is not None:
+            gap = received_at - self.last_sample_at
+            if gap <= 0.0 or gap > self.max_gap_s + _DOCK_SAMPLE_MAX_AGE_MS / 1000.0:
+                self.reset_dwell()
+                return self._status(
+                    robot_id, "dock_dwell_window_expired_or_regressed",
+                    confirmed=False, elapsed=0.0,
+                )
+        try:
+            sample = validate_aux(raw_sample, robot_id)
+        except Exception:
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_telemetry_invalid", confirmed=False, elapsed=0.0,
+            )
+        force_boot = sample["force"].get("boot_id")
+        prox_boot = sample["proximity"].get("boot_id")
+        boot = (
+            force_boot
+            if type(force_boot) is int and force_boot > 0 and force_boot == prox_boot
+            else None
+        )
+        if boot is None or boot in self.retired_boots:
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_sample_epoch_unverified_or_retired",
+                confirmed=False, elapsed=0.0,
+            )
+        if self.boot_id is not None and boot != self.boot_id:
+            if len(self.retired_boots) >= _MAX_RETIRED_DOCK_BOOTS:
+                self.reset_dwell()
+                return self._status(
+                    robot_id, "dock_epoch_fence_exhausted", confirmed=False, elapsed=0.0,
+                )
+            self.retired_boots.add(self.boot_id)
+            self.boot_id = boot
+            self.last_dock_seq = None
+            self.last_pack_seq = None
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_sample_epoch_changed", confirmed=False, elapsed=0.0,
+            )
+        self.boot_id = boot
+
+        dock = sample.get("dock")
+        if dock is None or not dock["present"] or not dock["valid"]:
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_telemetry_unavailable", confirmed=False, elapsed=0.0,
+            )
+        if dock["age_ms"] + request_ms >= _DOCK_SAMPLE_MAX_AGE_MS:
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_telemetry_stale_at_consumer",
+                confirmed=False, elapsed=0.0,
+            )
+        dock_seq = dock["seq"]
+        if self.last_dock_seq is not None and not _newer_u32(dock_seq, self.last_dock_seq):
+            self.reset_dwell()
+            return self._status(
+                robot_id, "dock_sample_replayed_or_reset", confirmed=False, elapsed=0.0,
+            )
+        self.last_dock_seq = dock_seq
+
+        dock_state = classify_dock(dock)
+        if dock_state != "charger_reports_active":
+            self.reset_dwell()
+            return self._status(robot_id, dock_state, confirmed=False, elapsed=0.0)
+
+        power = sample["power"]
+        pack_age_ms = power.get("pack_age_ms")
+        pack_seq = power.get("pack_seq")
+        pack_ma = power.get("pack_ma")
+        if (
+            power.get("pack_valid") is not True
+            or type(pack_seq) is not int
+            or pack_seq <= 0
+            or type(pack_age_ms) is not int
+            or not 0 <= pack_age_ms < _DOCK_SAMPLE_MAX_AGE_MS
+            or pack_age_ms + request_ms >= _DOCK_SAMPLE_MAX_AGE_MS
+            or type(pack_ma) is not int
+        ):
+            self.reset_dwell()
+            return self._status(
+                robot_id, "current_sample_stale_or_invalid", confirmed=False, elapsed=0.0,
+            )
+        if self.last_pack_seq is not None and not _newer_u32(pack_seq, self.last_pack_seq):
+            self.reset_dwell()
+            return self._status(
+                robot_id, "current_sample_replayed", confirmed=False, elapsed=0.0,
+            )
+        self.last_pack_seq = pack_seq
+
+        if pack_ma < self.min_charge_ma:
+            self.reset_dwell()
+            return self._status(
+                robot_id, "non_charging_or_negative_pack_current",
+                confirmed=False, elapsed=0.0,
+            )
+
+        if self.dwell_started_at is None:
+            self.dwell_started_at = received_at
+        self.last_sample_at = received_at
+        elapsed = received_at - self.dwell_started_at
+        confirmed = elapsed >= self.required_dwell_s
+        return self._status(
+            robot_id,
+            "software_charging_dwell_confirmed" if confirmed else "charger_reports_active",
+            confirmed=confirmed,
+            elapsed=elapsed,
+        )
+
+
+async def confirm_dock_charging_dwell(
+    head,
+    robot_id: str,
+    *,
+    dwell_s: float = _DOCK_DEFAULT_DWELL_S,
+    gap: float = 0.30,
+    clock: Callable[[], float] = monotonic,
+    dwell: DockChargingDwell | None = None,
+) -> dict:
+    """Poll read-only WROOM dock+INA226 evidence across a continuous >=2 s dwell."""
+    if not isinstance(robot_id, str) or not robot_id or not 0.25 <= gap <= 1.0:
+        raise ValueError("Invalid dock evidence request")
+    tracker = (
+        dwell
+        if dwell is not None
+        else DockChargingDwell(required_dwell_s=dwell_s, max_gap_s=gap)
+    )
+    max_polls = max(3, int(tracker.required_dwell_s / gap) + 4)
+    latest: dict | None = None
+    for index in range(max_polls):
+        request_at = clock()
+        reply = await bounded_head_reply(
+            head.aux_status(), seconds=_DOCK_READ_TIMEOUT_S,
+            timeout_message="Dock GPIO evidence read timed out",
+        )
+        received_at = clock()
+        request_ms = max(0.0, (received_at - request_at) * 1000.0)
+        latest = tracker.observe_sample(
+            reply, robot_id, received_at=received_at, request_ms=request_ms,
+        )
+        if latest["software_charging_confirmed"]:
+            return latest
+        if tracker.dwell_started_at is None:
+            return latest
+        if index + 1 < max_polls:
+            await asyncio.sleep(gap)
+    assert latest is not None
+    return latest
+
+
 def classify_dock(dock: dict) -> str:
     """Strict independent seat and charger-pin truth table."""
     if not dock["present"] or not dock["valid"]:
@@ -108,13 +339,24 @@ def classify_dock(dock: dict) -> str:
     return "charger_reports_active" if indicated else "input_present_not_charging"
 
 
-async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> dict:
-    """Read three independently timed body updates, require stable dock pins.
+async def observe_dock_evidence(
+    head,
+    robot_id: str,
+    *,
+    gap: float = 0.30,
+    dwell_s: float | None = None,
+    clock: Callable[[], float] = monotonic,
+) -> dict:
+    """Read three independently timed body updates, or confirm a >=2 s dwell.
 
-    Require three different *hardware* MCP23017 GPIO acquisition sequence
-    values. HTTP polling delay alone cannot distinguish cached/replayed data.
+    Require distinct *hardware* MCP23017 GPIO acquisition sequence values.
+    HTTP polling delay alone cannot distinguish cached/replayed data.
     There is still no electrical ammeter or charger controller authorization.
     """
+    if dwell_s is not None:
+        return await confirm_dock_charging_dwell(
+            head, robot_id, dwell_s=dwell_s, gap=gap, clock=clock,
+        )
     if not isinstance(robot_id, str) or not robot_id or not 0.25 <= gap <= 1.0:
         raise ValueError("Invalid dock evidence request")
     snapshots = []

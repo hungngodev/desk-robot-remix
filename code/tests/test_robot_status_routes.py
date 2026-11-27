@@ -133,3 +133,36 @@ def test_wrong_identity_never_enters_receipt(routes, route, method, error):
     with TestClient(app) as client, pytest.raises(HeadError, match=error):
         client.get(f"/v1/robots/robot-01/{route}")
     assert state.receipts == []
+
+
+def test_aux_receipt_cursor_caps_retired_boots_and_rejects_replay(routes):
+    app, state, payload, _ = routes
+    state.admit = True
+    with TestClient(app) as client:
+        url = "/v1/robots/robot-01/aux"
+        # Transition through 129 distinct boots (retiring boots 1..128).
+        for boot in range(1, 130):
+            payload["force"]["boot_id"] = payload["proximity"]["boot_id"] = boot
+            payload["climate"]["seq"] = 1
+            payload["bmp280"]["seq"] = 1
+            assert client.get(url).status_code == 200
+        assert len(state.receipts) == 129
+
+        # Replaying any retired boot ID (e.g. boot 1 or boot 128) is ignored.
+        for replayed in (1, 64, 128):
+            payload["force"]["boot_id"] = payload["proximity"]["boot_id"] = replayed
+            payload["climate"]["seq"] = 99
+            assert client.get(url).status_code == 200
+        assert len(state.receipts) == 129
+
+        # Once 128 boots are retired, a 130th boot fails closed without growing the set.
+        payload["force"]["boot_id"] = payload["proximity"]["boot_id"] = 130
+        payload["climate"]["seq"] = 1
+        assert client.get(url).status_code == 200
+        assert len(state.receipts) == 129
+
+        # Current active boot 129 still admits fresh advancing sequences.
+        payload["force"]["boot_id"] = payload["proximity"]["boot_id"] = 129
+        payload["climate"]["seq"] = 2
+        assert client.get(url).status_code == 200
+        assert len(state.receipts) == 130
