@@ -37,12 +37,14 @@ def test_invalid_coordinates_cannot_write_or_read_evidence(point):
     g = grid()
     first = evidence(((0, 0),))
     g.record(first, now_us=first.received_us)
-    candidate = evidence(((1, 1), point), sequence=2)
+    candidate = evidence(((0, 0), (1, 1), point), sequence=2)
     before = g.snapshot(now_us=candidate.received_us)
     with pytest.raises(GridEvidenceError):
         g.record(candidate, now_us=candidate.received_us)
     assert g.snapshot(now_us=candidate.received_us) == before
     assert len(g._cells) == 1
+    assert g.log_odds(0, 0) == pytest.approx(1.2)
+    assert g.log_odds(1, 1) == 0.0
     with pytest.raises(ValueError):
         g.state(*point, now_us=candidate.received_us)
     with pytest.raises(ValueError):
@@ -52,6 +54,7 @@ def test_invalid_coordinates_cannot_write_or_read_evidence(point):
     g.record(valid, now_us=valid.received_us)
     assert g.log_odds(1, 1) == pytest.approx(1.2)
     assert len(g._cells) == 2
+    assert g.log_odds(0, 0) == pytest.approx(1.2)
 
 
 def test_full_grid_stays_bounded_under_repeated_observations():
@@ -62,7 +65,9 @@ def test_full_grid_stays_bounded_under_repeated_observations():
         g.record(batch, now_us=batch.received_us)
     assert len(g._cells) == 4096
     assert len(g.snapshot(now_us=batch.received_us).support) == 4096
+    assert all(g.log_odds(*cell) == pytest.approx(1.2) for cell in cells)
     repeat = evidence(cells[:256], sequence + 1)
     g.record(repeat, now_us=repeat.received_us)
     assert len(g._cells) == 4096
-    assert g.log_odds(63, 63) == pytest.approx(1.2)
+    assert all(g.log_odds(*cell) == pytest.approx(2.4) for cell in cells[:256])
+    assert all(g.log_odds(*cell) == pytest.approx(1.2) for cell in cells[256:])
