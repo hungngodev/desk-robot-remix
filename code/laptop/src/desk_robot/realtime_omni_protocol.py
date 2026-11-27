@@ -296,7 +296,8 @@ class OmniDuplexWire:
     def commit(self, *, final: bool = True) -> dict:
         if type(final) is not bool:
             raise ValueError("Final must be a boolean")
-        if self._needs_new_input and self._input_after_interrupt:
+        # Partial commits cannot reopen speech while a human turn is ongoing.
+        if final and self._needs_new_input and self._input_after_interrupt:
             self._needs_new_input = False
         return {
             "type": "input_audio_buffer.commit",
