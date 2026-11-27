@@ -392,7 +392,7 @@ static void guarded_extreme_drive_requests_do_not_bypass_direction_gate() {
     for (const char* command : {
         "drive 100 99 250", "drive 99 100 250", "drive 41 40 250",
         "drive 40 41 250", "drive 100 -100 250", "drive -100 100 250",
-        "drive -100 -100 250"}) {
+        "drive -100 -100 250", "drive 20 0 100", "drive 0 20 100"}) {
       CHECK(send(body, "drive 100 100 250", ++now) == "OK drive left=40 right=40 ms=250");
       CHECK(send(body, command, ++now) == "ERR drive directional_clearance_unqualified");
       CHECK(body.state().armed && body.state().servos_attached);
@@ -4427,6 +4427,147 @@ static void combined_cliff_attitude_watchdog_and_uart_backpressure() {
   }
 }
 
+static void mpu_handling_latch_freezes_active_lift_and_grip_both_profiles() {
+  using desk_robot::BodyProfile;
+  for (const bool low_g_scenario : {false, true}) {
+    for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(config()));
+      desk_robot::BodyControl body(profile, &guard);
+      body.require_imu_for_motion(true);
+      body.require_imu_attitude_guard(true);
+      body.set_imu_identity(4, 0x68, 0);
+      CHECK(body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+      desk_robot::BerryReading imu{};
+      imu.model = desk_robot::BerryModel::Mpu6050;
+      imu.valid = imu.low_g_status_valid = true;
+      imu.accel[2] = 16384;
+      imu.at_ms = 50;
+      body.set_imu(imu);
+      imu.at_ms = 100;
+      body.set_imu(imu);
+      fresh(guard, 100);
+      CHECK(send(body, "rearm", 100, true) == "OK rearm");
+      CHECK(send(body, "arm", 100) == "OK arm");
+      CHECK(send(body, "lift 105", 100) == "OK lift angle=105");
+      CHECK(send(body, "grip 75", 100) == "OK grip angle=75");
+      CHECK(send(body, "drive 40 40 250", 100) == "OK drive left=40 right=40 ms=250");
+      CHECK(body.state().armed && body.state().servos_attached);
+      CHECK(body.state().lift_target == 105 && body.state().grip_target == 75);
+      // Let servos step partly toward their commanded targets before the latch.
+      body.tick(110);
+
+      // Inject unsafe sustained static tilt (2 consecutive fresh samples) or low-g IRQ.
+      imu.at_ms = 120;
+      if (low_g_scenario) {
+        imu.low_g_irq = true;
+      } else {
+        imu.accel[0] = 11585; // ~45 deg tilt
+        imu.accel[2] = 11585;
+      }
+      fresh(guard, 120);
+      body.set_imu(imu);
+      if (!low_g_scenario) {
+        imu.at_ms = 140;
+        fresh(guard, 140);
+        body.set_imu(imu);
+      }
+      const int held_lift = body.state().lift;
+      const int held_grip = body.state().grip;
+      CHECK(!body.state().armed);
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.state().servos_attached);
+      CHECK(body.state().lift_target == held_lift && body.state().grip_target == held_grip);
+      CHECK(held_lift < 105 && held_grip > 75); // target frozen, no continuation
+
+      // Fresh putdown (level, no low-g) and replayed delayed commands must stay rejected.
+      imu.low_g_irq = false;
+      imu.accel[0] = 0;
+      imu.accel[2] = 16384;
+      imu.at_ms = 200;
+      fresh(guard, 200);
+      body.set_imu(imu);
+      imu.at_ms = 220;
+      fresh(guard, 220);
+      body.set_imu(imu);
+      CHECK(send(body, "arm", 220).rfind("ERR arm", 0) == 0);
+      CHECK(send(body, "drive 40 40 250", 220).rfind("ERR drive", 0) == 0);
+      CHECK(send(body, "lift 90", 220).rfind("ERR lift", 0) == 0);
+      CHECK(send(body, "grip 90", 220).rfind("ERR grip", 0) == 0);
+      CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+      CHECK(body.state().lift == held_lift && body.state().grip == held_grip);
+      CHECK(body.state().lift_target == held_lift && body.state().grip_target == held_grip);
+
+      // Recovery only via explicit local USB rearm + arm + new commands.
+      CHECK(send(body, "rearm", 230) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 230, true) == "OK rearm");
+      CHECK(!body.state().armed);
+      CHECK(send(body, "arm", 240) == "OK arm");
+      CHECK(send(body, "lift 95", 240) == "OK lift angle=95");
+      CHECK(send(body, "drive 40 40 250", 240) == "OK drive left=40 right=40 ms=250");
+      CHECK(body.state().left == 40 && body.state().lift_target == 95);
+    }
+  }
+}
+
+static void uart_integrity_quiet_and_paw_consent_regressions() {
+  // 868i8Ej: guarded LineReceiver(false, true) rejects printable mutations in valid drive.
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcGuarded, &guard);
+  desk_robot::LineReceiver head(false, true);
+  desk_robot::LineReceiver usb(true);
+  auto feed_str = [&](desk_robot::LineReceiver& rx, const std::string& line,
+                      std::uint32_t now) -> std::string {
+    char reply[desk_robot::kReplyCapacity]{};
+    for (char c : line) {
+      CHECK(!rx.feed(c, now, body, reply, sizeof(reply)));
+    }
+    CHECK(rx.feed('\n', now, body, reply, sizeof(reply)));
+    return reply;
+  };
+  auto sign = [](std::uint32_t tx_id, const std::string& payload) -> std::string {
+    const std::string base = "@" + std::to_string(tx_id) + ":" + payload;
+    char tail[8]{};
+    std::snprintf(tail, sizeof(tail), "*%02X",
+                  static_cast<unsigned>(desk_robot::uart_crc8(base.data(), base.size())));
+    return base + tail;
+  };
+  CHECK(feed_str(usb, "rearm", 100) == "OK rearm");
+  CHECK(feed_str(head, sign(10U, "arm"), 100) == "OK arm");
+  CHECK(feed_str(head, sign(11U, "drive 40 40 250"), 100) == "OK drive left=40 right=40 ms=250");
+  std::string valid = sign(12U, "drive 40 40 250");
+  // Swap '4' -> '3' without updating CRC: legal in-range drive target, must fail checksum.
+  valid[valid.find("40")] = '3';
+  CHECK(feed_str(head, valid, 150) == "ERR input bad_checksum");
+  CHECK(head.last_tx_id() == 0U);
+  CHECK(body.drive_remaining(150) == 200U); // original lease not renewed
+  CHECK(body.state().left == 40);
+  CHECK(feed_str(head, "drive 20 20 250", 160) == "ERR input unframed");
+  CHECK(body.drive_remaining(160) == 190U);
+
+  // 868rosW & 868XYa3: quiet inhibit blocks haptic, paw consent defaults OFF and clears on revoke.
+  CHECK(feed_str(head, "disarm", 170) == "ERR input unframed");
+  CHECK(feed_str(head, sign(13U, "disarm"), 170) == "OK disarm");
+  CHECK(body.haptic_feedback_allowed());
+  body.set_haptic_quiet_inhibited(true);
+  CHECK(!body.haptic_feedback_allowed());
+  body.set_haptic_quiet_inhibited(false);
+  CHECK(body.haptic_feedback_allowed());
+
+  CHECK(!body.paw_raw_consent());
+  desk_robot::OpticalRaw paw{};
+  paw.present = paw.valid = true;
+  paw.red = 1234;
+  body.set_paw_pulse(paw);
+  body.set_paw_raw_consent(true);
+  CHECK(body.paw_raw_consent());
+  body.set_paw_raw_consent(false);
+  CHECK(!body.paw_raw_consent());
+  CHECK(!body.state().paw_pulse.valid && body.state().paw_pulse.red == 0U);
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -4543,6 +4684,10 @@ int main() {
     std::cout << "PASS both receivers and coil output respect bus fault\n";
     drive_expiry_stops_coils_even_with_keepalive();
     std::cout << "PASS drive expiry stops coils despite keepalive\n";
+    mpu_handling_latch_freezes_active_lift_and_grip_both_profiles();
+    std::cout << "PASS handling latch freezes lift/grip across both profiles\n";
+    uart_integrity_quiet_and_paw_consent_regressions();
+    std::cout << "PASS UART integrity mutations, quiet haptic, and paw consent\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
     return 1;

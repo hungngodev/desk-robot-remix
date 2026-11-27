@@ -31,7 +31,31 @@ bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
   if (!bus_available() || received != 1 || wire_->available() < 1) return false;
   return wire_->read() == mask;
 }
+void AccessorySensors::set_nfc_collection_enabled(bool enabled,
+                                                  std::uint32_t now_ms) {
+  if (enabled == nfc_collection_enabled_) return;
+  nfc_collection_enabled_ = enabled;
+  if (!enabled) {
+    nfc_pending_probe_ = false;
+    nfc_stage_ = NfcStage::Disabled;
+    nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
+    data_.nfc = NfcRaw{};
+    return;
+  }
+  nfc_pending_probe_ = true;
+  nfc_stage_ = NfcStage::Disabled;
+  nfc_phase_at_ms_ = 0;
+  nfc_last_scan_at_ms_ = now_ms;
+}
+
 void AccessorySensors::reset_nfc_protocol(std::uint32_t now_ms) {
+  if (!nfc_collection_enabled_) {
+    nfc_pending_probe_ = false;
+    nfc_stage_ = NfcStage::Disabled;
+    nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
+    data_.nfc = NfcRaw{};
+    return;
+  }
   data_.nfc.transport_failed();
   if (nfc_stage_ != NfcStage::Disabled) {
     nfc_stage_ = NfcStage::StartSam;
@@ -153,6 +177,8 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   started_ = false;
   sht_pending_ = ads_pending_ = false;
   gesture_.restart();
+  nfc_collection_enabled_ = false;
+  nfc_pending_probe_ = false;
   nfc_stage_ = NfcStage::Disabled;
   nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
   if (!mux_present_ || !bus_available()) return false;
@@ -261,9 +287,8 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
     }
 #endif
     if (data_.dock.present && !verify_mcp_ports()) invalidate_cached();
-    // PN532 is truly optional and cannot replace MCP23017 dock interlock.
-    // An address ACK only starts a nonblocking SAM protocol verification.
-    if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
+    // PN532 acquisition is default-off and requires explicit consent; do not
+    // probe or start the reader during boot before opt-in is granted.
   }
   if (!close()) return false;
   for (std::uint8_t i = 0; i < 3; ++i) {
@@ -679,7 +704,7 @@ int AccessorySensors::nfc_read(std::uint8_t* frame, std::uint8_t count) {
 }
 
 void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
-  if (nfc_stage_ == NfcStage::Disabled) return;
+  if (!nfc_collection_enabled_ || nfc_stage_ == NfcStage::Disabled) return;
   auto& tag = data_.nfc;
   const auto fail = [&]() {
     // Keep last confirmed identity for duplicate suppression on recovery.
@@ -772,7 +797,9 @@ void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
   }
 }
 
-bool AccessorySensors::poll(std::uint32_t now_ms) {
+bool AccessorySensors::poll(std::uint32_t now_ms,
+                            Lane5SafetyCallback on_lane5_safety,
+                            void* on_lane5_ctx) {
   if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return true;
   started_ = true;
   last_ms_ = now_ms;
@@ -791,19 +818,29 @@ bool AccessorySensors::poll(std::uint32_t now_ms) {
     case 4: power(now_ms); break;
     case 5:
       dock_status(now_ms);
-#if DESK_ROBOT_ENABLE_HAPTIC
-      // Short, one-shot, touch-driven feedback only; dock monitor stays first.
-      // Even a LOW retry needs a freshly verified register configuration.
-      if (mcp_ports_.verified()) haptic_step(now_ms);
-#endif
-      // Optional NFC work is subordinate to the required dock monitor.
-      // Never spend a second bus transaction if mandatory GPIO failed.
+      // Acquire mandatory GPB3 DRV8833 nFAULT alongside valid GPIOA before
+      // any optional haptic or NFC I2C transactions can run.
       if (data_.dock.present && data_.dock.valid) {
         optional_gpio(now_ms);
-        nfc_poll(now_ms);
       } else {
         data_.optional_inputs.valid = false;
         reset_nfc_protocol(now_ms); // no optional bus work or stale scan response on dock failure
+      }
+      // Publish dock/GPIOA/GPB3 safety state and coast motors before haptic/NFC.
+      if (on_lane5_safety) on_lane5_safety(data_, now_ms, on_lane5_ctx);
+      if (bus_available()) {
+#if DESK_ROBOT_ENABLE_HAPTIC
+        // Short, one-shot, touch-driven feedback only; dock monitor stays first.
+        // Even a LOW retry needs a freshly verified register configuration.
+        if (mcp_ports_.verified()) haptic_step(now_ms);
+#endif
+        if (data_.dock.present && data_.dock.valid && nfc_collection_enabled_) {
+          if (nfc_pending_probe_) {
+            nfc_pending_probe_ = false;
+            if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
+          }
+          nfc_poll(now_ms);
+        }
       }
       break;
     case 6: angle(1, now_ms); break;

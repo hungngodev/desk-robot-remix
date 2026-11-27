@@ -130,6 +130,9 @@ class TwoWire {
   bool fail_tof_register_write = false;
   unsigned rejected_tof_register_writes = 0;
   unsigned tof_register_stop_transmissions = 0;
+  std::uint8_t tof_stop_variable = 0x55;
+  unsigned tof_register_writes = 0;
+  unsigned fail_tof_write_index = 0;
   std::uint8_t tof_raw_status = 11;
   std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
   bool tof_force_zero = false; // inject an actual zero-mm conversion
@@ -357,6 +360,14 @@ class TwoWire {
     } else if (current_address == 0x29 && !outbound.empty()) {
       if (outbound.size() < 1 || outbound.size() > 2) return 4;
       tof_register = outbound[0];
+      if (outbound.size() == 2) {
+        ++tof_register_writes;
+        if (fail_tof_write_index != 0U && tof_register_writes == fail_tof_write_index) {
+          fail_tof_write_index = 0U;
+          return 2;
+        }
+        if (outbound[0] == 0x91) tof_stop_variable = outbound[1];
+      }
     } else if (current_address == 0x24 && !outbound.empty()) {
       if (outbound.size() < 9 || outbound[0] != 0 || outbound[1] != 0 ||
           outbound[2] != 0xff) return 4;
@@ -475,6 +486,8 @@ class TwoWire {
         inbound = {static_cast<std::uint8_t>(
             (tof_ready ? 0x07 : 0) | tof_interrupt_error_bits)};
         // A missing conversion must NOT manufacture freshness.
+      } else if (tof_register == 0x91 && count == 1) {
+        inbound = {tof_stop_variable};
       } else if (tof_register == 0x14 && count == 12) {
         // Delay only the actual ToF result read, not the generic register pointer.
         fake_arduino_millis() += next_tof_result_delay_ms;

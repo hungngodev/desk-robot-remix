@@ -688,11 +688,19 @@ static void shaft_delta_boundary_retires_moving_pose() {
 static void integer_encoder_evidence_contract() {
   // Nonfinite sensor values cannot enter the fixed-point API. Never cast
   // NaN to an integer to manufacture a reading: that conversion is undefined.
-  static_assert(std::is_integral_v<decltype(desk_robot::AngleRaw::angle)>);
-  static_assert(std::is_integral_v<decltype(desk_robot::WheelPairCapture::Receipt::left_delta)>);
-  static_assert(std::is_integral_v<decltype(desk_robot::WheelPairCapture::Receipt::right_delta)>);
-  static_assert(std::is_integral_v<decltype(WheelPoseIntegrator::Calibration::left_nm_per_count)>);
-  static_assert(std::is_integral_v<decltype(WheelPoseIntegrator::Calibration::right_nm_per_count)>);
+  static_assert(std::is_integral<decltype(desk_robot::AngleRaw::angle)>::value, "integral");
+  static_assert(
+      std::is_integral<decltype(desk_robot::WheelPairCapture::Receipt::left_delta)>::value,
+      "integral");
+  static_assert(
+      std::is_integral<decltype(desk_robot::WheelPairCapture::Receipt::right_delta)>::value,
+      "integral");
+  static_assert(
+      std::is_integral<decltype(WheelPoseIntegrator::Calibration::left_nm_per_count)>::value,
+      "integral");
+  static_assert(
+      std::is_integral<decltype(WheelPoseIntegrator::Calibration::right_nm_per_count)>::value,
+      "integral");
 }
 
 static void zero_elapsed_encoder_retires_paired_pose() {

@@ -17,7 +17,7 @@ struct FakeWire {
   void setTimeOut(unsigned ms) { timeout_ms = ms; }
   void beginTransmission(uint8_t address) {
     ++starts;
-    assert(!pending_);
+    if (pending_) std::abort();
     address_ = address;
     writes_ = 0;
   }

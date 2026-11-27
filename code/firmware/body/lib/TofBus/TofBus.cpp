@@ -192,8 +192,33 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
       if (!quiesce_range_mux()) recovery_quarantine_ = true;
       return false;
     }
+    // Pololu VL53L0X::startContinuous() does not check intermediate writeReg()
+    // failures; read stop_variable and verify every continuous-start write
+    // explicitly with checked I2C transactions.
+    std::uint8_t stop_variable = 0;
+    if (!write_byte(0x80, 0x01) || !bus_idle() ||
+        !write_byte(0xFF, 0x01) || !bus_idle() ||
+        !write_byte(0x00, 0x00) || !bus_idle() ||
+        !read_register(0x91, &stop_variable, 1) || !bus_idle() ||
+        !write_byte(0x00, 0x01) || !bus_idle() ||
+        !write_byte(0xFF, 0x00) || !bus_idle() ||
+        !write_byte(0x80, 0x00) || !bus_idle()) {
+      if (!quiesce_range_mux()) recovery_quarantine_ = true;
+      return false;
+    }
     sensor.startContinuous();
     if (sensor.last_status != 0 || sensor.timeoutOccurred()) {
+      if (!quiesce_range_mux()) recovery_quarantine_ = true;
+      return false;
+    }
+    if (!write_byte(0x80, 0x01) || !bus_idle() ||
+        !write_byte(0xFF, 0x01) || !bus_idle() ||
+        !write_byte(0x00, 0x00) || !bus_idle() ||
+        !write_byte(0x91, stop_variable) || !bus_idle() ||
+        !write_byte(0x00, 0x01) || !bus_idle() ||
+        !write_byte(0xFF, 0x00) || !bus_idle() ||
+        !write_byte(0x80, 0x00) || !bus_idle() ||
+        !write_byte(0x00, 0x02) || !bus_idle()) {
       if (!quiesce_range_mux()) recovery_quarantine_ = true;
       return false;
     }
@@ -423,17 +448,27 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     return;
   }
   std::uint8_t result[kMaxSampleBytes]{};
-  if (!read_register(0x14, result, kMaxSampleBytes) || !bus_idle() ||
-      !write_byte(0x0B, 0x01) || !bus_idle()) {
+  if (!read_register(0x14, result, kMaxSampleBytes) || !bus_idle()) {
     failed(guard);
     return;
   }
-  scan_.transport_succeeded(channel);
   // A plausible distance with a weak return is not clearance. Decode the
   // complete result using ST's register layout and the pinned driver limit.
   const auto decoded = decode_tof_result(result);
   const auto distance = decoded.distance_mm;
   const bool accepted = decoded.accepted;
+  if (channel < kFloorAndFrontCount) {
+    // Latch unsafe floor/front evidence as soon as received, before sending
+    // the asynchronous interrupt clear that can suffer delay or timeout.
+    const auto elapsed_ms = static_cast<std::uint32_t>(millis()) - poll_started_ms;
+    guard.evaluate(now_ms + elapsed_ms);
+    guard.sample(channel, distance, accepted, now_ms);
+  }
+  if (!write_byte(0x0B, 0x01) || !bus_idle()) {
+    failed(guard);
+    return;
+  }
+  scan_.transport_succeeded(channel);
   auto& optics = optical_[channel];
   optics.present = true;
   optics.valid = accepted;
@@ -441,15 +476,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   optics.signal_97 = decoded.signal_97;
   optics.at_ms = now_ms;
   new_optical_channel_ = channel;
-  if (channel < kFloorAndFrontCount) {
-    // The scan-start timestamp conservatively dates the new reading, but
-    // must not conceal expiry of the old reading during synchronous I2C.
-    // Assess the previous clearance at actual elapsed completion time
-    // before replacing it. Unsigned elapsed arithmetic handles rollover.
-    const auto elapsed_ms = static_cast<std::uint32_t>(millis()) - poll_started_ms;
-    guard.evaluate(now_ms + elapsed_ms);
-    guard.sample(channel, distance, accepted, now_ms);
-  } else {
+  if (channel >= kFloorAndFrontCount) {
     auto& sample = extra_[channel - kFloorAndFrontCount];
     sample.present = true;
     sample.valid = accepted;

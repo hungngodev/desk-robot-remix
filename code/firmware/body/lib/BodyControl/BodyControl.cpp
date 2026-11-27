@@ -2053,6 +2053,7 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
   if (frame_started_ && now_ms - frame_started_ms_ >= kWatchdogMs)
     frame_age_expired_ = true;
   if (byte == '\n') {
+    last_tx_id_ = 0U;
     if (frame_timed_out_) {
       format_reply(reply, capacity, "ERR input interbyte_timeout");
     } else if (frame_age_expired_) {
@@ -2061,6 +2062,21 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
       format_reply(reply, capacity, "ERR input line_too_long");
     } else if (invalid_) {
       format_reply(reply, capacity, "ERR input invalid_ascii");
+    } else if (require_frame_integrity_) {
+      std::uint32_t tx_id = 0U;
+      std::size_t payload_offset = 0U;
+      std::size_t payload_length = 0U;
+      const auto status = parse_uart_integrity_frame(
+          line_, length_, tx_id, payload_offset, payload_length);
+      if (status == UartFrameStatus::BadChecksum) {
+        format_reply(reply, capacity, "ERR input bad_checksum");
+      } else if (status != UartFrameStatus::Ok) {
+        format_reply(reply, capacity, "ERR input unframed");
+      } else {
+        last_tx_id_ = tx_id;
+        control.execute(line_ + payload_offset, payload_length, now_ms,
+                        reply, capacity, local_safety_rearm_, sample_us);
+      }
     } else {
       control.execute(line_, length_, now_ms, reply, capacity, local_safety_rearm_,
                       sample_us);

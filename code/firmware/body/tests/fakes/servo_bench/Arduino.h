@@ -35,8 +35,8 @@ struct FakeServoSerial {
   }
   int availableForWrite() { return free; }
   std::size_t write(const std::uint8_t* data, std::size_t count) {
-    assert(count <= static_cast<std::size_t>(free));
-    assert(count <= 32);
+    (void)data;
+    if (count > static_cast<std::size_t>(free) || count > 32) std::abort();
     sent.append(reinterpret_cast<const char*>(data), count);
     free -= static_cast<int>(count);
     return count;
@@ -56,7 +56,9 @@ struct FakeServoSerial {
 extern FakeServoSerial Serial;
 inline std::uint32_t millis() { return servo_bench_fake::clock_ms; }
 inline void pinMode(int, int) {}
-inline void digitalWrite(int, int value) { assert(value == LOW); }
+inline void digitalWrite(int, int value) {
+  if (value != LOW) std::abort();
+}
 // Independent fixture contract: 50 Hz, 16-bit, 1500 us center command.
 // Do not derive expected duty or channel mapping from the production helper.
 inline int& programmed_servo_channel() {
@@ -85,7 +87,7 @@ inline void ledcAttachPin(int pin, int channel) {
   servo_bench_fake::attached_at = millis();
 }
 inline void ledcDetachPin(int pin) {
-  assert(servo_bench_fake::attached_pin == pin);
+  if (servo_bench_fake::attached_pin != pin) std::abort();
   servo_bench_fake::attached_pin = -1;
   servo_bench_fake::detached_at = millis();
 }

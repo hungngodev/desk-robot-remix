@@ -13,6 +13,7 @@
 #include "ImuYawCapture.h"
 #include "WheelPoseIntegrator.h"
 #include "NecBurst.h"
+#include "UartFrameIntegrity.h"
 
 namespace desk_robot {
 
@@ -127,8 +128,18 @@ class BodyControl {
            !bumper_fault_latched_ && !battery_fault_latched_ &&
            !fuel_monitor_fault_latched_ && !motor_watchdog_latched_ &&
            !command_timeout_latched_ && !imu_low_g_latched_ &&
-           !imu_attitude_latched_ && !imu_sensor_fault_latched_;
+           !imu_attitude_latched_ && !imu_sensor_fault_latched_ &&
+           !haptic_quiet_inhibited_;
   }
+  void set_haptic_quiet_inhibited(bool inhibited) {
+    haptic_quiet_inhibited_ = inhibited;
+  }
+  bool haptic_quiet_inhibited() const { return haptic_quiet_inhibited_; }
+  void set_paw_raw_consent(bool granted) {
+    paw_raw_consent_ = granted;
+    if (!granted) state_.paw_pulse = OpticalRaw{};
+  }
+  bool paw_raw_consent() const { return paw_raw_consent_; }
   void tick(std::uint32_t now_ms);
   // Called after output application, before publishing an accepted reply.
   void veto_unapplied_motion_ack(char* reply, std::size_t capacity) const;
@@ -414,6 +425,8 @@ class BodyControl {
   bool bumper_fault_latched_ = false; // collision requires local USB recovery
   bool battery_fault_latched_ = false; // guarded motion needs USB recovery
   bool fuel_monitor_fault_latched_ = false; // required physical gauge missing/stale
+  bool haptic_quiet_inhibited_ = false;
+  bool paw_raw_consent_ = false;
   std::uint32_t fuel_monitor_fault_seq_ = 0, fuel_monitor_fault_at_ms_ = 0;
   std::uint32_t battery_fault_seq_ = 0, battery_fault_at_ms_ = 0;
   bool motor_watchdog_latched_ = false;  // physical CPU stall, USB only
@@ -441,14 +454,23 @@ class BodyControl {
 // or overlong frame, including suffixes that happen to be valid commands.
 class LineReceiver {
  public:
-  explicit LineReceiver(bool local_safety_rearm = false)
-      : local_safety_rearm_(local_safety_rearm) {}
+  explicit LineReceiver(bool local_safety_rearm = false,
+                        bool require_frame_integrity = false)
+      : local_safety_rearm_(local_safety_rearm),
+        require_frame_integrity_(require_frame_integrity) {}
   // True only when a newline completes a response; reply has no newline.
   bool feed(char byte, std::uint32_t now_ms, BodyControl& control,
             char* reply, std::size_t capacity, std::uint64_t sample_us = 0);
+  std::uint32_t last_tx_id() const { return last_tx_id_; }
+  bool wrap_reply(char* reply, std::size_t capacity) const {
+    if (!require_frame_integrity_ || last_tx_id_ == 0U) return false;
+    return wrap_uart_integrity_reply(reply, capacity, last_tx_id_);
+  }
 
  private:
   const bool local_safety_rearm_;
+  const bool require_frame_integrity_;
+  std::uint32_t last_tx_id_ = 0;
   char line_[kMaxLineLength + 1]{};
   std::size_t length_ = 0;
   bool saw_cr_ = false;

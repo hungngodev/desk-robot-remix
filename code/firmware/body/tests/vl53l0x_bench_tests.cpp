@@ -1,5 +1,7 @@
 #include "../src/vl53l0x_bench.cpp"
-#include <cassert>
+#include <cstdlib>
+
+#define CHECK(expr) do { if (!(expr)) std::abort(); } while (0)
 
 // One shared fake hardware state, without C++17 inline variables.
 bool stuck_bus = false;
@@ -30,7 +32,7 @@ static void assert_safe_harness() {
   for (int pin = 0; pin < 40; ++pin) {
     unsigned writes = 0;
     for (int safe : expected) if (pin == safe) ++writes;
-    assert(low_writes[pin] == writes && output_modes[pin] == writes);
+    CHECK(low_writes[pin] == writes && output_modes[pin] == writes);
   }
 }
 
@@ -43,93 +45,93 @@ static void test_startup() {
   reset();
   Wire.fail_begin = true;
   setup();
-  assert(!ready && Wire.starts == 0 && outputs_low == 10);
+  CHECK(!ready && Wire.starts == 0 && outputs_low == 10);
   assert_safe_harness();
   reset();
   Wire.short_write = true;
   setup();
-  assert(!ready && Wire.starts == Wire.stops && Wire.reads == 0);
+  CHECK(!ready && Wire.starts == Wire.stops && Wire.reads == 0);
   reset();
   Wire.hold_after_stop = true;
   Wire.optional_installed = true;
   setup();
-  assert(!ready && Wire.stops == 1 && Wire.reads == 0);
+  CHECK(!ready && Wire.stops == 1 && Wire.reads == 0);
   reset();
   Wire.mux_readback = 3;
   setup();
-  assert(!ready && sensor.starts == 0);
+  CHECK(!ready && sensor.starts == 0);
   reset();
   sensor.fail_start = true;
   setup();
-  assert(!ready && sensor.starts == 1 && Wire.ranges == 0);
+  CHECK(!ready && sensor.starts == 1 && Wire.ranges == 0);
   reset();
   sensor.timed_out = true;
   setup();
-  assert(!ready && Wire.ranges == 0);
+  CHECK(!ready && Wire.ranges == 0);
   reset();
   Wire.optional_installed = true;
   Wire.extras = 1;
   Wire.optional_stuck = true;
   setup();
-  assert(!ready && sensor.starts == 0 && Wire.ranges == 0);
+  CHECK(!ready && sensor.starts == 0 && Wire.ranges == 0);
   reset();
   Wire.optional_installed = true;
   Wire.extras = 1;
   setup();
-  assert(ready && Wire.ranges == 0 && Wire.extras == 0 && Wire.timeout_ms == 10);
+  CHECK(ready && Wire.ranges == 0 && Wire.extras == 0 && Wire.timeout_ms == 10);
   assert_safe_harness();
-  assert(input_reads[21] > 0 && input_reads[22] > 0);
+  CHECK(input_reads[21] > 0 && input_reads[22] > 0);
 }
 
 static void test_optical_rejection() {
   reset();
   setup();
-  assert(ready);
+  CHECK(ready);
   loop();
-  assert(Serial.samples == 1 && Serial.valid == 1 && Wire.clears == 1);
+  CHECK(Serial.samples == 1 && Serial.valid == 1 && Wire.clears == 1);
   // A successful clear must consume the ready indication. Polling again
   // without a new conversion must not publish another sample.
-  assert(Wire.interrupt_status == 0);
+  CHECK(Wire.interrupt_status == 0);
   next_poll();
-  assert(Serial.samples == 1 && Wire.results == 1 && Wire.clears == 1);
+  CHECK(Serial.samples == 1 && Wire.results == 1 && Wire.clears == 1);
   Wire.interrupt_status = 0x18;
   next_poll();
-  assert(Serial.samples == 2 && Serial.valid == 0 && Wire.results == 1 && Wire.clears == 2);
+  CHECK(Serial.samples == 2 && Serial.valid == 0 && Wire.results == 1 && Wire.clears == 2);
   Wire.interrupt_status = 7;
   Wire.raw_status = 4;
   next_poll();
-  assert(Serial.samples == 3 && Serial.valid == 0 && ready);
+  CHECK(Serial.samples == 3 && Serial.valid == 0 && ready);
   Wire.interrupt_status = 7;
   Wire.raw_status = 11;
   Wire.signal = 31;
   next_poll();
-  assert(Serial.samples == 4 && Serial.valid == 0 && ready);
+  CHECK(Serial.samples == 4 && Serial.valid == 0 && ready);
   Wire.interrupt_status = 7;
   Wire.signal = 32;
   Wire.mm = 8190;
   next_poll();
-  assert(Serial.samples == 5 && Serial.valid == 0 && ready);
+  CHECK(Serial.samples == 5 && Serial.valid == 0 && ready);
   Wire.interrupt_status = 7;
   Wire.mm = 45;
   next_poll();
-  assert(Serial.samples == 6 && Serial.valid == 1 && ready);
+  CHECK(Serial.samples == 6 && Serial.valid == 1 && ready);
 }
 
 static void test_transport_faults() {
   for (unsigned fault_case = 0; fault_case < 4; ++fault_case) {
     reset();
     setup();
-    assert(ready);
+    CHECK(ready);
     if (fault_case == 0) Wire.short_result = true;
     if (fault_case == 1) Wire.fail_clear = true;
     if (fault_case == 2) Wire.hold_after_result = true;
     if (fault_case == 3) Wire.mux_readback = 3;
     loop();
-    assert(!ready && Serial.samples == 0);
-    if (fault_case == 2) assert(Wire.clears == 0);
-    else assert(Wire.ranges == 0);
+    CHECK(!ready && Serial.samples == 0);
+    if (fault_case == 2) CHECK(Wire.clears == 0);
+    else CHECK(Wire.ranges == 0);
     if (fault_case == 1) {
-      assert(Wire.clears == 1 && Wire.interrupt_status == 7);
+      CHECK(Wire.clears == 1 && Wire.interrupt_status == 7);
     }
     // Even a recovered bus and a new ready conversion cannot rearm the
     // latched bench or touch the neutralized actuator harness.
@@ -139,7 +141,7 @@ static void test_transport_faults() {
     stuck_bus = false;
     const unsigned transactions = Wire.starts;
     next_poll();
-    assert(!ready && Wire.starts == transactions && Serial.samples == 0);
+    CHECK(!ready && Wire.starts == transactions && Serial.samples == 0);
     assert_safe_harness();
   }
 }
@@ -149,21 +151,21 @@ static void test_wire_read_requires_begin() {
   wire.optional_installed = true;
   const uint8_t addresses[] = {0x70, 0x71};
   for (uint8_t address : addresses) {
-    assert(wire.requestFrom(address, std::size_t{1}, true) == 0);
-    assert(wire.available() == 0 && wire.read() == -1);
+    CHECK(wire.requestFrom(address, std::size_t{1}, true) == 0);
+    CHECK(wire.available() == 0 && wire.read() == -1);
   }
   wire.fail_begin = true;
-  assert(!wire.begin(21, 22, 400000));
+  CHECK(!wire.begin(21, 22, 400000));
   for (uint8_t address : addresses) {
-    assert(wire.requestFrom(address, std::size_t{1}, true) == 0);
-    assert(wire.available() == 0 && wire.read() == -1);
+    CHECK(wire.requestFrom(address, std::size_t{1}, true) == 0);
+    CHECK(wire.available() == 0 && wire.read() == -1);
   }
   wire.fail_begin = false;
-  assert(wire.begin(21, 22, 400000));
+  CHECK(wire.begin(21, 22, 400000));
   for (uint8_t address : addresses) {
-    assert(wire.requestFrom(address, std::size_t{1}, true) == 1);
-    assert(wire.available() == 1 && wire.read() == 0);
-    assert(wire.available() == 0 && wire.read() == -1);
+    CHECK(wire.requestFrom(address, std::size_t{1}, true) == 1);
+    CHECK(wire.available() == 1 && wire.read() == 0);
+    CHECK(wire.available() == 0 && wire.read() == -1);
   }
 }
 

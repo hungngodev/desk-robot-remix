@@ -219,7 +219,7 @@ desk_robot::BodyControl control;
 #endif
 // Recovery is deliberately unavailable on the head UART or network bridge.
 desk_robot::LineReceiver usb_receiver(true);
-desk_robot::LineReceiver head_receiver;
+desk_robot::LineReceiver head_receiver(false, true);
 HardwareSerial head_uart(2);
 // UART output is never sent synchronously inside the sensor/heartbeat loop.
 // Two full worst-case replies fit per port; saturation drops an ACK rather
@@ -481,7 +481,10 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
       // STOP/HALT already took effect before acknowledgement. Keep the
       // small final reply out of the normal status backlog without splicing
       // it into any JSON line that has begun transmitting.
-      if (strcmp(reply, "OK halt") == 0 || strcmp(reply, "OK stop") == 0)
+      const bool urgent_stop =
+          strcmp(reply, "OK halt") == 0 || strcmp(reply, "OK stop") == 0;
+      receiver.wrap_reply(reply, sizeof(reply));
+      if (urgent_stop)
         replies.enqueue_priority_line(reply);
       else
         replies.enqueue_line(reply);
@@ -770,6 +773,15 @@ void service_safety_checkpoint() {
   if (!control.haptic_feedback_allowed()) accessories.cancel_pending_haptic();
 #endif
 }
+
+void publish_lane5_safety(const desk_robot::AccessoryReadings& readings,
+                          std::uint32_t assessed_at_ms, void*) {
+  // Publish mandatory dock/GPIOA/GPB3 safety evidence and coast motors
+  // before lane 5 proceeds with optional haptic or NFC I2C transactions.
+  invalidate_shared_bus_if_faulted();
+  control.set_accessories(readings, assessed_at_ms);
+  service_safety_checkpoint();
+}
 #endif
 
 void loop() {
@@ -810,7 +822,8 @@ void loop() {
   poll_optional(millis());
   if (control.state().bumper_raw) apply_outputs();
   service_safety_checkpoint();
-  if (tof.clients_accessible() && !accessories.poll(millis()))
+  if (tof.clients_accessible() &&
+      !accessories.poll(millis(), publish_lane5_safety, nullptr))
     tof.note_shared_mux_fault(cliff_guard);
   invalidate_shared_bus_if_faulted();
   control.set_accessories(accessories.readings(), millis());
@@ -845,9 +858,14 @@ void loop() {
   }
 #if DESK_ROBOT_ENABLE_PAW_RAW
   else {
-    if (tof.clients_accessible()) paw_pulse.poll(millis());
-    if (!tof.clients_accessible()) paw_pulse.invalidate_bus();
-    control.set_paw_pulse(paw_pulse.sample());
+    if (control.paw_raw_consent()) {
+      if (tof.clients_accessible()) paw_pulse.poll(millis());
+      if (!tof.clients_accessible()) paw_pulse.invalidate_bus();
+      control.set_paw_pulse(paw_pulse.sample());
+    } else {
+      paw_pulse.invalidate_bus();
+      control.set_paw_pulse(desk_robot::OpticalRaw{});
+    }
   }
 #endif
   // Keep the existing CAP1188 cadence even without an optical client.

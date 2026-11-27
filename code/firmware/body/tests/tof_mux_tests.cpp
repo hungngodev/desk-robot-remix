@@ -2078,6 +2078,58 @@ int main() {
         }
       }
     }
+    {
+      // 868fIqQ: any intermediate checked startup write error must abort init
+      // without setting that channel's boot_health_mask_ bit even when later
+      // writes succeed (14 checked writes on lane 0, then lane 1 on step 15+).
+      for (unsigned fail_step = 1; fail_step <= 15; ++fail_step) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        Wire.fail_tof_write_index = fail_step;
+        desk_robot::TofBus bus;
+        CHECK(!bus.begin(21, 22, -1));
+        CHECK(!bus.ready());
+        CHECK(bus.boot_health_mask() == (fail_step <= 14 ? 0U : 1U));
+        CHECK(Wire.ranges == 0 && Wire.extras == 0 && !Wire.unsafe_parallel_mux);
+      }
+    }
+    {
+      // 868Fp6u: valid-status unsafe range and interrupt-error paths must
+      // latch CliffGuard upon receipt before 0x0B interrupt clear finishes/times out.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      std::uint32_t now = 51;
+#if DESK_ROBOT_EXTRA_RANGERS
+      bus.poll(guard, now++); // optional lane 5 -> next poll is floor lane 0
+#endif
+      fake_arduino_millis() = now;
+      Wire.tof_force_mm = 120; // outside [30, 80] floor band
+      Wire.next_stop_timeout_address = 0x29; // time out on 0x0B interrupt clear
+      bus.poll(guard, now);
+      CHECK(bus.last_channel() == 0);
+      CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+      CHECK(!guard.evaluate(millis()));
+
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus err_bus;
+      desk_robot::CliffGuard err_guard;
+      ready(err_bus, err_guard);
+      now = 51;
+#if DESK_ROBOT_EXTRA_RANGERS
+      err_bus.poll(err_guard, now++); // optional lane 5 -> next poll is floor lane 0
+#endif
+      fake_arduino_millis() = now;
+      Wire.tof_interrupt_error_bits = 0x10;
+      Wire.next_stop_timeout_address = 0x29;
+      err_bus.poll(err_guard, now);
+      CHECK(err_bus.last_channel() == 0);
+      CHECK(err_guard.fault() == desk_robot::CliffFault::InvalidSample);
+      CHECK(!err_guard.evaluate(millis()));
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {

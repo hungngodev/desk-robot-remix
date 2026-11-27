@@ -1584,24 +1584,34 @@ int main() {
     nfc_wire.nfc_tag_present = true;
     desk_robot::AccessorySensors nfc_accessories;
     CHECK(nfc_accessories.begin(nfc_wire));
-    for (std::uint32_t ms = 0; ms < 2600; ms += 12) {
+    CHECK(!nfc_accessories.nfc_collection_enabled());
+    for (std::uint32_t ms = 0; ms < 600; ms += 12) {
+      nfc_accessories.poll(ms);
+      CHECK(!nfc_wire.unsafe_parallel_mux);
+    }
+    const auto& nfc = nfc_accessories.readings().nfc;
+    CHECK(nfc_wire.nfc_scans == 0U && !nfc.present && !nfc.valid &&
+          !nfc.tag_visible && nfc.tag_token == 0U && nfc.tag_events == 0U &&
+          nfc.scan_seq == 0U);
+    nfc_accessories.set_nfc_collection_enabled(true, 600);
+    CHECK(nfc_accessories.nfc_collection_enabled());
+    for (std::uint32_t ms = 612; ms < 3200; ms += 12) {
       nfc_accessories.poll(ms);
       CHECK(!nfc_wire.unsafe_parallel_mux);
       CHECK(nfc_wire.ranges == 0 && nfc_wire.extras == 0);
     }
-    const auto& nfc = nfc_accessories.readings().nfc;
     CHECK(nfc.present && nfc.valid && nfc.tag_visible);
     CHECK(nfc.tag_events == 1U && nfc.tag_token != 0U);
     CHECK(nfc.scan_seq > 1U);
     CHECK(nfc_wire.dock_gpio_reads > 0);
     nfc_wire.nfc_tag_present = false;
-    for (std::uint32_t ms = 2604; ms < 4200; ms += 12) {
+    for (std::uint32_t ms = 3204; ms < 4800; ms += 12) {
       nfc_accessories.poll(ms);
       CHECK(!nfc_wire.unsafe_parallel_mux);
     }
     CHECK(nfc.valid && !nfc.tag_visible && nfc.tag_events == 1U);
     nfc_wire.nfc_tag_present = true;
-    for (std::uint32_t ms = 4200; ms < 6100; ms += 12) {
+    for (std::uint32_t ms = 4800; ms < 6700; ms += 12) {
       nfc_accessories.poll(ms);
       CHECK(!nfc_wire.unsafe_parallel_mux);
     }
@@ -1609,7 +1619,7 @@ int main() {
     CHECK(nfc_wire.dock_gpio_reads > 0);
     const unsigned previous_scans = nfc_wire.nfc_scans;
     nfc_wire.fail_dock_gpio = true;
-    for (std::uint32_t ms = 6108; ms < 6800; ms += 12) {
+    for (std::uint32_t ms = 6708; ms < 7400; ms += 12) {
       nfc_accessories.poll(ms);
       CHECK(!nfc_wire.unsafe_parallel_mux);
     }
@@ -1624,6 +1634,7 @@ int main() {
     recovery_wire.nfc_tag_present = true;
     desk_robot::AccessorySensors recovery;
     CHECK(recovery.begin(recovery_wire));
+    recovery.set_nfc_collection_enabled(true, 0);
     for (std::uint32_t ms = 0; ms < 2600; ms += 12)
       recovery.poll(ms);
     const auto initial = recovery.readings().nfc;
@@ -1672,6 +1683,7 @@ int main() {
       inflight_wire.dock_gpioA = boundary == NfcBoundary::DockRemoval ? 0x0d : 0x0c;
       desk_robot::AccessorySensors inflight;
       CHECK(inflight.begin(inflight_wire));
+      inflight.set_nfc_collection_enabled(true, 0);
       std::uint32_t ms = 0;
       for (; ms < 2600; ms += 12) inflight.poll(ms);
       const auto baseline = inflight.readings().nfc;
@@ -1733,6 +1745,43 @@ int main() {
       CHECK(after.tag_events == baseline.tag_events);
       CHECK(after.scan_seq > pre_fault_seq);
       CHECK(inflight_wire.nfc_scans == pre_fault_scans + 1U);
+    }
+    // 868sCBh: revoking NFC acquisition consent during a pending ScanResponse
+    // must retire the in-flight scan, clear stale NFC fields, and perform no
+    // further PN532 transfers.
+    {
+      TwoWire revoke_wire;
+      revoke_wire.nfc_connected = true;
+      revoke_wire.nfc_tag_present = true;
+      desk_robot::AccessorySensors revoke;
+      CHECK(revoke.begin(revoke_wire));
+      revoke.set_nfc_collection_enabled(true, 0);
+      std::uint32_t ms = 0;
+      for (; ms < 2600; ms += 12) revoke.poll(ms);
+      CHECK(revoke.readings().nfc.valid && revoke.readings().nfc.tag_visible);
+      bool armed_scan = false;
+      for (; ms < 6000; ms += 12) {
+        revoke.poll(ms);
+        if (revoke_wire.nfc_command == 0x4a && revoke_wire.nfc_phase == 2) {
+          armed_scan = true;
+          break;
+        }
+      }
+      CHECK(armed_scan);
+      const unsigned scans_before = revoke_wire.nfc_scans;
+      revoke.set_nfc_collection_enabled(false, ms);
+      CHECK(!revoke.nfc_collection_enabled());
+      const auto& cleared = revoke.readings().nfc;
+      CHECK(!cleared.present && !cleared.valid && !cleared.tag_visible &&
+            cleared.tag_token == 0U && cleared.tag_events == 0U &&
+            cleared.scan_seq == 0U && cleared.at_ms == 0U);
+      for (int i = 0; i < 60; ++i, ms += 12) {
+        revoke.poll(ms);
+        CHECK(!revoke_wire.unsafe_parallel_mux);
+      }
+      CHECK(revoke_wire.nfc_scans == scans_before);
+      CHECK(!cleared.present && !cleared.valid && cleared.scan_seq == 0U &&
+            cleared.tag_events == 0U);
     }
     // A separate GPIOB read can host slow reed/PIR while GPIOA continues
     // owning the compulsory independent dock stop/PGOOD evidence.

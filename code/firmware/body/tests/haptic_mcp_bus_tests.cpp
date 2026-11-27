@@ -369,6 +369,99 @@ int main() {
     CHECK(stuck.mcp_olatb == 0);
     CHECK(!separated.haptic_ready());
 
+    // 868la5q: Lane 5 acquires GPIOA + GPIOB and invokes on_lane5_safety BEFORE
+    // haptic_step or NFC transactions run, including on dock contact, GPB3
+    // nFAULT LOW, GPIOA NACK, and timeout while preserving haptic LOW recovery.
+    struct Lane5Trace {
+      unsigned callbacks = 0;
+      bool saw_haptic_already_fired = false;
+      bool saw_dock_valid = false;
+      bool saw_dock_seated = false;
+      bool saw_driver_fault = false;
+      desk_robot::AccessorySensors* owner = nullptr;
+      TwoWire* wire = nullptr;
+      unsigned haptic_edges_at_callback = 0;
+      std::uint8_t olatb_at_callback = 0;
+    };
+    const auto trace_cb = [](const desk_robot::AccessoryReadings& readings,
+                             std::uint32_t, void* ctx) {
+      auto* trace = static_cast<Lane5Trace*>(ctx);
+      ++trace->callbacks;
+      trace->saw_dock_valid = readings.dock.valid;
+      trace->saw_dock_seated = readings.dock.left_seated;
+      trace->saw_driver_fault = readings.optional_inputs.valid &&
+          readings.optional_inputs.driver_fault_active;
+      trace->haptic_edges_at_callback = trace->wire->haptic_rising_edges;
+      trace->olatb_at_callback = trace->wire->mcp_olatb;
+      if (trace->saw_dock_seated || trace->saw_driver_fault || !readings.dock.valid) {
+        trace->owner->cancel_pending_haptic();
+      }
+    };
+    {
+      TwoWire l5;
+      l5.dock_gpioA = 0x0C;
+      l5.optional_gpioB = 0x09;
+      desk_robot::AccessorySensors s;
+      CHECK(s.begin(l5));
+      CHECK(s.request_haptic(1));
+      Lane5Trace trace{};
+      trace.owner = &s;
+      trace.wire = &l5;
+      for (std::uint32_t ms = 0; ms < 60; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(trace.callbacks == 1U);
+      CHECK(trace.haptic_edges_at_callback == 0U);
+      CHECK(trace.olatb_at_callback == 0x00U);
+      CHECK(l5.haptic_rising_edges == 1U);
+      CHECK(l5.mcp_olatb == 0x04U);
+
+      // GPB3 LOW assert during next lane-5 pass cancels before any TurnOn.
+      for (std::uint32_t ms = 60; ms < 1500; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(l5.mcp_olatb == 0x00U);
+      l5.optional_gpioB = 0x01; // GPB3 LOW -> driver_fault_active
+      CHECK(s.request_haptic(1550));
+      const unsigned edges_before = l5.haptic_rising_edges;
+      trace.callbacks = 0;
+      for (std::uint32_t ms = 1560; ms < 1660; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(trace.callbacks == 1U && trace.saw_driver_fault);
+      CHECK(l5.haptic_rising_edges == edges_before);
+      CHECK(l5.mcp_olatb == 0x00U);
+
+      // Pending haptic LOW recovery: GPIOA NACK fires callback before recovery,
+      // and recovery still deasserts OLATB once the bus recovers.
+      l5.optional_gpioB = 0x09;
+      CHECK(s.request_haptic(3200));
+      for (std::uint32_t ms = 3200; ms < 3260; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(l5.mcp_olatb == 0x04U);
+      l5.fail_mcp_register_write = true;
+      for (std::uint32_t ms = 3260; ms < 3360; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(l5.mcp_olatb == 0x04U); // pending LOW retry active
+      l5.fail_mcp_register_write = false;
+      l5.next_read_timeout_address = 0x20;
+      trace.callbacks = 0;
+      for (std::uint32_t ms = 3364; ms < 3450; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+        if (trace.callbacks == 1U) {
+          CHECK(trace.olatb_at_callback == 0x04U); // LOW recovery happens AFTER safety cb
+          CHECK(!trace.saw_dock_valid);
+        }
+      }
+      CHECK(trace.callbacks == 1U);
+      for (std::uint32_t ms = 3460; ms < 3550; ms += 12) {
+        s.poll(ms, trace_cb, &trace);
+      }
+      CHECK(l5.mcp_olatb == 0x00U); // LOW retry still completed after recovery
+    }
+
     std::cout << "PASS guarded haptic register IO, dock-first, fault and mux\n";
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << error.what() << '\n';

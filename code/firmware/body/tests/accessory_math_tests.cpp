@@ -5,6 +5,9 @@
 #include <cfenv>
 #include <iostream>
 #include <stdexcept>
+#if defined(__clang__)
+#pragma STDC FENV_ACCESS ON
+#endif
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 #include "Bmp280RailTests.h"
 // Verify quantization against exact rational intervals, not a second copy

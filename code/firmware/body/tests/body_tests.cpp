@@ -1266,6 +1266,59 @@ void deterministic_stream_stress() {
   }
 }
 
+void uart_frame_integrity_mutation_check() {
+  BodyControl body;
+  LineReceiver head(false, true);
+  auto send_framed = [&](std::uint32_t tx_id, const std::string& payload,
+                         std::uint32_t now_ms) -> std::string {
+    const std::string body_str =
+        "@" + std::to_string(tx_id) + ":" + payload;
+    const std::uint8_t crc =
+        desk_robot::uart_crc8(body_str.data(), body_str.size());
+    char tail[8]{};
+    std::snprintf(tail, sizeof(tail), "*%02X\n", static_cast<unsigned>(crc));
+    auto replies = frame(body, head, body_str + tail, now_ms);
+    CHECK(replies.size() == 1U);
+    head.wrap_reply(&replies[0][0], replies[0].size()); // ensure non-mutated checkable
+    return replies[0];
+  };
+  CHECK(send_framed(1U, "arm", 10) == "OK arm");
+  CHECK(head.last_tx_id() == 1U);
+  char wrapped[128] = "OK arm";
+  CHECK(head.wrap_reply(wrapped, sizeof(wrapped)));
+  std::uint32_t rx_id = 0;
+  std::size_t off = 0, len = 0;
+  CHECK(desk_robot::parse_uart_integrity_frame(
+            wrapped, std::strlen(wrapped), rx_id, off, len) ==
+        desk_robot::UartFrameStatus::Ok);
+  CHECK(rx_id == 1U && std::string(wrapped + off, len) == "OK arm");
+
+  CHECK(send_framed(2U, "drive 40 40 250", 20) == "OK drive left=40 right=40 ms=250");
+  CHECK(body.state().armed && body.state().left == 40 && body.state().right == 40);
+  // Single printable-byte mutation anywhere inside a valid in-range drive frame
+  // cannot execute another command or renew the drive lease.
+  const std::string valid = "@2:drive 40 40 250*";
+  const std::uint8_t crc = desk_robot::uart_crc8(valid.data(), valid.size() - 1U);
+  char hex[4]{};
+  std::snprintf(hex, sizeof(hex), "%02X", static_cast<unsigned>(crc));
+  const std::string full_frame = valid + hex;
+  for (std::size_t idx = 0; idx < full_frame.size(); ++idx) {
+    for (const char replacement : {'3', '9', 'A', 'z'}) {
+      if (full_frame[idx] == replacement) continue;
+      std::string mutated = full_frame;
+      mutated[idx] = replacement;
+      auto r = frame(body, head, mutated + "\n", 100);
+      CHECK(r.size() == 1U);
+      CHECK(r[0] == "ERR input bad_checksum" || r[0] == "ERR input unframed");
+      CHECK(head.last_tx_id() == 0U);
+      CHECK(body.drive_remaining(100) == 170U); // original 250ms lease from t=20 not renewed
+    }
+  }
+  auto unframed = frame(body, head, "drive 20 20 250\n", 110);
+  CHECK(unframed.size() == 1U && unframed[0] == "ERR input unframed");
+  CHECK(body.state().left == 40 && body.drive_remaining(110) == 160U);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1300,7 +1353,8 @@ int main(int argc, char** argv) {
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},
       {"guarded_transition_sequences", guarded_transition_sequences},
       {"guarded_reboot_fault_matrix", guarded_reboot_fault_matrix},
-      {"deterministic_stream_stress", deterministic_stream_stress}};
+      {"deterministic_stream_stress", deterministic_stream_stress},
+      {"uart_frame_integrity_mutation_check", uart_frame_integrity_mutation_check}};
   int ran = 0;
   for (const auto& test : tests) {
     if (argc > 1 && std::strcmp(argv[1], test.first) != 0) continue;

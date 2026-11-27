@@ -23,7 +23,11 @@ class AccessorySensors {
   bool begin(TwoWire& wire, bool (*bus_accessible)() = nullptr);
   // False means a shared mux/bus fault, not an absent optional sensor.
   // True on a skipped slot is not a fresh acquisition.
-  bool poll(std::uint32_t now_ms);
+  // When lane 5 finishes mandatory GPIOA/GPIOB safety acquisition, optional
+  // on_lane5_safety runs synchronously BEFORE haptic output or NFC transactions.
+  using Lane5SafetyCallback = void (*)(const AccessoryReadings&, std::uint32_t, void*);
+  bool poll(std::uint32_t now_ms, Lane5SafetyCallback on_lane5_safety = nullptr,
+            void* on_lane5_ctx = nullptr);
   const AccessoryReadings& readings() const { return data_; }
   // No bus transaction: invalidate every cached conversion when another
   // shared client detects a held line or detached pin matrix.
@@ -53,6 +57,10 @@ class AccessorySensors {
     return false;
 #endif
   }
+  // Optional PN532 toy tag acquisition defaults OFF and requires explicit
+  // runtime opt-in. Revoking consent retires any active scan immediately.
+  void set_nfc_collection_enabled(bool enabled, std::uint32_t now_ms);
+  bool nfc_collection_enabled() const { return nfc_collection_enabled_; }
  private:
   TwoWire* wire_ = nullptr;
   bool (*bus_accessible_)() = nullptr;
@@ -79,6 +87,8 @@ class AccessorySensors {
     StartRetry, RetryAck, RetryResponse, Idle, ScanAck, ScanResponse
   };
   NfcStage nfc_stage_ = NfcStage::Disabled;
+  bool nfc_collection_enabled_ = false;
+  bool nfc_pending_probe_ = false;
   std::uint32_t nfc_phase_at_ms_ = 0;
   std::uint32_t nfc_last_scan_at_ms_ = 0;
   Bmp280Trim bmp_trim_{};
