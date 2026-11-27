@@ -7,9 +7,9 @@ enum class FaceStatus {
 
 constexpr FaceStatus SelectFaceStatus(bool body_fault, bool dock_lockout, bool mic_privacy,
                                       bool voice_link_lost = false) {
-    if (body_fault) return dock_lockout ? FaceStatus::kDockLock : FaceStatus::kBodyFault;
-    if (mic_privacy) return FaceStatus::kMicPrivacy;
-    return voice_link_lost ? FaceStatus::kVoiceLinkLost : FaceStatus::kNormal;
+    return body_fault ? (dock_lockout ? FaceStatus::kDockLock : FaceStatus::kBodyFault) :
+           mic_privacy ? FaceStatus::kMicPrivacy :
+           voice_link_lost ? FaceStatus::kVoiceLinkLost : FaceStatus::kNormal;
 }
 
 // A lost voice link is information, not a body fault or a privacy command.
