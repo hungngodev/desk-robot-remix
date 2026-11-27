@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <vector>
 
 static unsigned allocations = 0;
@@ -20,7 +22,7 @@ void* operator new(std::size_t n) {
 }
 void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-static std::size_t written = 0;
+static std::optional<std::size_t> written;
 static int err = 0;
 static unsigned calls = 0;
 static int32_t first_sample = 0;
@@ -40,7 +42,7 @@ static int i2s_channel_write(int, const void* buf, std::size_t bytes, std::size_
     if (ticks != 120) std::abort();
     ++calls;
     first_sample = static_cast<const int32_t*>(buf)[0];
-    *accepted = written ? written : bytes;
+    *accepted = written.value_or(bytes);
     change_volume_during_write();
     return err;
 }
@@ -154,7 +156,7 @@ static int CheckVolumeBoundaries() {
     CHECK(sense.short_output_writes_ == 1);
     CHECK(sense.reference_integrity_failed_);
     change_volume = nullptr;
-    written = 0;
+    written.reset();
     return 0;
 }
 // Inspect the actual PCM32 submitted to I2S, including corrupt saved or
@@ -173,6 +175,45 @@ static int CheckTxGainRails() {
         }
         CHECK(first_sample == int64_t(pcm[0]) * entry.factor);
     }
+    return 0;
+}
+// Invalid I2S receipts must never advance the accepted PCM reference.
+static int CheckRejectedWrites() {
+    SenseReferenceCodec sense;
+    const std::array<int16_t, 64> pcm{};
+    CHECK(sense.Write(pcm.data(), 64) == 64);
+    CHECK(sense.n == 32);
+    CHECK(sense.speaker_frames_accepted_ == 64);
+    const auto end_us = sense.reference_clock_.represented_end_us();
+    const auto ring = sense.ring;
+    const auto frames = sense.speaker_activity_.SnapshotNow().frames;
+    const auto old_calls = calls;
+    struct Receipt { std::size_t bytes; int status; };
+    const Receipt rejected[] = {
+        {0, ESP_OK}, {3, ESP_OK}, {65 * sizeof(int32_t), ESP_OK},
+        {std::numeric_limits<std::size_t>::max(), ESP_OK}, {4, 1},
+    };
+    uint32_t failures = 0;
+    for (const auto& receipt : rejected) {
+        written = receipt.bytes;
+        err = receipt.status;
+        CHECK(sense.Write(pcm.data(), 64) == 0);
+        ++failures;
+        CHECK(calls == old_calls + failures);
+        CHECK(sense.short_output_writes_ == failures);
+        CHECK(sense.reference_integrity_failed_);
+        CHECK(sense.n == 32 && sense.ring == ring);
+        CHECK(sense.speaker_frames_accepted_ == 64);
+        CHECK(sense.speaker_activity_.SnapshotNow().frames == frames);
+        CHECK(sense.reference_clock_.represented_end_us() == end_us);
+    }
+    written.reset();
+    err = ESP_OK;
+    CHECK(sense.Write(pcm.data(), 64) == 64);
+    CHECK(sense.n == 64);
+    CHECK(sense.speaker_frames_accepted_ == 128);
+    CHECK(sense.short_output_writes_ == failures);
+    CHECK(sense.reference_integrity_failed_);
     return 0;
 }
 int main() {
@@ -208,6 +249,9 @@ int main() {
         const auto old_calls = calls;
         CHECK(codec.Write(nullptr, 1920) == 0);
         CHECK(codec.Write(pcm, -1) == 0);
+        CHECK(codec.Write(pcm, 0) == 0);
+        CHECK(codec.Write(pcm, std::numeric_limits<int>::min()) == 0);
+        CHECK(codec.Write(pcm, std::numeric_limits<int>::max()) == 0);
         CHECK(codec.Write(pcm, 32001) == 0);
         CHECK(calls == old_calls);
         CHECK(startup_allocations == 1);
@@ -224,8 +268,9 @@ int main() {
     CHECK(startup_releases == 1);
     std::cout << "PASS allocation-free TX, bounds, short/error writes\n";
     refuse_memory = false;
-    written = 0;
+    written.reset();
     err = 0;
+    CHECK(CheckRejectedWrites() == 0);
     SenseReferenceCodec sense;
     std::fill_n(pcm, 64, -32768);
     const auto sense_allocations = allocations;
