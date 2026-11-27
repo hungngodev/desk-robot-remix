@@ -44,6 +44,8 @@ def scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes:
     """Ignore broad lighting shifts while retaining signed localized changes."""
     if type(threshold) is not int or not 1 <= threshold <= 255:
         raise ValueError("Scene change threshold must be an integer in [1, 255]")
+    if type(a) is not bytes or type(b) is not bytes:
+        raise ValueError("Frame fingerprints must be immutable bytes")
     if len(a) != len(b) or len(a) != 64 * 48:
         raise ValueError("Frame fingerprints have incompatible dimensions")
     count = len(a)
@@ -79,8 +81,14 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
 
 def consistent_change_mask(previous: bytes | None, current: bytes) -> bool:
     """Require half the smaller nonempty changed region to persist with the same sign."""
+    if type(current) is not bytes or max(current, default=0) > 2:
+        raise ValueError("Invalid signed change mask")
     if previous is None:
         return False
+    if type(previous) is not bytes or max(previous, default=0) > 2:
+        raise ValueError("Invalid signed change mask")
+    if len(previous) != len(current):
+        raise ValueError("Change masks have incompatible dimensions")
     overlap = sum(old != 0 and old == new for old, new in zip(previous, current, strict=True))
     smaller = min(len(previous) - previous.count(0), len(current) - current.count(0))
     return smaller > 0 and 2 * overlap >= smaller

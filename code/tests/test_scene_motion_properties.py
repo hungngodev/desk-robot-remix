@@ -49,3 +49,42 @@ def test_threshold_endpoints_preserve_signed_residuals(threshold):
     mask = scene_change_mask(baseline, changed, threshold=threshold)
     assert mask == bytes([1]) + baseline[1:]
     assert change_fraction(baseline, changed, threshold=threshold) == 1 / len(mask)
+
+
+@pytest.mark.parametrize("invalid", [
+    bytearray(64 * 48), memoryview(bytes(64 * 48)), [True] * (64 * 48),
+    [float("nan")] * (64 * 48), [float("inf")] * (64 * 48),
+    [-1] * (64 * 48), [256] * (64 * 48), None,
+])
+def test_fingerprints_require_immutable_bytes(invalid):
+    baseline = bytes(64 * 48)
+    for score in (scene_change_mask, change_fraction):
+        with pytest.raises(ValueError, match="immutable bytes"):
+            score(invalid, baseline)
+        with pytest.raises(ValueError, match="immutable bytes"):
+            score(baseline, invalid)
+
+
+@pytest.mark.parametrize("invalid", [b"", b"\x00", bytes(64 * 48 + 1)])
+def test_fingerprint_dimensions_rejected(invalid):
+    baseline = bytes(64 * 48)
+    with pytest.raises(ValueError, match="dimensions"):
+        scene_change_mask(invalid, baseline)
+    with pytest.raises(ValueError, match="dimensions"):
+        scene_change_mask(invalid, invalid)
+
+
+@pytest.mark.parametrize("invalid", [b"\x03", b"\xff", bytearray(b"\x01"), [True]])
+def test_invalid_mask_cannot_count_as_persistent_motion(invalid):
+    with pytest.raises(ValueError, match="signed change mask"):
+        consistent_change_mask(invalid, invalid)
+    with pytest.raises(ValueError, match="signed change mask"):
+        consistent_change_mask(None, invalid)
+    with pytest.raises(ValueError, match="signed change mask"):
+        consistent_change_mask(invalid, b"\x01")
+
+
+def test_mask_dimensions_and_empty_overlap():
+    with pytest.raises(ValueError, match="dimensions"):
+        consistent_change_mask(b"\x01", b"\x01\x02")
+    assert not consistent_change_mask(b"", b"")
