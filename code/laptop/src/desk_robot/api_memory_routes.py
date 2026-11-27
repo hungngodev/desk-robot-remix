@@ -6,6 +6,7 @@ moves intact from the canonical application without a second memory backend.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -27,6 +28,9 @@ from .memory import (
     EpisodeMemoryMutationSuperseded,
     Memory,
 )
+
+
+_logger = logging.getLogger(__name__)
 
 
 class CoreMemoryRequest(BaseModel):
@@ -108,7 +112,15 @@ def _create_memory_mutation_runner(settings: Settings):
                 done.exception()
 
         worker.add_done_callback(finished)
-        return await asyncio.shield(worker)
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            def report_detached_failure(done):
+                if not done.cancelled() and done.exception() is not None:
+                    _logger.warning("Detached operator memory mutation failed")
+
+            worker.add_done_callback(report_detached_failure)
+            raise
 
     return apply_mutation
 
