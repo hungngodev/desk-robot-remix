@@ -49,8 +49,13 @@ def replace_private_text(path: Path, contents: str) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
+    except BaseException as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            # Report cleanup failure without masking the primary exception
+            # (including cancellation) or exposing the temporary path.
+            exc.add_note("Private temporary file cleanup failed")
         raise
 
 
