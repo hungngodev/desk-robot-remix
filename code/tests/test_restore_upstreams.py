@@ -2,6 +2,8 @@
 
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -224,3 +226,47 @@ def test_cached_checkout_with_replacement_ref_is_rejected(tmp_path, monkeypatch)
     assert git(path, "rev-parse", "HEAD") == current
     assert (path / "tracked").read_text() == "different source"
     assert git(path, "replace", "-l") == pin
+
+
+def stall_git_command(tmp_path, monkeypatch, command):
+    """Run real Git except for one deliberately unresponsive subprocess."""
+    real_git = shutil.which("git")
+    assert real_git is not None
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    wrapper = bin_dir / "git"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys, time\n"
+        f"if sys.argv[1] == {command!r}:\n"
+        "    time.sleep(30)\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ["PATH"])
+
+
+def test_local_git_timeout_is_reported(tmp_path, monkeypatch):
+    stall_git_command(tmp_path, monkeypatch, "status")
+    monkeypatch.setattr(restore, "LOCAL_GIT_TIMEOUT_S", 0.1)
+    with pytest.raises(TimeoutError, match="Git status timed out") as error:
+        restore.run(["status"], tmp_path)
+    assert isinstance(error.value.__cause__, subprocess.TimeoutExpired)
+
+
+def test_timed_out_fetch_preserves_checkout(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "upstream/source"
+    original = repository(path)
+    pin = "a" * 40
+    configure(tmp_path, monkeypatch, commit=pin)
+    stall_git_command(tmp_path, monkeypatch, "fetch")
+    monkeypatch.setattr(restore, "TRANSFER_GIT_TIMEOUT_S", 0.1)
+    with pytest.raises(RuntimeError, match="fetch.*source.*" + pin + ".*timed out") as error:
+        restore.main()
+    assert isinstance(error.value.__cause__, TimeoutError)
+    assert "Verified" not in capsys.readouterr().out
+    assert git(path, "rev-parse", "HEAD") == original
+    assert git(path, "symbolic-ref", "HEAD")
+    assert (path / "tracked").read_text() == "original"
+    assert not git(path, "status", "--porcelain")

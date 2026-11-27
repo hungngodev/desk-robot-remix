@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_GIT_TIMEOUT_S = 30
+TRANSFER_GIT_TIMEOUT_S = 300
 
 
 def git_env():
@@ -16,20 +18,27 @@ def git_env():
     return env
 
 
+def git(args, cwd, *, timeout=None, **kwargs):
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, env=git_env(),
+            timeout=LOCAL_GIT_TIMEOUT_S if timeout is None else timeout, **kwargs,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise TimeoutError(f"Git {args[0]} timed out in {cwd}") from exc
+
+
 def run(args, cwd):
-    return subprocess.check_output(args, cwd=cwd, text=True, env=git_env()).strip()
-
-
-def git(args, cwd, **kwargs):
-    return subprocess.run(["git", *args], cwd=cwd, env=git_env(), **kwargs)
+    return git(args, cwd, check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
 
 
 def transfer(args, cwd, source):
     try:
-        git(args, cwd, check=True)
-    except subprocess.CalledProcessError as exc:
+        git(args, cwd, check=True, timeout=TRANSFER_GIT_TIMEOUT_S)
+    except (subprocess.CalledProcessError, TimeoutError) as exc:
         raise RuntimeError(
             f"Cannot {args[0]} {source['path']} at {source['commit']}: "
+            f"{'Git timed out; ' if isinstance(exc, TimeoutError) else ''}"
             "check network access to the pinned origin or restore a local checkout "
             "containing the exact commit."
         ) from exc
@@ -55,20 +64,20 @@ def require_checkout(path):
     metadata = path / ".git"
     if metadata.is_symlink() or not metadata.is_dir():
         raise RuntimeError(f"Expected a standalone upstream checkout in {path}")
-    if Path(run(["git", "rev-parse", "--show-toplevel"], path)).resolve() != path.resolve():
+    if Path(run(["rev-parse", "--show-toplevel"], path)).resolve() != path.resolve():
         raise RuntimeError(f"Git worktree mismatch in {path}")
-    common = run(["git", "rev-parse", "--git-common-dir"], path)
+    common = run(["rev-parse", "--git-common-dir"], path)
     if (path / common).resolve() != metadata.resolve():
         raise RuntimeError(f"Git metadata mismatch in {path}")
     # A replacement ref can make HEAD name the pin while checking out other content.
-    if run(["git", "for-each-ref", "--format=%(refname)", "refs/replace/"], path):
+    if run(["for-each-ref", "--format=%(refname)", "refs/replace/"], path):
         raise RuntimeError(f"Refuse replacement refs in {path}")
 
 
 def require_visible_index(path):
     # Git status can ignore edits to assume-unchanged or skip-worktree entries.
     # Reject the flags rather than clearing them or overwriting local work.
-    entries = subprocess.check_output(["git", "ls-files", "-v", "-z"], cwd=path, env=git_env())
+    entries = git(["ls-files", "-v", "-z"], path, check=True, stdout=subprocess.PIPE).stdout
     if any(entry[:1].islower() or entry.startswith(b"S ") for entry in entries.split(b"\0")):
         raise RuntimeError(f"Preserve local changes and clear hidden index flags in {path}")
 
@@ -88,9 +97,9 @@ def main():
         else:
             require_checkout(path)
             require_visible_index(path)
-            if run(["git", "status", "--porcelain", "--untracked-files=all"], path):
+            if run(["status", "--porcelain", "--untracked-files=all"], path):
                 raise RuntimeError(f"Preserve local changes in {path} before restoring sources")
-        if run(["git", "remote", "get-url", "origin"], path) != source["url"]:
+        if run(["remote", "get-url", "origin"], path) != source["url"]:
             raise RuntimeError(f"Origin mismatch in {path}")
         if git(
             ["cat-file", "-e", source["commit"] + "^{commit}"],
@@ -100,7 +109,7 @@ def main():
         ).returncode:
             transfer(["fetch", "origin", source["commit"]], path, source)
         git(["checkout", "--detach", "--no-overwrite-ignore", source["commit"]], path, check=True)
-        if run(["git", "rev-parse", "HEAD"], path) != source["commit"]:
+        if run(["rev-parse", "HEAD"], path) != source["commit"]:
             raise RuntimeError(f"Upstream commit mismatch in {path}")
         require_visible_index(path)
         print(f"Verified {source['name']} at {source['commit'][:12]}")
@@ -109,5 +118,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except RuntimeError as exc:
+    except (RuntimeError, TimeoutError) as exc:
         raise SystemExit(str(exc)) from None
