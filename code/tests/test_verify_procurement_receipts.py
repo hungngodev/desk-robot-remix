@@ -3,8 +3,10 @@ import base64
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -1749,18 +1751,16 @@ def test_a12_receipt_required_in_both_release_scopes(first_robot):
     ))
 
 
-def test_three_commit_release_receipt_flow_a_to_b_to_c():
-    """Accept A->B->C when source unchanged A..C and record at B stays intact at C."""
-    commit_a = "1" * 40
-    commit_b = "2" * 40
-    commit_c = "3" * 40
-    tree_a = "a" * 40
-    tree_b = "b" * 40
-    tree_c = "c" * 40
+def _git_run(repo: Path, *args: str) -> str:
+    return subprocess.check_output(
+        ["git", *args], cwd=repo, text=True, stderr=subprocess.PIPE,
+    ).strip()
+
+
+def _build_three_commit_evidence(commit_a: str):
     evidence = {
         "parts": {
-            role: {g: receipt("part:" + role, g) for g in release.PART_GATES}
-            for role in ("imu",)
+            "imu": {g: receipt("part:imu", g) for g in release.PART_GATES},
         },
         "room_pod": {},
         "system": {g: receipt("system", g) for g in release.SYSTEM_GATES},
@@ -1778,10 +1778,6 @@ def test_three_commit_release_receipt_flow_a_to_b_to_c():
     records = []
     for _, _, row in release.required_receipts(evidence):
         row["source_sha"] = commit_a
-        row["evidence_url"] = (
-            f"https://github.com/hungngodev/desk-robot-remix/blob/{commit_b}/"
-            "docs/records/release-evidence.json"
-        )
         records.append({
             "record_id": row["record_id"],
             "scope": row["scope"],
@@ -1792,80 +1788,139 @@ def test_three_commit_release_receipt_flow_a_to_b_to_c():
             "tested_on": row["tested_on"],
             "device_revision": row["device_revision"],
             "measurement": row["measurement"],
-            "evidence_url": row["evidence_url"],
         })
-    raw = record_bytes(records)
-    digest = hashlib.sha256(raw).hexdigest()
-    blob_b = hashlib.sha1(
-        f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False,
-    ).hexdigest()
-    for _, _, row in release.required_receipts(evidence):
-        row["artifact_sha256"] = digest
+    return evidence, records
 
-    def make_lookup(*, blob_c=None, missing_in_c=False, source_changed=False):
-        eff_c = blob_b if blob_c is None else blob_c
 
-        def _lk(url):
-            if url.endswith(f"/git/commits/{commit_a}"):
-                return {"sha": commit_a, "tree": {"sha": tree_a}}
-            if url.endswith(f"/git/commits/{commit_b}"):
-                return {"sha": commit_b, "tree": {"sha": tree_b}}
-            if url.endswith(f"/git/commits/{commit_c}"):
-                return {"sha": commit_c, "tree": {"sha": tree_c}}
-            if url.endswith(f"/git/trees/{tree_b}?recursive=1"):
-                return {
-                    "sha": tree_b, "truncated": False,
-                    "tree": [{"path": "docs/records/release-evidence.json",
-                              "mode": "100644", "type": "blob", "sha": blob_b}],
-                }
-            if url.endswith(f"/git/trees/{tree_c}?recursive=1"):
-                entries = [] if missing_in_c else [{
-                    "path": "docs/records/release-evidence.json",
-                    "mode": "100644", "type": "blob", "sha": eff_c,
-                }]
-                return {"sha": tree_c, "truncated": False, "tree": entries}
-            if url.endswith(f"/compare/{commit_a}...{commit_c}"):
-                changed = (
-                    "code/laptop/src/desk_robot/controller.py"
-                    if source_changed
-                    else "docs/records/release-evidence.json"
-                )
-                return {
-                    "status": "ahead", "ahead_by": 2, "total_commits": 2,
-                    "commits": [{"sha": commit_b}, {"sha": commit_c}],
-                    "merge_base_commit": {"sha": commit_a},
-                    "files": [{"status": "modified", "filename": changed}],
-                }
-            if url.endswith(f"/compare/{commit_b}...{commit_c}"):
-                return {
-                    "status": "ahead", "ahead_by": 1, "total_commits": 1,
-                    "commits": [{"sha": commit_c}],
-                    "merge_base_commit": {"sha": commit_b},
-                    "files": [{
-                        "status": "modified",
-                        "filename": "docs/reviews/100_page_procedure_trace.json",
-                    }],
-                }
-            if url.endswith("/issues/comments/42"):
-                return {
-                    "html_url": REVIEW_URL,
-                    "user": {"login": "real_review_account", "type": "User"},
-                    "author_association": "OWNER",
-                    "body": "\n".join(
-                        release.procurement_review_statement({
-                            **row, "artifact_sha256": digest,
-                        }) for row in records
-                    ),
-                }
-            assert url.endswith("/contents/docs/records/release-evidence.json?ref=" + commit_b)
+def _real_git_api_lookup(repo: Path, review_body: str):
+    status_names = {"A": "added", "M": "modified", "D": "removed", "T": "modified"}
+
+    def _lookup(url: str):
+        parsed = urlsplit(url)
+        tail = parsed.path.removeprefix("/repos/hungngodev/desk-robot-remix/")
+        if tail.startswith("git/commits/"):
+            rev = tail.removeprefix("git/commits/")
+            sha = _git_run(repo, "rev-parse", "--verify", f"{rev}^{{commit}}")
+            return {"sha": sha, "tree": {"sha": _git_run(repo, "rev-parse", f"{rev}^{{tree}}")}}
+        if tail.startswith("git/trees/"):
+            tree_sha = tail.removeprefix("git/trees/")
+            entries = []
+            for line in _git_run(repo, "ls-tree", "-r", tree_sha).splitlines():
+                meta, path = line.split("\t", 1)
+                mode, kind, blob_sha = meta.split()
+                entries.append({"path": path, "mode": mode, "type": kind, "sha": blob_sha})
+            return {"sha": tree_sha, "truncated": False, "tree": entries}
+        if tail.startswith("contents/"):
+            path = tail.removeprefix("contents/")
+            rev = parsed.query.removeprefix("ref=")
+            raw = subprocess.check_output(["git", "show", f"{rev}:{path}"], cwd=repo)
             return {
                 "type": "file", "size": len(raw), "encoding": "base64",
                 "content": base64.b64encode(raw).decode("ascii"),
             }
+        if tail.startswith("compare/"):
+            left, right = tail.removeprefix("compare/").split("...", 1)
+            commits = _git_run(repo, "rev-list", "--reverse", f"{left}..{right}").splitlines()
+            files = [
+                {"status": status_names[st[0]], "filename": fn}
+                for st, fn in (
+                    ln.split("\t", 1)
+                    for ln in _git_run(repo, "diff", "--name-status", left, right).splitlines()
+                )
+            ]
+            base = _git_run(repo, "merge-base", left, right)
+            return {
+                "status": "ahead" if base == left else "diverged",
+                "ahead_by": len(commits), "total_commits": len(commits),
+                "commits": [{"sha": sha} for sha in commits],
+                "merge_base_commit": {"sha": base}, "files": files,
+            }
+        assert tail == "issues/comments/42", f"Unexpected GitHub API path: {url}"
+        return {
+            "html_url": REVIEW_URL,
+            "user": {"login": "real_review_account", "type": "User"},
+            "author_association": "OWNER",
+            "body": review_body,
+        }
 
-        return _lk
+    return _lookup
 
-    assert release.audit_release(evidence, commit_c, make_lookup()) == []
-    assert release.audit_release(evidence, commit_c, make_lookup(blob_c="0" * 40))
-    assert release.audit_release(evidence, commit_c, make_lookup(missing_in_c=True))
-    assert release.audit_release(evidence, commit_c, make_lookup(source_changed=True))
+
+def test_three_commit_release_receipt_flow_a_to_b_to_c(tmp_path):
+    """Real Git A->B->C passes when A..C source and B->C record blob stay intact."""
+    _git_run(tmp_path, "init", "-q")
+    _git_run(tmp_path, "config", "user.name", "Procurement Receipt Fixture")
+    _git_run(tmp_path, "config", "user.email", "fixture@example.invalid")
+    src = tmp_path / "code/laptop/src/desk_robot"
+    src.mkdir(parents=True)
+    (src / "controller.py").write_text("SAFE = True\n", encoding="utf-8")
+    _git_run(tmp_path, "add", "code/laptop/src/desk_robot/controller.py")
+    _git_run(tmp_path, "commit", "-qm", "A: tested source")
+    commit_a = _git_run(tmp_path, "rev-parse", "HEAD")
+
+    evidence, records = _build_three_commit_evidence(commit_a)
+    raw = record_bytes(records)
+    rec_file = tmp_path / "docs/records/release-evidence.json"
+    rec_file.parent.mkdir(parents=True)
+    rec_file.write_bytes(raw)
+    _git_run(tmp_path, "add", "docs/records/release-evidence.json")
+    _git_run(tmp_path, "commit", "-qm", "B: immutable physical trial record")
+    commit_b = _git_run(tmp_path, "rev-parse", "HEAD")
+
+    digest = hashlib.sha256(raw).hexdigest()
+    record_url = (
+        f"https://github.com/hungngodev/desk-robot-remix/blob/{commit_b}/"
+        "docs/records/release-evidence.json"
+    )
+    for _, _, row in release.required_receipts(evidence):
+        row["evidence_url"] = record_url
+        row["artifact_sha256"] = digest
+    review_body = "\n".join(
+        release.procurement_review_statement(row)
+        for _, _, row in release.required_receipts(evidence)
+    )
+    signoff = tmp_path / "docs/reviews/100_page_procedure_trace.json"
+    signoff.parent.mkdir(parents=True)
+    signoff.write_text(json.dumps(evidence), encoding="utf-8")
+    _git_run(tmp_path, "add", "docs/reviews/100_page_procedure_trace.json")
+    _git_run(tmp_path, "commit", "-qm", "C: release signoff referencing B")
+    commit_c = _git_run(tmp_path, "rev-parse", "HEAD")
+    assert len({commit_a, commit_b, commit_c}) == 3
+    git_lookup = _real_git_api_lookup(tmp_path, review_body)
+    assert release.audit_release(evidence, commit_c, git_lookup) == []
+
+    _git_run(tmp_path, "checkout", "-q", commit_c)
+    rec_file.write_bytes(raw + b"\n")
+    _git_run(tmp_path, "add", "docs/records/release-evidence.json")
+    _git_run(tmp_path, "commit", "-qm", "tamper record blob at C")
+    altered_errors = release.audit_release(
+        evidence, _git_run(tmp_path, "rev-parse", "HEAD"), git_lookup,
+    )
+    assert altered_errors and all("immutable scoped record" in e for e in altered_errors)
+
+    _git_run(tmp_path, "checkout", "-q", commit_c)
+    _git_run(tmp_path, "rm", "-q", "docs/records/release-evidence.json")
+    _git_run(tmp_path, "commit", "-qm", "delete record blob at C")
+    deleted_errors = release.audit_release(
+        evidence, _git_run(tmp_path, "rev-parse", "HEAD"), git_lookup,
+    )
+    assert deleted_errors and all("immutable scoped record" in e for e in deleted_errors)
+
+    _git_run(tmp_path, "checkout", "-q", commit_c)
+    rec_file.unlink()
+    rec_file.symlink_to("other.json")
+    _git_run(tmp_path, "add", "docs/records/release-evidence.json")
+    _git_run(tmp_path, "commit", "-qm", "replace record with symlink at C")
+    symlink_errors = release.audit_release(
+        evidence, _git_run(tmp_path, "rev-parse", "HEAD"), git_lookup,
+    )
+    assert symlink_errors and all("immutable scoped record" in e for e in symlink_errors)
+
+    _git_run(tmp_path, "checkout", "-q", commit_c)
+    (src / "controller.py").write_text("SAFE = False\n", encoding="utf-8")
+    _git_run(tmp_path, "add", "code/laptop/src/desk_robot/controller.py")
+    _git_run(tmp_path, "commit", "-qm", "edit tested source between A and C")
+    source_errors = release.audit_release(
+        evidence, _git_run(tmp_path, "rev-parse", "HEAD"), git_lookup,
+    )
+    assert source_errors and all("unpinned or generic signoff" in e for e in source_errors)

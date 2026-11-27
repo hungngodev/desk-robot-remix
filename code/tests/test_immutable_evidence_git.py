@@ -65,6 +65,18 @@ def real_history(tmp_path, *, code_change=False):
         prefix = f"https://api.github.com/repos/{REPO}/"
         assert url.startswith(prefix), "Untrusted GitHub target"
         tail = url[len(prefix):]
+        if tail.startswith("git/commits/"):
+            rev = tail[len("git/commits/"):]
+            commit = git(tmp_path, "rev-parse", "--verify", f"{rev}^{{commit}}")
+            return {"sha": commit, "tree": {"sha": git(tmp_path, "rev-parse", f"{rev}^{{tree}}")}}
+        if tail.startswith("git/trees/"):
+            tree_sha = tail[len("git/trees/"):].split("?", 1)[0]
+            entries = []
+            for line in git(tmp_path, "ls-tree", "-r", tree_sha).splitlines():
+                meta, path = line.split("\t", 1)
+                mode, kind, sha = meta.split()
+                entries.append({"path": path, "mode": mode, "type": kind, "sha": sha})
+            return {"sha": tree_sha, "truncated": False, "tree": entries}
         if tail.startswith("compare/"):
             left, right = tail[len("compare/"):].split("...", 1)
             try:
@@ -73,9 +85,8 @@ def real_history(tmp_path, *, code_change=False):
                 changed = []
                 for line in git(tmp_path, "diff", "--name-status", left, right).splitlines():
                     status, filename = line.split("\t", 1)
-                    changed.append({"filename": filename,
-                                    "status": {"A": "added", "M": "modified",
-                                               "D": "removed"}[status]})
+                    kind = {"A": "added", "M": "modified", "D": "removed", "T": "modified"}
+                    changed.append({"filename": filename, "status": kind[status[0]]})
                 return {
                     "status": "ahead" if git(tmp_path, "merge-base", left, right) == left
                               else "diverged",
@@ -155,3 +166,36 @@ def test_real_intervening_source_edit_invalidates_physical_evidence(tmp_path):
     assert not playbook.source_unchanged_since_test(source, later, lookup)
     assert not procurement.verified_scoped_record(receipt, later, lookup)
     assert not playbook.verified_procedure_record(procedure, source, lookup)
+
+
+def test_three_commit_signed_receipt_across_real_git_trees(tmp_path):
+    commit_a, commit_b, lookup, receipt, _ = real_history(tmp_path)
+    reviews = tmp_path / "docs/reviews"
+    reviews.mkdir(parents=True)
+    signoff = reviews / "100_page_procedure_trace.json"
+    signoff.write_text(json.dumps(receipt), encoding="utf-8")
+    git(tmp_path, "add", "docs/reviews/100_page_procedure_trace.json")
+    git(tmp_path, "commit", "-qm", "release signoff C referencing record at B")
+    commit_c = git(tmp_path, "rev-parse", "HEAD")
+    assert len({commit_a, commit_b, commit_c}) == 3
+    assert procurement.verified_scoped_record(
+        receipt, commit_c, lookup, require_git_blob=True,
+    )
+
+    git(tmp_path, "checkout", "-q", commit_c)
+    (tmp_path / "docs/records/release.json").write_bytes(b'{"receipts": []}\n')
+    git(tmp_path, "add", "docs/records/release.json")
+    git(tmp_path, "commit", "-qm", "tamper record at C")
+    commit_c_altered = git(tmp_path, "rev-parse", "HEAD")
+    assert not procurement.verified_scoped_record(
+        receipt, commit_c_altered, lookup, require_git_blob=True,
+    )
+
+    git(tmp_path, "checkout", "-q", commit_c)
+    git(tmp_path, "rm", "-q", "docs/records/release.json")
+    git(tmp_path, "commit", "-qm", "delete record at C")
+    commit_c_deleted = git(tmp_path, "rev-parse", "HEAD")
+    assert not procurement.verified_scoped_record(
+        receipt, commit_c_deleted, lookup, require_git_blob=True,
+    )
+
