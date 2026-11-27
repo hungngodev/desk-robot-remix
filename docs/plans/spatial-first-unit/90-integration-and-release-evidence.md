@@ -20,6 +20,27 @@ Own shared Mac startup and API registration, `controller.py` cross-feature integ
 - Verify the source-to-physical trace for robot/dock/station using guides [10](10-requirements-and-shopping.md), [40](40-voice-and-proactive-behavior.md), [60](60-object-recall-and-navigation.md) and [70](70-fit-power-manipulation-and-dock.md). Each acceptance row needs source revision, fixture or real assembly ID, operator evidence and status. Treat historical CI and physical evidence from different assemblies as separate records. Keep the PR in its required draft state until the active release policy allows promotion. [Current build guide](../../guides/build.md), [Verification ledger](../../records/verification.md)
 
 
+### Side-range capture and release evidence
+
+Use [capture_side_ranges.py](../../../code/scripts/capture_side_ranges.py) with
+the operator's private bearer supplied through its token environment variable.
+Disarm the wheels and manually position the near/far targets. The CLI reads
+only authenticated robot status; it collects 20 distinct conversions for each
+of the six left/right/rear near/far phases (120 rows total). A selected lens
+must report 30–1300 mm, with sample age plus request elapsed time at most
+350 ms. Repeated conversion timestamps do not count; reversed timestamps or a
+WROOM boot change abort the capture. Use an existing private output directory
+(no group or other permissions); the capture creates a new 0600 JSONL file
+and refuses to overwrite an existing file or a changed parent directory.
+
+Analyze the saved rows with
+[calibrate_side_ranges.py](../../../code/scripts/calibrate_side_ranges.py).
+The firmware and mount labels are operator-supplied provenance, not verified
+flash or assembly identities. The analyzer's threshold is a candidate only;
+neither capture nor analysis establishes independent physical sample provenance,
+physical acceptance, motion authority or charger authorization. Retain the
+raw evidence and operator measurements separately from host replay results.
+
 ### Independent procurement reviewer approval
 
 For each real procurement receipt, keep the measured record immutable and set
@@ -35,3 +56,10 @@ the comment author and digest to the exact scope, gate, source, artifact,
 device revision, test date and measurement; a name in a file alone cannot
 release purchasing. A synthetic fixture or an unrelated green workflow is
 not physical approval.
+
+Routine engineering verification may be posted as a PR review with event
+`COMMENT`, but that is not a procurement acceptance comment. The current
+verifier requires an exact `#issuecomment-<id>` URL and reads the corresponding
+`issues/comments` resource. If conversation comments cannot be created, record
+the approval-path blocker and retain purchasing HOLD; do not substitute a
+review URL or relax the receipt verifier.
