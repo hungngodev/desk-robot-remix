@@ -175,6 +175,39 @@ static void check_expectation_change_revokes_verification() {
   CHECK(!regs.verify(lock) && lock.faulted());
 }
 
+static void check_optional_work_cannot_restore_faulted_verification() {
+  for (const int failed_register : {0x00, 0x01, 0x0C, 0x0D}) {
+    Registers regs;
+    desk_robot::McpPortDirectionLock lock;
+    lock.expect_haptic_output();
+    regs.values[1] = 0xFB;
+    CHECK(regs.verify(lock) && lock.verified());
+    regs.fail_read = failed_register;
+    CHECK(!regs.verify(lock) && !lock.verified() && !lock.faulted());
+    CHECK(regs.writes == 0);
+    regs.fail_read = -1;
+    CHECK(regs.verify(lock) && lock.verified());
+  }
+
+  // Removing the optional device from the poll must not clear a mismatch
+  // that was already observed while the optional device was configured.
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  CHECK(regs.verify(lock) && lock.verified());
+  regs.values[0x0D] = 0x00;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+  CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
+  const auto writes = regs.writes;
+  regs.fail_read = 0x0D;
+  CHECK(!regs.verify(lock, false) && lock.faulted() && !lock.verified());
+  regs.fail_read = -1;
+  regs.values[0x0D] = 0x01;
+  CHECK(!regs.verify(lock, false) && lock.faulted() && !lock.verified());
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  CHECK(regs.writes == writes);
+}
+
 int main() {
   try {
     check_every_direction_bit();
@@ -182,6 +215,7 @@ int main() {
     check_reset_and_transport_faults();
     check_direction_drift_after_verified_reset();
     check_expectation_change_revokes_verification();
+    check_optional_work_cannot_restore_faulted_verification();
     std::cout << "PASS MCP23017 direction lock and verified reset\n";
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << error.what() << '\n';
