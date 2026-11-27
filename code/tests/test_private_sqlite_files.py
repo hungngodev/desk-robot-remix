@@ -1,6 +1,7 @@
 """The SQLite filesystem boundary rejects unsafe entries before database open."""
 
 import os
+import stat
 
 import pytest
 from desk_robot.private_files import validate_private_sqlite_files
@@ -36,18 +37,23 @@ def test_private_sqlite_rejects_unsafe_entries(tmp_path, suffix, kind):
 
 
 @pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
-def test_private_sqlite_rejects_readable_sidecar(tmp_path, suffix):
+@pytest.mark.parametrize("mode", [0o601, 0o602, 0o604, 0o610, 0o620, 0o640])
+def test_private_sqlite_rejects_nonprivate_sidecar(tmp_path, suffix, mode):
     path = tmp_path / "pet_a.sqlite3"
     sidecar = tmp_path / (path.name + suffix)
     sidecar.touch()
-    sidecar.chmod(0o644)
+    sidecar.chmod(mode)
     with pytest.raises(PermissionError, match="sidecar must be owner-only"):
         validate_private_sqlite_files(path)
+    assert stat.S_IMODE(sidecar.stat().st_mode) == mode
 
 
-def test_private_sqlite_rejects_foreign_owner(tmp_path, monkeypatch):
+@pytest.mark.parametrize("suffix", ["", "-journal", "-wal", "-shm"])
+def test_private_sqlite_rejects_foreign_owner(tmp_path, monkeypatch, suffix):
     path = tmp_path / "pet_a.sqlite3"
-    path.touch(mode=0o600)
+    entry = tmp_path / (path.name + suffix)
+    entry.touch(mode=0o600)
+    validate_private_sqlite_files(path)
     uid = os.geteuid()
     monkeypatch.setattr(os, "geteuid", lambda: uid + 1)
     with pytest.raises(PermissionError, match="owner-owned"):
