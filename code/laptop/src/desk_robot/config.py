@@ -74,7 +74,7 @@ class RobotConfig(BaseModel):
     motion_enabled: StrictBool = False
     # Set only after verifying installed driver, wiring, and flashed WROOM.
     motor_backend: Literal["stepper_28byj48", "dc_pwm_guarded"] | None = None
-    exploration_qualified: StrictBool = False  # Explicit real swept-path trial gate; not a simulation claim.
+    exploration_qualified: StrictBool = False  # Real swept-path trial gate, not sim claim.
     # Optional physical sensor-triggered interactions. None means NOT calibrated.
     nose_twist_threshold_counts: int | None = Field(default=None, strict=True, ge=80, le=1800)
     squeeze_raw_threshold: int | None = Field(default=None, strict=True, ge=100, le=30000)
@@ -92,13 +92,13 @@ class RobotConfig(BaseModel):
     bmp280_interactions_qualified: StrictBool = False
     bmp280_pressure_change_pa: int | None = Field(default=None, strict=True, ge=100, le=5000)
     gesture_interactions_qualified: StrictBool = False  # measured hardware gate
-    handling_interactions_qualified: StrictBool = False  # measured MPU6050 mount and stationary baseline
+    handling_interactions_qualified: StrictBool = False  # Measured MPU6050 mount & baseline.
     # Defaults are provisional; this separate attestation requires mounted-unit trials.
     handling_thresholds_calibrated: StrictBool = False
     handling_tilt_threshold_deg: int = Field(default=38, strict=True, ge=25, le=75)
     handling_shake_delta_mg: int = Field(default=550, strict=True, ge=300, le=1400)
     side_near_threshold_mm: int | None = Field(default=None, strict=True, ge=35, le=1000)
-    side_interactions_qualified: StrictBool = False  # measured 3-direction geometry, no motor permit
+    side_interactions_qualified: StrictBool = False  # Measured 3-dir geometry, no motor permit.
     calibration: Path | None = None
     dock_calibration: Path | None = None
     dock_motion_qualified: StrictBool = False
@@ -168,10 +168,11 @@ class Settings(BaseModel):
     speech_bridge_token_env: CredentialEnvName = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
-    voice_memory_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
-    voice_transcript_memory_enabled: StrictBool = False  # Separate consent to retain model-estimated spoken words as text.
-    voice_vision_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
-    pet_autostart_enabled: StrictBool = False  # Explicit hardware opt-in for idle camera and sensor observation.
+    # Explicit opt-ins for Xiaozhi memory, model-estimated transcripts, vision, and idle autostart.
+    voice_memory_tools_enabled: StrictBool = False
+    voice_transcript_memory_enabled: StrictBool = False
+    voice_vision_tools_enabled: StrictBool = False
+    pet_autostart_enabled: StrictBool = False
     pet_activity_min_interval_seconds: float = Field(default=30.0, strict=True, ge=5.0, le=600.0)
     pet_activity_max_interval_seconds: float = Field(default=90.0, strict=True, ge=5.0, le=600.0)
     # Optional daily local-time window; fixed for the lifetime of this config.
@@ -187,7 +188,7 @@ class Settings(BaseModel):
     # Optional actual ADC endpoints for one physical probe, never fake defaults.
     room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
-    fleet_text_auto_fanout_enabled: StrictBool = True  # Keep existing broadcast behavior unless selective-only chosen.
+    fleet_text_auto_fanout_enabled: StrictBool = True  # Keep broadcast unless selective-only.
     vision_weights_sha256: str | None = None
     max_job_seconds: float = Field(default=45, strict=True, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
@@ -328,7 +329,11 @@ class Settings(BaseModel):
                 listener = listener_ref()
                 if listener is not None:
                     listener(self)
-        elif name == "voice_vision_tools_enabled" and self.voice_vision_tools_enabled and not was_granted:
+        elif (
+            name == "voice_vision_tools_enabled"
+            and self.voice_vision_tools_enabled
+            and not was_granted
+        ):
             # Sent Opus text has a Mac monotonic timestamp. A late HTTP
             # receipt from the revoked grant cannot enter this new context.
             self._camera_consent_started_at = time.monotonic()

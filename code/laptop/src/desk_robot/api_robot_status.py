@@ -77,7 +77,9 @@ def _status_health(settings: Settings, request: Request, head: str, body: str) -
     }
 
 
-def _require_current_voice_tool(request: Request, robot_id: str, owner, current_tool_context) -> None:
+def _require_current_voice_tool(
+    request: Request, robot_id: str, owner, current_tool_context,
+) -> None:
     """Fence canonical voice tool reads without restricting dashboard polling."""
     if request.headers.get("x-desk-robot-tool-receipt") == "1":
         current_tool_context(
@@ -199,8 +201,10 @@ def _register_inventory_route(app, settings, authorize) -> None:
         }
 
 
-def _register_status_route(app, settings, authorize, coordinator,
-                           requested_tool_context, remember_tool_context, current_tool_context) -> None:
+def _register_status_route(
+    app, settings, authorize, coordinator,
+    requested_tool_context, remember_tool_context, current_tool_context,
+) -> None:
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
     async def status(robot_id: str, request: Request):
         require_configured_robot(settings, robot_id)
@@ -236,8 +240,10 @@ def _register_status_route(app, settings, authorize, coordinator,
         return {**data, "health": health}
 
 
-def _register_aux_route(app, settings, authorize, coordinator,
-                        requested_tool_context, remember_tool_context, current_tool_context) -> None:
+def _register_aux_route(
+    app, settings, authorize, coordinator,
+    requested_tool_context, remember_tool_context, current_tool_context,
+) -> None:
     cursor = _AuxReceiptCursor()
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])

@@ -1535,7 +1535,9 @@ class Conversation:
                         # Simulated and alternate speakers may yield during say.
                         # Never report a completed proactive remark after opt-out.
                         if permission_check is not None and not permission_check():
-                            raise RuntimeError("Proactive speech permission revoked during transmission")
+                            raise RuntimeError(
+                                "Proactive speech permission revoked during transmission"
+                            )
                     except BaseException:
                         # A failed WAV/Opus transfer, not just cancellation,
                         # can leave already queued audio in the XIAO decoder.

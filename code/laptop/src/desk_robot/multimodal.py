@@ -502,7 +502,8 @@ class CameraFrameHub:
         motion = change_fraction(prev, gray) if prev is not None else 0.0
         self.previous_gray[robot_id] = gray
         self.changed_streak[robot_id] = (
-            min(3, self.changed_streak[robot_id] + 1) if motion >= _STREAM_VISUAL_CHANGE_MIN_FRACTION
+            min(3, self.changed_streak[robot_id] + 1)
+            if motion >= _STREAM_VISUAL_CHANGE_MIN_FRACTION
             else 0
         )
         self.last_capture[robot_id] = received_at

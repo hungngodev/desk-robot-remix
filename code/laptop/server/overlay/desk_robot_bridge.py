@@ -1210,7 +1210,9 @@ def create_app():
                         or coordinated_speech_preempted()
                         or request_token != lease_token
                         or generation != interrupt_generation.get(device, 0)):
-                    raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
+                    raise RuntimeError(
+                        "Coordinated session stopped, interrupted or robot disconnected"
+                    )
                 if lease_passive:
                     await transmit(connection, text, frames, passive=True)
                 else:

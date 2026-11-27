@@ -86,9 +86,18 @@ async def test_nfc_qualified_gate_excludes_unqualified_nfc_from_context():
         robot_id: SimpleNamespace(
             aux_status=AsyncMock(return_value={
                 "robot_id": robot_id,
-                "force": {"adc": [100, 100], "valid": False, "calibrated": False, "jaw_seq": 1, "boot_id": 1},
-                "proximity": {"raw": 10, "valid": False, "gesture": 0, "gesture_events": 0, "boot_id": 1, "physically_qualified": False},
-                "climate": {"temp_centi": 2300, "rh_centi": 4500, "valid": True, "seq": 10, "age_ms": 10},
+                "force": {
+                    "adc": [100, 100], "valid": False, "calibrated": False,
+                    "jaw_seq": 1, "boot_id": 1,
+                },
+                "proximity": {
+                    "raw": 10, "valid": False, "gesture": 0,
+                    "gesture_events": 0, "boot_id": 1, "physically_qualified": False,
+                },
+                "climate": {
+                    "temp_centi": 2300, "rh_centi": 4500, "valid": True,
+                    "seq": 10, "age_ms": 10,
+                },
                 "nfc": {"v": True, "e": 5, "s": 2, "t": 0xAABB},
                 "power": {
                     "fuel_valid": True, "fuel_seq": 10, "fuel_age_ms": 10,
@@ -285,12 +294,21 @@ def test_memory_upgrade_migrates_old_episode_mutations_into_replay_fence(tmp_pat
         " witnessed INTEGER NOT NULL, kind TEXT NOT NULL, summary TEXT NOT NULL,"
         " observed_at REAL NOT NULL, confidence REAL NOT NULL, relay_token TEXT)"
     )
-    conn.execute("CREATE TABLE memory_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1), robot_id TEXT NOT NULL)")
+    conn.execute(
+        "CREATE TABLE memory_identity("
+        "singleton INTEGER PRIMARY KEY CHECK(singleton=1), robot_id TEXT NOT NULL)"
+    )
     conn.execute("INSERT INTO memory_identity VALUES (1, 'robot-01')")
     conn.execute("CREATE TABLE deleted_episode_ids(event_id TEXT PRIMARY KEY)")
-    conn.execute("CREATE TABLE deletion_fence_guard(singleton INTEGER PRIMARY KEY CHECK(singleton=1), writes_sealed INTEGER NOT NULL)")
+    conn.execute(
+        "CREATE TABLE deletion_fence_guard("
+        "singleton INTEGER PRIMARY KEY CHECK(singleton=1), writes_sealed INTEGER NOT NULL)"
+    )
     conn.execute("INSERT INTO deletion_fence_guard VALUES (1, 0)")
-    conn.execute("CREATE TABLE episode_mutations(event_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)")
+    conn.execute(
+        "CREATE TABLE episode_mutations("
+        "event_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)"
+    )
     conn.execute("INSERT INTO episode_mutations VALUES ('old-evicted-corr-1', 2)")
     conn.commit()
     conn.close()
@@ -350,7 +368,10 @@ async def test_camera_opt_out_cancels_inflight_look_and_prevents_stale_reply():
     orch = MultimodalOrchestrator(settings, heads, BlockingScene(), asyncio.Lock())
     settings.register_camera_revocation(orch._camera_revoked)
     try:
-        orch.hub.offer(settings.robots[0].id, _tiny_jpeg(), received_at=time.monotonic(), source="proactive")
+        orch.hub.offer(
+            settings.robots[0].id, _tiny_jpeg(),
+            received_at=time.monotonic(), source="proactive",
+        )
         task = asyncio.create_task(orch.look(settings.robots[0].id, "What is on the desk?"))
         await asyncio.wait_for(entered.wait(), timeout=1.0)
         settings.voice_vision_tools_enabled = False

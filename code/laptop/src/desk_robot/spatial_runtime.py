@@ -244,7 +244,8 @@ class SpatialRuntime:
         if actual != (expected_cell, expected_heading):
             self.invalidate_robot(robot_id, reason="pose_odometry_divergence")
             raise PoseError(
-                f"Observed pose {actual} diverges from route state {(expected_cell, expected_heading)}"
+                f"Observed pose {actual} diverges from route state "
+                f"{(expected_cell, expected_heading)}"
             )
         return actual
 
@@ -285,7 +286,7 @@ class SpatialRuntime:
         event_id: str | None = None,
         spatial_evidence: SpatialEvidence | None = None,
     ) -> bool:
-        """Record volatile object observation and optionally attach to existing episodic SQLite row."""
+        """Record volatile object observation and optionally attach to episodic SQLite row."""
         state = self.states[robot_id]
         if evidence.robot_id != robot_id:
             raise ValueError("Object evidence robot identity mismatch")
@@ -400,7 +401,10 @@ class SpatialRuntime:
                 now_us=current_us,
             )
             if chosen_goal is None:
-                if target_res.status == "current_sighting" and target_res.confirmed_floor_mm is not None:
+                if (
+                    target_res.status == "current_sighting"
+                    and target_res.confirmed_floor_mm is not None
+                ):
                     cx, cy = target_res.confirmed_floor_mm
                     chosen_goal = (cx // CELL_MM, cy // CELL_MM)
                 elif state.viewpoints:

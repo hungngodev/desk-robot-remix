@@ -708,7 +708,9 @@ class Runtime:
         failures.extend(result for result in outcomes
                         if isinstance(result, BaseException))
         if failures:
-            raise RuntimeError("Voice monitor lost; physical speaker stop unconfirmed") from failures[0]
+            raise RuntimeError(
+                "Voice monitor lost; physical speaker stop unconfirmed"
+            ) from failures[0]
         self._confirm_voice_stop(stop_attempt)
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:

@@ -1796,7 +1796,9 @@ def test_three_commit_release_receipt_flow_a_to_b_to_c():
         })
     raw = record_bytes(records)
     digest = hashlib.sha256(raw).hexdigest()
-    blob_b = hashlib.sha1(f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False).hexdigest()
+    blob_b = hashlib.sha1(
+        f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False,
+    ).hexdigest()
     for _, _, row in release.required_receipts(evidence):
         row["artifact_sha256"] = digest
 
@@ -1823,7 +1825,11 @@ def test_three_commit_release_receipt_flow_a_to_b_to_c():
                 }]
                 return {"sha": tree_c, "truncated": False, "tree": entries}
             if url.endswith(f"/compare/{commit_a}...{commit_c}"):
-                changed = "code/laptop/src/desk_robot/controller.py" if source_changed else "docs/records/release-evidence.json"
+                changed = (
+                    "code/laptop/src/desk_robot/controller.py"
+                    if source_changed
+                    else "docs/records/release-evidence.json"
+                )
                 return {
                     "status": "ahead", "ahead_by": 2, "total_commits": 2,
                     "commits": [{"sha": commit_b}, {"sha": commit_c}],
@@ -1835,7 +1841,10 @@ def test_three_commit_release_receipt_flow_a_to_b_to_c():
                     "status": "ahead", "ahead_by": 1, "total_commits": 1,
                     "commits": [{"sha": commit_c}],
                     "merge_base_commit": {"sha": commit_b},
-                    "files": [{"status": "modified", "filename": "docs/reviews/100_page_procedure_trace.json"}],
+                    "files": [{
+                        "status": "modified",
+                        "filename": "docs/reviews/100_page_procedure_trace.json",
+                    }],
                 }
             if url.endswith("/issues/comments/42"):
                 return {

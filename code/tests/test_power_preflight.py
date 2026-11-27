@@ -139,7 +139,10 @@ def test_exact_decimal_sizing_boundary_is_accepted_without_float_error():
 def test_continuous_cell_input_is_reported_separately_from_peak():
     report = tool(3, 1.8, cell_low_v=3.0, measured_boost_efficiency=0.85)
     assert report["minimum_continuous_cell_input_a"] == 4.589
-    assert report["minimum_rated_cell_and_boost_input_a"] > report["minimum_continuous_cell_input_a"]
+    assert (
+        report["minimum_rated_cell_and_boost_input_a"]
+        > report["minimum_continuous_cell_input_a"]
+    )
     assert report["thermal_and_brownout_verified"] is False
 
 
@@ -238,8 +241,14 @@ def test_low_cell_voltage_and_efficiency_cannot_improve_input_current_requiremen
     low_cell = tool(2, 1.2, cell_low_v=3.0, measured_boost_efficiency=0.9)
     low_efficiency = tool(2, 1.2, cell_low_v=3.5, measured_boost_efficiency=0.7)
     for degraded in (low_cell, low_efficiency):
-        assert degraded["minimum_rated_cell_and_boost_input_a"] > nominal["minimum_rated_cell_and_boost_input_a"]
-        assert degraded["minimum_continuous_cell_input_a"] > nominal["minimum_continuous_cell_input_a"]
+        assert (
+            degraded["minimum_rated_cell_and_boost_input_a"]
+            > nominal["minimum_rated_cell_and_boost_input_a"]
+        )
+        assert (
+            degraded["minimum_continuous_cell_input_a"]
+            > nominal["minimum_continuous_cell_input_a"]
+        )
         assert degraded["candidate_physically_qualified"] is False
         assert degraded["charger_and_load_sharing_verified"] is False
 
@@ -312,7 +321,10 @@ def test_larger_safety_margin_cannot_turn_undersized_supply_into_qualified_candi
     assert smaller["candidate_electrically_sufficient_on_paper"] is True
     assert larger["candidate_electrically_sufficient_on_paper"] is False
     assert larger["minimum_rated_5v_output_a"] > smaller["minimum_rated_5v_output_a"]
-    assert larger["minimum_rated_cell_and_boost_input_a"] > smaller["minimum_rated_cell_and_boost_input_a"]
+    assert (
+        larger["minimum_rated_cell_and_boost_input_a"]
+        > smaller["minimum_rated_cell_and_boost_input_a"]
+    )
     for report in (smaller, larger):
         assert report["candidate_physically_qualified"] is False
         assert report["charger_and_load_sharing_verified"] is False
@@ -363,7 +375,10 @@ def test_increased_sustained_load_cannot_pass_unchanged_continuous_input_rating(
     assert lower["candidate_electrically_sufficient_on_paper"] is True
     assert higher["candidate_electrically_sufficient_on_paper"] is False
     assert higher["minimum_continuous_cell_input_a"] > lower["minimum_continuous_cell_input_a"]
-    assert higher["minimum_rated_cell_and_boost_input_a"] == lower["minimum_rated_cell_and_boost_input_a"]
+    assert (
+        higher["minimum_rated_cell_and_boost_input_a"]
+        == lower["minimum_rated_cell_and_boost_input_a"]
+    )
     for report in (lower, higher):
         assert report["candidate_physically_qualified"] is False
         assert report["charger_and_load_sharing_verified"] is False
@@ -380,7 +395,10 @@ def test_lower_cell_voltage_and_efficiency_cannot_improve_power_qualification():
                  measured_boost_efficiency=0.75, **ratings)
     assert nominal["candidate_electrically_sufficient_on_paper"] is True
     assert worst["candidate_electrically_sufficient_on_paper"] is False
-    assert worst["minimum_rated_cell_and_boost_input_a"] > nominal["minimum_rated_cell_and_boost_input_a"]
+    assert (
+        worst["minimum_rated_cell_and_boost_input_a"]
+        > nominal["minimum_rated_cell_and_boost_input_a"]
+    )
     assert worst["minimum_continuous_cell_input_a"] > nominal["minimum_continuous_cell_input_a"]
     assert worst["minimum_rated_5v_output_a"] == nominal["minimum_rated_5v_output_a"]
     for report in (nominal, worst):
@@ -474,7 +492,10 @@ def test_docked_electronics_budget_must_not_inherit_undocked_motor_peak():
     docked_electronics = tool(0.8, 0.5)
     assert mobile["minimum_rated_5v_output_a"] == 3.9
     assert docked_electronics["minimum_rated_5v_output_a"] == 1.04
-    assert mobile["minimum_rated_cell_and_boost_input_a"] > docked_electronics["minimum_rated_cell_and_boost_input_a"]
+    assert (
+        mobile["minimum_rated_cell_and_boost_input_a"]
+        > docked_electronics["minimum_rated_cell_and_boost_input_a"]
+    )
     for report in (mobile, docked_electronics):
         assert report["charger_and_load_sharing_verified"] is False
         assert report["candidate_physically_qualified"] is False

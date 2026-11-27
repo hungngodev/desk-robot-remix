@@ -156,7 +156,9 @@ def summarize(rows, robot_id, *, run_manifest=None, csv_sha256=None):
                 isinstance(r.get(k), str) and r[k].strip()
                 for k in ("object_description", "date", "firmware", "calibration")
             ):
-                raise ValueError("Record real object, mass, date and configuration for every attempt")
+                raise ValueError(
+                    "Record real object, mass, date and configuration for every attempt"
+                )
             for k in ("object_description", "firmware", "calibration", "assembly_id"):
                 val = r.get(k)
                 if isinstance(val, str) and _is_placeholder_label(val):
@@ -178,7 +180,9 @@ def summarize(rows, robot_id, *, run_manifest=None, csv_sha256=None):
             if accepted_setup is None:
                 accepted_setup = setup
             elif setup != accepted_setup:
-                raise ValueError("A5 trials must use the same firmware and calibration and physical assembly")
+                raise ValueError(
+                    "A5 trials must use the same firmware and calibration and physical assembly"
+                )
             # Each attempt, including an unsuccessful one, needs an actual
             # observation of assistance, placement and initial orientation.
             # Otherwise an unmeasured attempt could silently fill the 10-trial

@@ -213,8 +213,11 @@ async def detect_object_frame(
                 or verified_sha256.lower() != expected_sha256):
             return reject("detector_provenance_unverified")
         verified_sha256 = verified_sha256.lower()
-        if (model_asset_identity is not None
-                and getattr(detector, "runtime_asset_identity", None) not in (None, model_asset_identity)):
+        if (
+            model_asset_identity is not None
+            and getattr(detector, "runtime_asset_identity", None)
+            not in (None, model_asset_identity)
+        ):
             return reject("detector_provenance_unverified")
     if query.cancelled:
         return reject("cancelled")

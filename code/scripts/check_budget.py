@@ -132,7 +132,8 @@ def budget(data: object, shipping: object = None, tax: object = None) -> dict[st
         "note": (
             "Missing prices and fees remain unknown; known landed subtotal includes "
             "only supplied costs. "
-            "Allowances are targets, not verified shopping prices. Confirm mechanical fit separately."
+            "Allowances are targets, not verified shopping prices. "
+            "Confirm mechanical fit separately.",
         ),
     }
 

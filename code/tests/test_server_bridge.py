@@ -196,7 +196,8 @@ async def test_authenticated_realtime_voice_readiness_is_live_not_invented(bridg
         assert voice["reported_listen_mode"] == "realtime"
         assert not voice["device_aec_measured"]
         assert not voice["audible_flush_measured"]
-        assert (await client.get("/voice-readiness?device_id=unknown", headers=headers)).status == 400
+        resp = await client.get("/voice-readiness?device_id=unknown", headers=headers)
+        assert resp.status == 400
         bridge.unregister(connection)
         missing = await (await client.get(path, headers=headers)).json()
         assert not missing["connected"]
@@ -2936,7 +2937,9 @@ def test_native_voice_refuses_missing_or_malformed_operator_mapping(
 
     monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps({"robot-01": voice}))
     config = {"selected_module": {"TTS": "CustomTTS"},
-              "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart", "model": "kokoro"}}}}
+              "TTS": {"CustomTTS": {
+                  "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
+              }}}
     owner = SimpleNamespace(device_id="mac-01", config=config)
     bridge.register(owner)
     with pytest.raises(RuntimeError, match="validated assigned voice"):
@@ -3014,7 +3017,9 @@ def test_native_voice_map_validates_every_provisioned_pet(bridge, monkeypatch, f
     monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps(voices))
     common = {
         "selected_module": {"TTS": "CustomTTS"},
-        "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart", "model": "kokoro"}}},
+        "TTS": {"CustomTTS": {
+            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
+        }},
     }
     heads = [SimpleNamespace(device_id=device, config=common)
              for device in devices.values()]
@@ -3252,7 +3257,10 @@ def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp
         (valid.replace("enabled: true", "enabled: 'true'", 1), "token authentication"),
         (valid.replace("allowed_devices: []", "allowed_devices: [mac-01]", 1), "whitelist"),
         (valid.replace("allowed_devices: []", "allowed_devices: null", 1), "whitelist"),
-        (valid.replace("read_config_from_api: false", "read_config_from_api: true", 1), "local server"),
+        (
+            valid.replace("read_config_from_api: false", "read_config_from_api: true", 1),
+            "local server",
+        ),
         (valid.replace("auth_key: " + ("x" * 40), "auth_key: LOCAL_RANDOM_SECRET", 1), "auth_key"),
         (valid.replace("auth_key: " + ("x" * 40), "auth_key: short", 1), "auth_key"),
         (valid.replace("auth_key: " + ("x" * 40), "auth_key: " + "x" * 31, 1), "auth_key"),
@@ -4351,7 +4359,9 @@ async def test_alternate_coordinator_port_routes_tools_and_native_omni_without_8
         pkg.__path__ = []
         reg = types.ModuleType("plugins_func.register")
         reg.Action = SimpleNamespace(NONE="none", REQLLM="reqllm")
-        reg.ActionResponse = lambda action, result=None: SimpleNamespace(action=action, result=result)
+        reg.ActionResponse = (
+            lambda action, result=None: SimpleNamespace(action=action, result=result)
+        )
         reg.ToolType = SimpleNamespace(IOT_CTL="iot_ctl")
         reg.register_function = lambda *_a, **_kw: (lambda fn: fn)
         monkeypatch.setitem(sys.modules, "plugins_func", pkg)

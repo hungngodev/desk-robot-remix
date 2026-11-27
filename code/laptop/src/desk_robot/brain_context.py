@@ -349,7 +349,10 @@ _CUE_PRIORITIES = {
 
 def _timeline_window(
     timeline: Sequence[Mapping[str, object] | TimelineEntry],
-) -> tuple[Sequence[Mapping[str, object] | TimelineEntry], list[Mapping[str, object] | TimelineEntry]]:
+) -> tuple[
+    Sequence[Mapping[str, object] | TimelineEntry],
+    list[Mapping[str, object] | TimelineEntry],
+]:
     # A burst of camera receipts must not erase older tool or touch evidence
     # before modality-aware deduplication. Bound the scan for prompt latency,
     # reserving fresh authenticated safety evidence before suffix windowing.

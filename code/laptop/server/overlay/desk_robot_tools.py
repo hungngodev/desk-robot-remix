@@ -262,8 +262,9 @@ def _valid_route_receipt(route: str, result: dict) -> bool:
             result, "accepted", "queued", "running", "physical_grasp_verified",
         ) and _valid_optional_str(result, "status", "state")
     if route == "status":
-        return _valid_optional_bool(result, "armed", "stopped", "connected") and _valid_optional_str(
-            result, "backend", "state", "status",
+        return (
+            _valid_optional_bool(result, "armed", "stopped", "connected")
+            and _valid_optional_str(result, "backend", "state", "status")
         )
     if route == "power-status":
         return all(

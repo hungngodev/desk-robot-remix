@@ -917,7 +917,10 @@ def test_two_seller_duties_discounts_and_independent_freight_exact_cents():
     assert out["remaining_under_cap_cents"] == 2386
 
     for missing_field in ("shipping_usd", "tax_usd", "duties_usd", "discount_usd"):
-        bad = {**ev, "seller_charges": [dict(ev["seller_charges"][0]), dict(ev["seller_charges"][1])]}
+        bad = {
+            **ev,
+            "seller_charges": [dict(ev["seller_charges"][0]), dict(ev["seller_charges"][1])],
+        }
         del bad["seller_charges"][0][missing_field]
         res = mod.account_landed_cost(
             bad, REQUIRED, CATEGORIES, expected_scope="evaluation",

@@ -191,7 +191,8 @@ def screen(measurement: object) -> dict:
                 if not math.isclose(masses[role][0], base_mass, rel_tol=1e-7, abs_tol=0.0):
                     raise ValueError(
                         f"Fixed assembly role '{role}' mass changed between poses "
-                        f"({base_mass}g in '{baseline_pose_name}' vs {masses[role][0]}g in '{case['name']}'); "
+                        f"({base_mass}g in '{baseline_pose_name}' "
+                        f"vs {masses[role][0]}g in '{case['name']}'); "
                         "stability screen requires consistent assembly mass evidence"
                     )
             for role, first_center in baseline_fixed_centers.items():

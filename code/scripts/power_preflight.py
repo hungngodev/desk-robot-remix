@@ -761,7 +761,9 @@ def main() -> None:
         if args.dock_charger_variant is None:
             parser.error("Dock mode requires the actual BQ24074 or BQ24075 charger variant")
         if any(v is None for v in dock_inputs):
-            parser.error("Dock mode requires idle current, charge current, SYS voltage and efficiency")
+            parser.error(
+                "Dock mode requires idle current, charge current, SYS voltage and efficiency"
+            )
         if (args.dock_regulator_topology is None
                 or args.dock_regulator_min_input_v is None
                 or args.dock_regulator_max_input_v is None):

@@ -463,7 +463,10 @@ def main() -> None:
             if _degraded_status(result, args.robot):
                 print(json.dumps(result, indent=2))
                 p.exit(1)
-        p.exit(1, f"Coordinator returned HTTP {exc.response.status_code}; completion unconfirmed.\n")
+        p.exit(
+            1,
+            f"Coordinator returned HTTP {exc.response.status_code}; completion unconfirmed.\n",
+        )
     except httpx.InvalidURL:
         p.exit(1, "Invalid coordinator URL\n")
     except httpx.TimeoutException:

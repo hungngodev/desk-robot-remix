@@ -356,7 +356,9 @@ def screen_floor_mounts(records: object) -> dict:
     checks = {}
     for record in records:
         if not isinstance(record, dict) or set(record) != set(floor_mount_template()[0]):
-            raise ValueError("Each floor mount requires channel, lens_height_mm, tilt_deg, min_mm, max_mm")
+            raise ValueError(
+                "Each floor mount requires channel, lens_height_mm, tilt_deg, min_mm, max_mm"
+            )
         channel = record["channel"]
         if type(channel) is not int or channel not in expected:
             raise ValueError(f"Invalid downward floor sensor channel: {channel!r}")

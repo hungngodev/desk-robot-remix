@@ -192,8 +192,10 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
     proposed = (low + high) // 2
     # A strict 95% measured classification check for each independent side.
     if any(
-        sum(value <= proposed for _, value in samples[side, "near"]) / len(samples[side, "near"]) < .95
-        or sum(value >= proposed + 60 for _, value in samples[side, "far"]) / len(samples[side, "far"]) < .95
+        sum(value <= proposed for _, value in samples[side, "near"])
+        / len(samples[side, "near"]) < .95
+        or sum(value >= proposed + 60 for _, value in samples[side, "far"])
+        / len(samples[side, "far"]) < .95
         for side in SIDE
     ):
         raise ValueError("Unable to meet 95% per-side near/far separation")
@@ -207,7 +209,10 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
         "independent_sample_provenance_verified": False,
         "human_review_required": True,
         "no_motion_authority": True,
-        "note": "Record IDs are operator supplied; inspect real oscilloscope/serial timestamps before opting in.",
+        "note": (
+            "Record IDs are operator supplied; inspect real oscilloscope/serial "
+            "timestamps before opting in."
+        ),
     }
 
 

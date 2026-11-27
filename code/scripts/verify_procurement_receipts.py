@@ -655,7 +655,9 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
             # Git object identity binds the exact decoded bytes to the regular tree entry.
             blob_header = f"blob {len(raw)}\0".encode("ascii")
             blob_sha = hashlib.sha1(blob_header + raw, usedforsecurity=False).hexdigest()
-            if not verified_regular_record_path(url, record_sha, lookup, expected_blob_sha=blob_sha):
+            if not verified_regular_record_path(
+                url, record_sha, lookup, expected_blob_sha=blob_sha,
+            ):
                 return False
             if record_sha != sha:
                 if (not evidence_digest_matches(raw, digest)

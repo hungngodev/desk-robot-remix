@@ -99,7 +99,9 @@ class Calibration(BaseModel):
         for field_name in ("robot_id", "head_device_id"):
             value = getattr(self, field_name)
             if value is not None and value.strip() != value:
-                raise ValueError(f"Calibration {field_name} must not have leading or trailing whitespace")
+                raise ValueError(
+                    f"Calibration {field_name} must not have leading or trailing whitespace"
+                )
         if not self.within(self.grip_ground_mm):
             raise ValueError("Gripping point outside work area")
         self.matrix()  # reject degenerate or inaccurate point pairs immediately

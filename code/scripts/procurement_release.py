@@ -293,7 +293,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         per = _count(part.get("per_robot"), f"{ident}.per_robot")
         owned = _count(part.get("reported_owned_total"), f"{ident}.reported_owned_total")
         estimated = _count(part.get("estimated_owned_total", 0), f"{ident}.estimated_owned_total")
-        ordered = _count(part.get("ordered_unreceived_total", 0), f"{ident}.ordered_unreceived_total")
+        ordered = _count(
+            part.get("ordered_unreceived_total", 0),
+            f"{ident}.ordered_unreceived_total",
+        )
         needed = _count(fleet * per, f"{ident}.fleet_total")
         # Reported ownership is not physical stock verification. An ordered
         # head is explicitly NOT counted as a delivered/accepted board.
@@ -676,7 +679,9 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             valid = (_receipt(declared.get("alternative_or_parent_receipt"))
                      and isinstance(declared.get("replacement_sku"), str)
                      and bool(declared["replacement_sku"].strip()))
-        approved_decisions.append({"id": ident, "name": linked_plan.get(ident, {}).get("name", ident),
+        approved_decisions.append({
+            "id": ident,
+            "name": linked_plan.get(ident, {}).get("name", ident),
                                    "parent_role": parent, "fleet_quantity": units,
                                    "reviewed": valid,
                                    "disposition": declared.get("disposition")
@@ -1122,18 +1127,25 @@ PILOT_SAMPLE_PRODUCTS = {
         2, 2.48),  # USD exact-SKU quote 2026-11-18; NC/COM and fit untested.
     "speaker": ("Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
                 "Challenge Electronics", "CS20-02P110-04-1X",
-                "https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
+                "https://www.digikey.com/en/products/detail/"
+                "challenge-electronics/CS20-02P110-04-1X/30407069", 1, 3.24),
     "sensor_3v3": ("Dedicated regulated 3.3V expansion sensor supply",
-                   "Pololu", "2873", "https://www.pololu.com/product/2873", 1, 5.95),  # Single unit; $5.47 applies at quantity >= 5.
+                   "Pololu", "2873", "https://www.pololu.com/product/2873",
+                   1, 5.95),  # Single unit; $5.47 at >= 5.
     "rgb": ("Single diffused WS2812B RGB pixel", "SparkFun", "BOB-13282",
             "https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html", 1, 1.50),
     "dock_ir_receivers": (
-        "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles",
-        "Vishay", "TSOP38438", "https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSOP38438/4073478", 2, 0.79),
+        "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, "
+        "mounted behind separate directional baffles",
+        "Vishay", "TSOP38438",
+        "https://www.digikey.com/en/products/detail/"
+        "vishay-semiconductor-opto-division/TSOP38438/4073478", 2, 0.79),
     "dock_ir_emitter_channels": (
-        "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
+        "Two independently aimed 940 nm 38 kHz infrared LED emitter channels "
+        "with rated transistor driver and current limiting per dock",
         "Vishay", "TSAL6200",
-        "https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSAL6200/1681339", 2, 0.35),
+        "https://www.digikey.com/en/products/detail/"
+        "vishay-semiconductor-opto-division/TSAL6200/1681339", 2, 0.35),
 }
 
 # Keep historical pilot quote rows visible, but do not present uncertain
@@ -1344,7 +1356,11 @@ def pilot_supplier_cart(report: dict) -> dict:
     pilot = first_robot_pilot_samples(report)
     # Expose a real repository owner and test for each proposed sample. This
     # is traceability, not proof the test ran or the exact PCB works.
-    ownership = json.loads((ROOT / "docs/hardware/full-63-role-source-ownership.json").read_text(encoding="utf-8"))
+    ownership = json.loads(
+        (ROOT / "docs/hardware/full-63-role-source-ownership.json").read_text(
+            encoding="utf-8",
+        )
+    )
     pet_owners = ownership.get("pet_roles")
     if not isinstance(pet_owners, dict):
         raise ValueError("Missing first-robot implementation ownership")
@@ -1566,7 +1582,10 @@ def render_pilot_supplier_cart(report: dict) -> str:
         "or proof that optional firmware is enabled. No lithium charging or "
         "motor motion is authorized.",
         "",
-        "| Candidate checkout seller | Brand or manufacturer | SKU | Part | Qty | Historical USD each | Link | Engineering source | Supplier status |",
+        (
+            "| Candidate checkout seller | Brand or manufacturer | SKU | Part "
+            "| Qty | Historical USD each | Link | Engineering source | Supplier status |"
+        ),
         "| --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
     ]
     for x in cart["items"]:
@@ -1631,7 +1650,10 @@ def render_first_robot_pilot_samples(report: dict) -> str:
         "",
         "## 2. Remaining: experimental samples versus unresolved physical choices",
         "",
-        "| Component | Needed | Pilot sample quantity | Decision | Verified historical source candidate |",
+        (
+            "| Component | Needed | Pilot sample quantity | Decision "
+            "| Verified historical source candidate |"
+        ),
         "| --- | ---: | ---: | --- | --- |",
     ])
     for x in p["roles"]:
@@ -1817,7 +1839,11 @@ def render_first_robot_markdown(report: dict) -> str:
     lines += [
         "## 1. Reported owned or ordered, plus inspected usable stock",
         "",
-        "| Role | Inspected usable for first unit | All reported on hand | All estimated on hand | All ordered, inspection pending | Conditionally allocated to first unit |",
+        (
+            "| Role | Inspected usable for first unit | All reported on hand "
+            "| All estimated on hand | All ordered, inspection pending "
+            "| Conditionally allocated to first unit |"
+        ),
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in projection["roles"]:
@@ -1853,7 +1879,12 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Preinspection gap if unverified stock works | Audited net units to order | Decision | Reviewed carrier / reference | Role note or selection gap | Source entry point, not proof of physical operation | Power reference | Verified checkout quote |",
+        (
+            "| Scope | Role | One-unit target | Preinspection gap if unverified stock works "
+            "| Audited net units to order | Decision | Reviewed carrier / reference "
+            "| Role note or selection gap | Source entry point, not proof of physical operation "
+            "| Power reference | Verified checkout quote |"
+        ),
         "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in projection["roles"]:
@@ -2006,7 +2037,18 @@ def render_markdown(report: dict) -> str:
         return str(value).replace("|", r"\|").replace("\n", " ").strip()
 
     output = [
-        "> **HISTORICAL SUPPLIER RESEARCH (2026-11-16):** [Earlier fleet supplier candidates](2026-11-16-five-pet-purchase-register.md) are reference research, NOT a second checkout cart. The authoritative projection below has 42 pet/dock parent roles, 7 shared-station parent roles and 14 linked decisions ALREADY COVERED BY THEIR PARENTS. Do not add the 14 to the parent quantities. One paid XIAO with carrier-reported delivery pending inspection remains the only confirmed historical payment in this register. Historical seller links are not current delivered quotes or physical qualification; drivetrain, chargers, wiring, printing and loaded operation remain HOLD.",
+        (
+            "> **HISTORICAL SUPPLIER RESEARCH (2026-11-16):** "
+            "[Earlier fleet supplier candidates](2026-11-16-five-pet-purchase-register.md) "
+            "are reference research, NOT a second checkout cart. The authoritative "
+            "projection below has 42 pet/dock parent roles, 7 shared-station parent "
+            "roles and 14 linked decisions ALREADY COVERED BY THEIR PARENTS. Do not "
+            "add the 14 to the parent quantities. One paid XIAO with carrier-reported "
+            "delivery pending inspection remains the only confirmed historical payment "
+            "in this register. Historical seller links are not current delivered "
+            "quotes or physical qualification; drivetrain, chargers, wiring, printing "
+            "and loaded operation remain HOLD."
+        ),
         "",
         "# Five desk pets, five docks, and the shared room station",
         "",
@@ -2029,7 +2071,10 @@ def render_markdown(report: dict) -> str:
     output += [
         "## 1. Owned or ordered, as reported",
         "",
-        "| Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, inspection pending |",
+        (
+            "| Component | Reported on hand, unverified | Estimated on hand, unverified "
+            "| Ordered, inspection pending |"
+        ),
         "| --- | ---: | ---: | ---: |",
     ]
     for _, part in _purchase_rows(report):
@@ -2050,7 +2095,10 @@ def render_markdown(report: dict) -> str:
         "",
         "## 2. Remaining components or unqualified roles",
         "",
-        "| Scope | Component | Fleet required | Conditional remaining | Status | Vendor reference or design blocker | Power reference | Verified checkout quote |",
+        (
+            "| Scope | Component | Fleet required | Conditional remaining | Status "
+            "| Vendor reference or design blocker | Power reference | Verified checkout quote |"
+        ),
         "| --- | --- | ---: | ---: | --- | --- | --- | --- |",
     ))
     for scope, part in _purchase_rows(report):

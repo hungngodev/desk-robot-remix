@@ -25,7 +25,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--head", choices=("eva", "sparky"), default="sparky")
 args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
 OUT = ROOT / (
-    "docs/cad/concepts/2026-11-03-rounded" if args.head == "sparky" else "docs/cad/concepts/2026-11-03"
+    "docs/cad/concepts/2026-11-03-rounded"
+    if args.head == "sparky"
+    else "docs/cad/concepts/2026-11-03"
 )
 OUT.mkdir(parents=True, exist_ok=True)
 scene = bpy.data.scenes.new("DeskRobot_Concept_Only")
@@ -361,15 +363,23 @@ report = {
     "render_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     "delivery": "concept_layout_only",
     "engine": "Blender Workbench studio light; material colors; cavity/shadows",
-    "unit_system": "metres internally; EVA 3MF declares mm; Sparky source SCAD specifies mm; chassis STL assumed mm, not yet physically checked",
+    "unit_system": (
+        "metres internally; EVA 3MF declares mm; Sparky source SCAD "
+        "specifies mm; chassis STL assumed mm, not yet physically checked"
+    ),
     "source_meshes": sources,
     "chassis_source_size": chassis_dims,
     "head_case": args.head,
     "head_oriented_size_mm": dict(zip(("width", "depth", "height"), head_dims, strict=True)),
-    "head_source_note": "Sparky v0.1.0 shell only, original estimated/unprinted design; no whole-case scaling"
+    "head_source_note": (
+        "Sparky v0.1.0 shell only, original estimated/unprinted design; "
+        "no whole-case scaling"
+    )
     if args.head == "sparky"
     else "EVA front source x=-9; long axis is depth, not face width",
-    "illustrative_objects": "all tracks, lift/claw, mounts, lenses, OLED insert, sensors and target",
+    "illustrative_objects": (
+        "all tracks, lift/claw, mounts, lenses, OLED insert, sensors and target"
+    ),
     "power_bank": "not modeled: dimensions, mass, capacity/current unknown",
     "physical_fit_verified": False,
     "print_exports": [],

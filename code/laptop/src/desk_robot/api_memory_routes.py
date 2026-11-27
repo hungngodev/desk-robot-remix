@@ -425,7 +425,9 @@ def _filter_voice_cues(settings, grant, cues):
     return sensor_cues, tool_cues, timeline
 
 
-def _validate_voice_revision(app, robot_id, conversation, memory_revision, owner, current_tool_context):
+def _validate_voice_revision(
+    app, robot_id, conversation, memory_revision, owner, current_tool_context,
+):
     # A current voice turn alone cannot certify private facts survived an operator edit.
     current_conv = getattr(app.state.runtime, "conversation", None)
     current_revisions = getattr(current_conv, "_private_memory_generation", None)

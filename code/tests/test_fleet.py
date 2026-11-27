@@ -583,7 +583,10 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
     await again.run(IDS[:2], "A follow up", 1)
     assert "Untrusted per-pet historical memory data" in again.histories["robot-01"][2]["content"]
     # A peer transcript is a report, not independent acoustic evidence.
-    assert "robot-02 said (peer report, not my sighting)" in again.histories["robot-01"][2]["content"]
+    assert (
+        "robot-02 said (peer report, not my sighting)"
+        in again.histories["robot-01"][2]["content"]
+    )
     assert "I sent for speech (playback unverified)" in (
         again.histories["robot-01"][2]["content"]
     )

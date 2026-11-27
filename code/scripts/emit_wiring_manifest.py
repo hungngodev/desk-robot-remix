@@ -672,10 +672,12 @@ def render(plan: dict, body: str, head: str) -> str:
         "0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH",
         "Verify actual board address straps before power-up")
     row("AT42QT1010 OUT", f"WROOM GPIO{bus['body_gpio']['head_touch']}",
-        "3.3V active-HIGH push-pull CMOS output to GPIO34 input (no external pull resistor required per AT42QT1010 datasheet)")
+        "3.3V active-HIGH push-pull CMOS output to GPIO34 input "
+        "(no external pull resistor required per AT42QT1010 datasheet)")
     row("3.3V external pullup node + two NC bumper switches in series -> GND",
         f"WROOM GPIO{bus['body_gpio']['bumper_nc_series']}",
-        "3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39")
+        "3.3V passive NC input (HIGH on open/fault, LOW when seated); "
+        "external bias required on GPIO34 through GPIO39")
     row("Optional reed switch to GND (with external 3.3V pullup)", "MCP23017 GPB0",
         "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
     row("Optional PIR output", "MCP23017 GPB1",
@@ -685,7 +687,8 @@ def render(plan: dict, body: str, head: str) -> str:
         "Disconnected lead must read LOW/fault; carrier and fault response HOLD")
     row("MCP23017 GPB2", "CD74HC123 rising-edge haptic trigger (1B pin 2)",
         "3.3V lab-only edge, not motor current; external defined LOW at boot",
-        "Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; physical one-shot NOT qualified")
+        "Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; "
+        "physical one-shot NOT qualified")
     row("Regulated 3.3V logic rail", "CD74HC123 VCC pin 16",
         "100nF local bypass to ground; HC not HCT",
         "Haptic bench candidate only")
@@ -728,7 +731,9 @@ def render(plan: dict, body: str, head: str) -> str:
     row("XIAO onboard GPIO41 DIN + GPIO42 CLK", "Sense PDM microphone",
         "Integrated board pins, NOT connections to WROOM")
     row("XIAO GPIO9 reserved", "RGB heart data",
-        "Xiaozhi WS2812 driver compiled only with explicit opt-in; SD J3 and 5V level buffer still unqualified", "Do NOT wire yet")
+        "Xiaozhi WS2812 driver compiled only with explicit opt-in; "
+        "SD J3 and 5V level buffer still unqualified",
+        "Do NOT wire yet")
     row("Rated regulated 3.3V expansion rail",
         "eight GY-530 VL53L0X VIN pins and TCA9548A 0x70 VCC",
         "3.3V ONLY in selected design; 5V VIN can raise SDA/SCL to 5V",

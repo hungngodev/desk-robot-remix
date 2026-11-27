@@ -343,8 +343,11 @@ def _open_report_parent(parent: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
-                        default="body")
+    parser.add_argument(
+        "--suite",
+        choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
+        default="body",
+    )
     parser.add_argument("--report", type=Path,
                         default=Path("verification-result.json"),
                         help="Unused file under real directories (no symlinks or ..)")

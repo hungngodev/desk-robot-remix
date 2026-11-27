@@ -358,7 +358,9 @@ def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, caps
     sent.clear()
     port = RecoveryPort([status_line, b"OK rearm\n", status_line])
     monkeypatch.setitem(transact.__globals__, "require_local_serial_device", lambda _p: None)
-    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    monkeypatch.setitem(
+        transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port),
+    )
     monkeypatch.setitem(transact.__globals__, "time", fake_clock)
     monkeypatch.setattr(sys, "argv", [
         "serial_bench.py", "--port", "/dev/ttyUSB0", "--command", "rearm", "--local-rearm",
@@ -378,7 +380,9 @@ def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, caps
     # 3. ERR reply on rearm raises without any actuation.
     sent.clear()
     port = RecoveryPort([status_line, b"ERR rearm_blocked\n"])
-    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    monkeypatch.setitem(
+        transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port),
+    )
     with pytest.raises(RuntimeError, match="ERR rearm_blocked"):
         transact.__globals__["main"]()
     assert sent == ["status", "rearm"]
@@ -397,7 +401,9 @@ def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, caps
         transact.__globals__, "time",
         SimpleNamespace(monotonic=lambda: slow_port.now, sleep=lambda _s: None),
     )
-    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: slow_port))
+    monkeypatch.setitem(
+        transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: slow_port),
+    )
     with pytest.raises(TimeoutError, match="Uncertain USB response"):
         transact.__globals__["main"]()
     assert sent == ["status", "rearm"]
@@ -408,15 +414,25 @@ def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, caps
     active_touch_line = (_json.dumps(active_touch_status) + "\n").encode("ascii")
     port = RecoveryPort([active_touch_line])
     monkeypatch.setitem(transact.__globals__, "time", fake_clock)
-    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    monkeypatch.setitem(
+        transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port),
+    )
     with pytest.raises(RuntimeError, match="Unqualified touch/range state"):
         transact.__globals__["main"]()
     assert sent == ["status"]
 
 
 @pytest.mark.parametrize("command, valid_reply, mutated_reply", [
-    ("drive 10 -10 250", b"OK drive left=10 right=-10 ms=250\n", b"OK drive left=10 right=10 ms=250\n"),
-    ("drive 10 10 100", b"OK drive left=10 right=10 ms=100\n", b"OK drive left=10 right=10 ms=101\n"),
+    (
+        "drive 10 -10 250",
+        b"OK drive left=10 right=-10 ms=250\n",
+        b"OK drive left=10 right=10 ms=250\n",
+    ),
+    (
+        "drive 10 10 100",
+        b"OK drive left=10 right=10 ms=100\n",
+        b"OK drive left=10 right=10 ms=101\n",
+    ),
     ("lift 95", b"OK lift angle=95\n", b"OK lift angle=96\n"),
     ("grip 95", b"OK grip angle=95\n", b"OK grip angle=94\n"),
     ("arm", b"OK arm\n", b"OK arm extra\n"),

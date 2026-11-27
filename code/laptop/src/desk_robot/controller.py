@@ -2050,7 +2050,10 @@ class Coordinator:
             if abs(dx) > c.alignment_tolerance_mm:
                 if self._uses_guarded_body_profile(job.robot_id):
                     raise OperationError(
-                        "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
+                    (
+                        "Pickup refused: guarded WROOM profile prohibits "
+                        "differential turn or reverse"
+                    ),
                     )
                 direction = (1 if dx > 0 else -1) * c.turn_sign
                 command = f"drive {direction * 20} {-direction * 20} 100"
@@ -2058,7 +2061,10 @@ class Coordinator:
                 direction = (1 if dy > 0 else -1) * c.forward_sign
                 if self._uses_guarded_body_profile(job.robot_id) and direction < 0:
                     raise OperationError(
-                        "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
+                    (
+                        "Pickup refused: guarded WROOM profile prohibits "
+                        "differential turn or reverse"
+                    ),
                     )
                 command = f"drive {direction * 20} {direction * 20} 100"
             # Vision and geometry may have taken seconds. Never re-use the
@@ -2479,7 +2485,10 @@ class Coordinator:
                 route.cells, initial_heading=cur_heading, final_heading=route.final_heading,
             ):
                 raise OperationError(
-                    "Navigation halted: guarded WROOM profile prohibits unqualified differential turn"
+                    (
+                        "Navigation halted: guarded WROOM profile prohibits "
+                        "unqualified differential turn"
+                    ),
                 )
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
@@ -2560,7 +2569,10 @@ class Coordinator:
         def _turn_once(target_heading: int) -> str:
             if self._uses_guarded_body_profile(job.robot_id):
                 raise OperationError(
-                    "Navigation halted: guarded WROOM profile prohibits unqualified differential turn"
+                    (
+                        "Navigation halted: guarded WROOM profile prohibits "
+                        "unqualified differential turn"
+                    ),
                 )
             delta = (target_heading - cur_heading) % 4
             if delta == 1:

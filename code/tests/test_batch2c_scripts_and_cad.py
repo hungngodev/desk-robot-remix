@@ -68,13 +68,20 @@ def test_verify_procurement_haptic_gate_rejects_unrelated_measurement():
             "thermal_capture_id": "therm-01",
         },
         "quantities": [
-            {"name": "normal_operation_trials", "unit": "trials", "value": 3, "minimum": 3, "maximum": 3},
-            {"name": "stuck_i2c_fault_trials", "unit": "trials", "value": 3, "minimum": 3, "maximum": 3},
-            {"name": "minimum_pulse_spacing_s", "unit": "s", "value": 1.6, "minimum": 1.5, "maximum": 2.0},
-            {"name": "measured_pulse_duration_ms", "unit": "ms", "value": 80.0, "minimum": 75.0, "maximum": 85.0},
-            {"name": "measured_motor_current_ma", "unit": "mA", "value": 90.0, "minimum": 80.0, "maximum": 100.0},
-            {"name": "measured_motor_temperature_c", "unit": "C", "value": 42.0, "minimum": 25.0, "maximum": 45.0},
-            {"name": "unbounded_continuous_energizations", "unit": "events", "value": 0, "minimum": 0, "maximum": 0},
+            {"name": "normal_operation_trials", "unit": "trials",
+             "value": 3, "minimum": 3, "maximum": 3},
+            {"name": "stuck_i2c_fault_trials", "unit": "trials",
+             "value": 3, "minimum": 3, "maximum": 3},
+            {"name": "minimum_pulse_spacing_s", "unit": "s",
+             "value": 1.6, "minimum": 1.5, "maximum": 2.0},
+            {"name": "measured_pulse_duration_ms", "unit": "ms",
+             "value": 80.0, "minimum": 75.0, "maximum": 85.0},
+            {"name": "measured_motor_current_ma", "unit": "mA",
+             "value": 90.0, "minimum": 80.0, "maximum": 100.0},
+            {"name": "measured_motor_temperature_c", "unit": "C",
+             "value": 42.0, "minimum": 25.0, "maximum": 45.0},
+            {"name": "unbounded_continuous_energizations", "unit": "events",
+             "value": 0, "minimum": 0, "maximum": 0},
         ],
     }
     assert mod["_qualified_gate_measurement"](
@@ -389,7 +396,8 @@ def test_serial_bench_preserves_halt_failure_and_structured_receipt(monkeypatch,
     )
     monkeypatch.setattr(
         sys, "argv",
-        ["serial_bench.py", "--port", "/dev/cu.usbserial-1", "--command", "grip 95", "--local-rearm"],
+        ["serial_bench.py", "--port", "/dev/cu.usbserial-1",
+         "--command", "grip 95", "--local-rearm"],
     )
     with pytest.raises(RuntimeError, match="ERR motion_blocked") as exc_info:
         sb.main()

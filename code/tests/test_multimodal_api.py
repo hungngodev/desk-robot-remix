@@ -2247,7 +2247,10 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
         assert own_payload["startup_memory_instructions_excluded"] is True
         assert private["core"] == "favorite_game: hide the key"
         assert "favorite_game: hide the key" not in text
-        assert "I sent for speech (playback unverified): Hello, my little friend" in private["recent"]
+        assert (
+            "I sent for speech (playback unverified): Hello, my little friend"
+            in private["recent"]
+        )
         assert "I said: Hello, my little friend" not in private["recent"]
         assert "uncertain transcription" in private["recent"]
         assert "I observed: Hello" not in private["recent"]
