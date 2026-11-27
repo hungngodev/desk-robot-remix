@@ -19,6 +19,7 @@ def test_face_mood_morph_native(tmp_path):
     binary = tmp_path / "morph"
     source.write_text(r"""
 #include "face_mood_morph.hpp"
+#include "face_presence.hpp"
 #include <cassert>
 #include <initializer_list>
 using desk_robot::FaceMoodMorph;
@@ -71,8 +72,39 @@ static void CheckGesturePriority(uint32_t start) {
     assert(face.Step(start + 611, "happy", true, false) == 0);
 }
 
+// Compose the real status classifier and morph gate, as FaceTask does.
+static void CheckStatusPriority(uint32_t start) {
+    using namespace desk_robot;
+    for (unsigned mask = 0; mask < 32; ++mask) {
+        const bool fault = (mask & 1U) != 0;
+        const bool dock = (mask & 2U) != 0;
+        const bool privacy = (mask & 4U) != 0;
+        const bool link_lost = (mask & 8U) != 0;
+        const bool available = (mask & 16U) != 0;
+        FaceMoodMorph face;
+        assert(face.Step(start, "neutral", true, true) == 10);
+        assert(face.Step(start + 1, "surprised", true, true) == 10);
+        const auto status = SelectFaceStatus(fault, dock, privacy, link_lost);
+        const bool priority_active = FaceStatusBlocksExpression(status);
+        assert(priority_active == (fault || privacy));
+        if (fault) {
+            assert(status == (dock ? FaceStatus::kDockLock : FaceStatus::kBodyFault));
+        }
+        const auto aperture = face.Step(start + 151, "surprised",
+                                        available && !priority_active, true);
+        if (fault || privacy || !available) {
+            assert(aperture == 0);
+            assert(face.Step(start + 152, "happy", false, true) == 0);
+            assert(face.Step(start + 153, "sad", true, true) == 6);
+        } else {
+            assert(aperture == 12);
+        }
+    }
+}
+
 int main() {
     for (uint32_t start : {0U, 0xffffff00U}) {
+        CheckStatusPriority(start);
         CheckGesturePriority(start);
         CheckRecovery(start, 150);   // brief cosmetic cue, recovery mid-morph
         CheckRecovery(start, 1600);  // held cosmetic cue, full recovery
