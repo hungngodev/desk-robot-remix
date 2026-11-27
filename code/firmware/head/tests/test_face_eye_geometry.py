@@ -10,7 +10,8 @@ import pytest
 OVERLAY = Path(__file__).resolve().parents[1] / "overlay"
 
 
-def test_face_eye_geometry(tmp_path):
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_face_eye_geometry(tmp_path, standard):
     compiler = shutil.which("g++") or shutil.which("clang++")
     if not compiler:
         pytest.skip("Native C++ compiler unavailable")
@@ -18,18 +19,23 @@ def test_face_eye_geometry(tmp_path):
     binary = tmp_path / "geometry"
     source.write_text(r"""
 #include "face_eye_geometry.hpp"
+#include <algorithm>
 #include <cassert>
 #include <initializer_list>
 #include <limits>
 using namespace desk_robot::face_eye_geometry;
 int main() {
-    static_assert(kPanelWidth == 128 && kPanelHeight == 64);
-    static_assert(kStatusHeight == 16 && kSlotWidth == 32 && kSlotHeight == 48);
-    static_assert(kEyeCount == 2 && kEyeWidth == 11);
-    static_assert(kOpenHeight == 14 && kClosedHeight == 2);
-    static_assert(kGazeExtent == 3 && kNodReturn == -2);
-    static_assert(EyeX(0) == 3 && EyeX(1) == 18 && EyeY(14) == 17);
-    static_assert(PupilX(0) == 4 && PupilY(14, 0) == 5);
+    static_assert(kPanelWidth == 128 && kPanelHeight == 64, "geometry contract");
+    static_assert(kStatusHeight == 16 && kSlotWidth == 32 && kSlotHeight == 48, "geometry contract");
+    static_assert(kEyeCount == 2 && kEyeWidth == 11, "geometry contract");
+    static_assert(kOpenHeight == 14 && kClosedHeight == 2, "geometry contract");
+    static_assert(kGazeExtent == 3 && kNodReturn == -2, "geometry contract");
+    static_assert(EyeX(0) == 3 && EyeX(1) == 18 && EyeY(14) == 17, "geometry contract");
+    static_assert(PupilX(0) == 4 && PupilY(14, 0) == 5, "geometry contract");
+    static_assert(EyeX(std::numeric_limits<int>::min()) == 3, "minimum eye index");
+    static_assert(EyeY(std::numeric_limits<int>::max()) == 17, "maximum height");
+    static_assert(PupilY(std::numeric_limits<int>::min(),
+                         std::numeric_limits<int>::max()) == 0, "closed pupil travel");
     constexpr auto inf = std::numeric_limits<float>::infinity();
     const auto nan = std::numeric_limits<float>::quiet_NaN();
     assert(NormalizedGazeOffset(nan) == 0);
@@ -61,13 +67,13 @@ int main() {
     constexpr int slot_x = (kPanelWidth - kSlotWidth) / 2;
     for (int i : {std::numeric_limits<int>::min(), -1, 0, 1, 2,
                   std::numeric_limits<int>::max()}) {
-        assert(EyeX(i) == kEyeLeft + std::clamp(i, 0, kEyeCount - 1) * kEyeStride);
+        assert(EyeX(i) == kEyeLeft + std::min(std::max(i, 0), kEyeCount - 1) * kEyeStride);
         const int left = slot_x + EyeX(i);
         assert(left >= slot_x && left + kEyeWidth <= slot_x + kSlotWidth);
         assert(left >= 0 && left + kEyeWidth <= kPanelWidth);
         for (int raw : {std::numeric_limits<int>::min(), -1, 0, 2, 6, 14, 255,
                         std::numeric_limits<int>::max()}) {
-            const int height = std::clamp(raw, kClosedHeight, kOpenHeight);
+            const int height = std::min(std::max(raw, kClosedHeight), kOpenHeight);
             assert(EyeY(raw) == kSlotHeight / 2 - height / 2);
             const int top = kStatusHeight + EyeY(raw);
             assert(top >= kStatusHeight && top + height <= kPanelHeight);
@@ -93,6 +99,11 @@ int main() {
         for (int i = 0; i < kEyeCount; ++i) {
             assert(EyeX(i) >= 0 && EyeX(i) + kEyeWidth <= kSlotWidth);
         }
+        const int center = std::max(0, h - kPupilHeight) / 2;
+        const int extent = std::min(center, static_cast<int>(kGazeExtent));
+        for (int d = -kGazeExtent - 1; d <= kGazeExtent + 1; ++d) {
+            assert(PupilY(h, d) == center + std::min(std::max(d, -extent), extent));
+        }
         if (h < kPupilMinEyeHeight) continue;
         for (int d = -kGazeExtent; d <= kGazeExtent; ++d) {
             assert(PupilX(d) >= 0 && PupilX(d) + kPupilWidth <= kEyeWidth);
@@ -107,7 +118,7 @@ int main() {
     pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
     subprocess.run(
         [
-            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            compiler, f"-std={standard}", "-Wall", "-Wextra", "-Werror", "-pedantic-errors",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all", *pie_flags,
             "-I", str(OVERLAY), str(source), "-o", str(binary),
         ],
