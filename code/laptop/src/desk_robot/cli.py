@@ -383,14 +383,15 @@ def _doctor_room_station(settings: Settings) -> dict[str, str]:
 
 
 def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, object]:
+    trials_file = getattr(settings, "trials_file", None)
     result: dict[str, object] = {
         "mode": settings.mode,
         "python_env": True,
         "ollama_installed": shutil.which("ollama") is not None,
         "ffmpeg_installed": shutil.which("ffmpeg") is not None,
         "physical_test_status": "not run",
-        "trials_file": str(settings.trials_file),
-        "trials_file_present": settings.trials_file.is_file(),
+        "trials_file": str(trials_file) if trials_file is not None else None,
+        "trials_file_present": Path(trials_file).is_file() if trials_file is not None else False,
         "room_station": _doctor_room_station(settings),
         "credentials_present": all(
             os.environ.get(n)
@@ -425,21 +426,24 @@ def _degraded_status(value: object, robot_id: str) -> bool:
     return isinstance(health, dict) and health.get("state") == "degraded"
 
 
+def _forward_sighup_to_sigterm(_signum: int, _frame: object) -> None:
+    """Translate SIGHUP into SIGTERM so uvicorn runs graceful ASGI lifespan teardown."""
+    signal.raise_signal(signal.SIGTERM)
+
+
 def _run_uvicorn_server(app: object, *, host: str, port: int) -> None:
     """Run uvicorn while routing SIGHUP through clean ASGI lifespan teardown."""
     import uvicorn
 
-    config = uvicorn.Config(
-        app, host=host, port=port, timeout_graceful_shutdown=1,
-    )
-    server = uvicorn.Server(config)
     previous_sighup = None
     sighup = getattr(signal, "SIGHUP", None)
     if sighup is not None and threading.current_thread() is threading.main_thread():
         previous_sighup = signal.getsignal(sighup)
-        signal.signal(sighup, server.handle_exit)
+        signal.signal(sighup, _forward_sighup_to_sigterm)
     try:
-        server.run()
+        uvicorn.run(
+            app, host=host, port=port, timeout_graceful_shutdown=1,
+        )
     finally:
         if sighup is not None and previous_sighup is not None:
             signal.signal(sighup, previous_sighup)

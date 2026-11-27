@@ -300,31 +300,30 @@ def test_tool_receipt_uses_monotonic_clock_immune_to_wall_steps(
 
 
 def test_cli_run_uvicorn_registers_and_restores_sighup(monkeypatch):
-    """Unit check: _run_uvicorn_server wires SIGHUP to server.handle_exit and restores it."""
+    """Unit check: _run_uvicorn_server wires SIGHUP to graceful shutdown and restores it."""
     if not hasattr(signal, "SIGHUP"):
         pytest.skip("SIGHUP not available on this platform")
     registered: dict[int, object] = {}
-    calls: list[str] = []
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    forwarded: list[int] = []
 
-    class FakeServer:
-        def __init__(self, config):
-            self.config = config
+    def fake_run(*args, **kwargs):
+        handler = signal.getsignal(signal.SIGHUP)
+        registered["inside"] = handler
+        assert callable(handler)
+        monkeypatch.setattr(signal, "raise_signal", lambda sig: forwarded.append(sig))
+        handler(signal.SIGHUP, None)
+        calls.append((args, kwargs))
 
-        def handle_exit(self, _sig, _frame):
-            calls.append("handle_exit")
-
-        def run(self):
-            handler = signal.getsignal(signal.SIGHUP)
-            registered["inside"] = handler
-            assert callable(handler)
-            handler(signal.SIGHUP, None)
-
-    monkeypatch.setattr("uvicorn.Config", lambda app, **kw: SimpleNamespace(app=app, **kw))
-    monkeypatch.setattr("uvicorn.Server", FakeServer)
+    monkeypatch.setattr("uvicorn.run", fake_run)
+    app = object()
     before = signal.getsignal(signal.SIGHUP)
-    _run_uvicorn_server(object(), host="127.0.0.1", port=0)
+    _run_uvicorn_server(app, host="127.0.0.1", port=0)
     after = signal.getsignal(signal.SIGHUP)
-    assert calls == ["handle_exit"]
+    assert calls == [((app,), {
+        "host": "127.0.0.1", "port": 0, "timeout_graceful_shutdown": 1,
+    })]
+    assert forwarded == [signal.SIGTERM]
     assert after == before
 
 
@@ -374,7 +373,9 @@ _run_uvicorn_server(app, host="127.0.0.1", port=0)
         assert ready_file.exists(), "Subprocess test server failed to become ready"
         os.kill(proc.pid, signal.SIGHUP)
         rc = proc.wait(timeout=10.0)
-        assert rc == 0, f"Unexpected exit code {rc}: {proc.stderr.read()}"
+        assert rc in (0, -signal.SIGTERM, 128 + signal.SIGTERM), (
+            f"Unexpected exit code {rc}: {proc.stderr.read()}"
+        )
         assert marker.read_text(encoding="utf-8") == "lifespan_clean_shutdown"
     finally:
         if proc.poll() is None:
