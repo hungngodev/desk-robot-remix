@@ -65,14 +65,23 @@ def test_empty_and_invalid_input_preserve_resampler_state(audio):
 
 
 def test_backlog_requires_drain_before_append_or_tail(audio):
-    framer = audio.PcmOpusFramer(lambda chunk, *args: (chunk, None))
+    calls = []
+
+    def ratecv(chunk, width, channels, source_rate, dest_rate, state):
+        assert (width, channels, source_rate, dest_rate) == (2, 1, 24000, 16000)
+        calls.append((chunk, state))
+        return chunk, (len(calls), ((0, 0),))
+
+    framer = audio.PcmOpusFramer(ratecv)
     framer.append(b'a' * 1922)
     with pytest.raises(ValueError):
         framer.append(b'bc')
     with pytest.raises(ValueError):
         framer.padded_tail()
+    assert calls == [(b'a' * 1922, None)]
     assert framer.pop_frame() == b'a' * 1920
     framer.append(b'bc')
+    assert calls == [(b'a' * 1922, None), (b'bc', (1, ((0, 0),)))]
     assert framer.padded_tail() == b'aabc' + b'\0' * 1916
 
 
@@ -102,8 +111,7 @@ def test_real_resampler_max_chunk_and_reset(audio):
     frames = []
     while framer.has_frame():
         frames.append(framer.pop_frame())
-    assert len(frames) == 33
-    assert all(len(frame) == 1920 for frame in frames)
+    assert frames == [b'\x01\x00' * 960] * 33
     assert framer.padded_tail() == b'\x01\x00' * 320 + b'\0' * 1280
     framer.reset()
     assert framer.padded_tail() == b''
