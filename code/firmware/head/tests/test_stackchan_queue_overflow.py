@@ -11,7 +11,8 @@ import pytest
 OVERLAY = Path(__file__).resolve().parents[1] / "overlay"
 
 
-def test_low_battery_survives_full_queue(tmp_path):
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_low_battery_survives_full_queue(tmp_path, standard):
     compiler = shutil.which("g++") or shutil.which("clang++")
     if not compiler:
         pytest.skip("Native C++ compiler unavailable")
@@ -45,7 +46,14 @@ int main() {
             assert(pet.state() == S::kLowBattery && pet.mood() == Mood::kSad);
             assert(action.motion == Motion::kLookFront);
             if (talking) assert(action.set_speech && action.speech[0] == '\0');
+            // No routine cue may clear a low-battery expression. Unlike the
+            // WROOM fault latch, this is cosmetic state only.
+            for (auto cue : {E::kTouched, E::kPersonDetected, E::kPersonLost,
+                             E::kLoudSound, E::kSpeakRequest, E::kSpeechFinished}) {
+                pet.pushEvent(Event(cue, "ignored"));
+            }
             assert(pet.update({start + 13U}).empty());
+            assert(pet.state() == S::kLowBattery && pet.mood() == Mood::kSad);
             // Fresh charging retains the existing explicit recovery semantics.
             pet.pushEvent(E::kCharging);
             assert(pet.update({start + 14U}).mood == Mood::kNeutral);
@@ -67,7 +75,7 @@ int main() {
     env = dict(os.environ, UBSAN_OPTIONS="halt_on_error=1", ASAN_OPTIONS="halt_on_error=1")
     subprocess.run(
         [
-            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            compiler, f"-std={standard}", "-Wall", "-Wextra", "-Werror", "-pedantic-errors",
             "-fsanitize=address,undefined", *pie_flags,
             "-I", str(OVERLAY), str(source), "-o", str(binary),
         ],

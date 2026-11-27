@@ -34,7 +34,8 @@ SOFTWARE.
 #include <stdint.h>
 #include <string.h>
 
-namespace stackchan::behavior {
+namespace stackchan {
+namespace behavior {
 
 /// Emotional expression requested by the controller. Mapped to display expressions by the caller.
 enum class Mood : uint8_t {
@@ -85,7 +86,8 @@ struct Event {
 };
 
 struct Observation {
-  uint32_t now_ms = 0;
+  uint32_t now_ms;
+  constexpr Observation(uint32_t now = 0) : now_ms(now) {}
 };
 
 /// What the controller wants to change. Only the fields with `set_*` / motion != kNone should be applied.
@@ -236,8 +238,6 @@ class HsmBehavior {
 
   // idle candidates: weight and cooldown
   enum Candidate : uint8_t { kLook = 0, kNodCand, kSmileCand, kNothing, kNumCandidates };
-  static constexpr uint8_t kWeights[kNumCandidates] = {3, 1, 1, 5};
-  static constexpr uint32_t kCooldowns[kNumCandidates] = {10000, 30000, 30000, 0};
   uint32_t last_picked_ms_[kNumCandidates] = {0, 0, 0, 0};
   bool picked_before_[kNumCandidates] = {false, false, false, false};
 
@@ -458,6 +458,9 @@ class HsmBehavior {
     scheduleNextPick();
 
     // weighted random choice among the candidates out of cooldown
+    // Function-local constants keep this header linkable under C++11.
+    static constexpr uint8_t kWeights[kNumCandidates] = {3, 1, 1, 5};
+    static constexpr uint32_t kCooldowns[kNumCandidates] = {10000, 30000, 30000, 0};
     uint32_t total = 0;
     bool eligible[kNumCandidates];
     for (uint8_t i = 0; i < kNumCandidates; i++) {
@@ -505,4 +508,5 @@ class HsmBehavior {
   }
 };
 
-}  // namespace stackchan::behavior
+}  // namespace behavior
+}  // namespace stackchan
