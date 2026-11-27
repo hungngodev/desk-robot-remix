@@ -52,3 +52,62 @@ async def test_cancelled_deferred_preflight_discards_request(swallow):
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", [1, 2])
+@pytest.mark.parametrize("error_type", [RuntimeError, TimeoutError, asyncio.CancelledError])
+async def test_deferred_consent_failure_retires_request(failure_at, error_type):
+    checks = 0
+    preflights = []
+
+    def consent():
+        nonlocal checks
+        checks += 1
+        if checks == failure_at:
+            raise error_type("private consent diagnostic")
+        return True
+
+    async def preflight(robot_id):
+        preflights.append(robot_id)
+
+    def submit():
+        pytest.fail("Failed consent must never submit a motion job")
+
+    request = DeferredMotionRequest(
+        "request", "pet", "exploration", float("inf"), 0, submit,
+        consent_check=consent,
+    )
+    coordinator = SimpleNamespace(
+        _ensure_voice_gate=lambda: None,
+        _deferred_dispatch_lock=asyncio.Lock(),
+        _deferred_voice_queue=deque([request]),
+        _deferred_voice_generation=0,
+        _deferred_robot_generation={},
+        _fleet_motion_owner=None,
+        _permit_epoch={"pet": 0},
+        _stop_confirmations=SimpleNamespace(blocked=lambda robot_id: False),
+        voice_blocks_motion=lambda: None,
+        robot=lambda robot_id: SimpleNamespace(motion_enabled=True),
+        dock_inhibited=lambda robot_id: False,
+        _hardware_preflight=preflight,
+        permits={},
+        closed=False,
+    )
+    if error_type is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await Coordinator.dispatch_next_deferred(coordinator)
+        assert request.state == "discarded"
+        assert request.error == "Deferred motion consent check cancelled; fresh consent required"
+    else:
+        assert await Coordinator.dispatch_next_deferred(coordinator) is None
+        assert request.state == "failed"
+        assert request.error == "Deferred motion consent check failed; fresh consent required"
+    assert checks == failure_at
+    assert preflights == ([] if failure_at == 1 else ["pet"])
+    assert not coordinator.permits
+    assert not coordinator._deferred_voice_queue
+    assert not coordinator._deferred_dispatch_lock.locked()
+    assert request.job_id is None
+    assert await Coordinator.dispatch_next_deferred(coordinator) is None
+    assert checks == failure_at

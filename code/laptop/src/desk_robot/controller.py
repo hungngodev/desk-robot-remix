@@ -168,6 +168,26 @@ class DeferredMotionRequest:
         }
 
 
+def _check_deferred_consent(req: DeferredMotionRequest) -> bool:
+    """Retire a dequeued request when its live consent check fails."""
+    if req.consent_check is None:
+        return True
+    try:
+        if req.consent_check() is True:
+            return True
+    except asyncio.CancelledError:
+        req.state = "discarded"
+        req.error = "Deferred motion consent check cancelled; fresh consent required"
+        raise
+    except Exception:
+        req.state = "failed"
+        req.error = "Deferred motion consent check failed; fresh consent required"
+        return False
+    req.state = "discarded"
+    req.error = "Deferred motion consent revoked; fresh consent required"
+    return False
+
+
 class Coordinator:
     def __init__(self, settings: Settings, heads: dict[str, Head], vision: Vision):
         self.settings = settings
@@ -726,13 +746,14 @@ class Coordinator:
                         self.dock_inhibited(req.robot_id)
                         and req.kind in {"manual", "exploration", "pickup", "navigate"}
                     )
-                    or (req.consent_check is not None and not req.consent_check())
                 ):
                     self._deferred_voice_queue.popleft()
                     req.state = "discarded"
-                    req.error = "Motion permission, dock state, or consent revoked before dispatch"
+                    req.error = "Motion permission or dock state revoked before dispatch"
                     continue
                 self._deferred_voice_queue.popleft()
+                if not _check_deferred_consent(req):
+                    continue
                 dispatch_epoch = self._permit_epoch[req.robot_id]
                 try:
                     await self._hardware_preflight(req.robot_id)
@@ -758,11 +779,12 @@ class Coordinator:
                         self.dock_inhibited(req.robot_id)
                         and req.kind in {"manual", "exploration", "pickup", "navigate"}
                     )
-                    or (req.consent_check is not None and not req.consent_check())
                     or self._fleet_motion_owner is not None
                 ):
                     req.state = "discarded"
                     req.error = "STOP, fault, or permission change superseded deferred dispatch"
+                    return None
+                if not _check_deferred_consent(req):
                     return None
                 if self.voice_blocks_motion() is not None:
                     # Human spoke again during preflight: discard instead of replaying.
