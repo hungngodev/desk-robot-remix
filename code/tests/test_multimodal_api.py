@@ -18,7 +18,7 @@ def _signed_tool_headers(settings, tokens, robot_id, path, generation, monkeypat
     speech_token = "s" * 40
     monkeypatch.setenv(settings.speech_bridge_token_env, speech_token)
     path = path.partition("?")[0]
-    issued_us = time.time_ns() // 1000
+    issued_us = time.monotonic_ns() // 1000
     receipt_id = secrets.token_hex(16)
     message = json.dumps(
         [1, robot_id, robot.device_id, generation, "GET", path,

@@ -39,7 +39,7 @@ fleet_text_sharing_enabled = false
 fleet_social_autonomy_enabled = false
 fleet_social_min_interval_seconds = 300
 memory_dir = "../data/private/memory"
-trials_file = "../data/physical-trials.jsonl"
+trials_file = "../../docs/records/physical-trials.csv"
 
 [[robots]]
 id = "robot-01"

@@ -489,34 +489,75 @@ class MemoryStore:
         # a plain schema string may select a private database.
         if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
-        # Repeat the ancestry check at each SQLite open: a linked parent
-        # introduced after boot must not redirect subsequent private reads.
+        # Repeat the ancestry check at each SQLite open: a linked or
+        # world-writable parent introduced after boot must not redirect reads.
         validate_private_directory_ancestry(self.root)
         # The root can lose its private permission boundary after startup.
-        # Refuse access before SQLite opens or creates any database sidecar.
+        # Pin a directory descriptor before checking or opening SQLite sidecars.
         root_info = self.root.lstat()
         if (not stat.S_ISDIR(root_info.st_mode)
                 or root_info.st_uid != os.geteuid() or root_info.st_mode & 0o077):
             raise PermissionError("Robot memory root must remain an owner-only directory")
-        path = self.root / (robot_id + ".sqlite3")
-        validate_private_sqlite_files(path)
-        # Only initialization may create a database. A runtime read or write
-        # must not leave an empty replacement if the private file vanished.
-        # SQLite URI mode=rw enforces this at open, without an exists/open race.
-        # Path.as_uri escapes literal '?' and '#' in the configured root.
-        mode = "rwc" if initializing else "rw"
-        db = sqlite3.connect(path.as_uri() + f"?mode={mode}", timeout=3, uri=True)
+        db_filename = robot_id + ".sqlite3"
+        path = self.root / db_filename
+        dir_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        db: sqlite3.Connection | None = None
         try:
+            dir_info = os.fstat(dir_fd)
+            if (
+                not stat.S_ISDIR(dir_info.st_mode)
+                or dir_info.st_uid != os.geteuid()
+                or dir_info.st_mode & 0o077
+                or (dir_info.st_dev, dir_info.st_ino)
+                != (root_info.st_dev, root_info.st_ino)
+            ):
+                raise PermissionError("Robot memory root changed during pre-open check")
+            validate_private_sqlite_files(path)
+            # Only initialization may create a database. A runtime read or write
+            # must not leave an empty replacement if the private file vanished.
+            # SQLite URI mode=rw enforces this at open, without an exists/open
+            # race. Python stdlib sqlite3.connect opens by URI rather than dirfd,
+            # so post-open root and db_fd inode checks reject check-to-open
+            # swaps before any chmod or query (assuming protected ancestors).
+            mode = "rwc" if initializing else "rw"
+            db = sqlite3.connect(path.as_uri() + f"?mode={mode}", timeout=3, uri=True)
+            after_root = self.root.lstat()
+            if (
+                not stat.S_ISDIR(after_root.st_mode)
+                or after_root.st_uid != os.geteuid()
+                or after_root.st_mode & 0o077
+                or (after_root.st_dev, after_root.st_ino)
+                != (dir_info.st_dev, dir_info.st_ino)
+            ):
+                raise PermissionError("Robot memory root changed during SQLite open")
             # A private root is necessary but insufficient if an older
             # database file was created with group/world read bits. Restrict
-            # both new and legacy pet files before any episode is accessed.
+            # via pinned dir_fd before any episode is accessed.
             try:
-                os.chmod(path, 0o600)
+                db_fd = os.open(
+                    db_filename, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd,
+                )
             except OSError as exc:
                 raise PermissionError(
                     "Cannot protect private robot memory database"
                 ) from exc
-            if path.stat().st_mode & 0o077:
+            try:
+                os.fchmod(db_fd, 0o600)
+                db_info = os.fstat(db_fd)
+                path_info = path.lstat()
+            except OSError as exc:
+                raise PermissionError(
+                    "Cannot protect private robot memory database"
+                ) from exc
+            finally:
+                os.close(db_fd)
+            if (
+                not stat.S_ISREG(db_info.st_mode)
+                or db_info.st_uid != os.geteuid()
+                or db_info.st_mode & 0o077
+                or (path_info.st_dev, path_info.st_ino)
+                != (db_info.st_dev, db_info.st_ino)
+            ):
                 raise PermissionError(
                     "Robot memory database is accessible to other users"
                 )
@@ -542,10 +583,13 @@ class MemoryStore:
             yield db
             db.commit()
         except BaseException:
-            db.rollback()
+            if db is not None:
+                db.rollback()
             raise
         finally:
-            db.close()
+            if db is not None:
+                db.close()
+            os.close(dir_fd)
 
     def dock_retry_transition(
         self, robot_id: str, boot_id: int, fuel_seq: int, *, recovered: bool,

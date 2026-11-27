@@ -12,7 +12,7 @@ import pytest
 def test_simulation_fixture_storage_is_private(request, tmp_path, fixture_name, iteration):
     config = request.getfixturevalue(fixture_name)
     assert config.memory_dir == tmp_path / "memory"
-    assert config.trials_file == tmp_path / "physical-trials.jsonl"
+    assert config.trials_file == tmp_path / "physical-trials.csv"
     assert not config.memory_dir.exists()
     assert not config.trials_file.exists()
 

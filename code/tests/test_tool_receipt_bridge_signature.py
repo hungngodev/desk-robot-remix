@@ -126,7 +126,7 @@ async def test_bridge_signs_current_device_generation_and_unique_request(monkeyp
         receipt_id = headers["X-Desk-Robot-Tool-Receipt-Id"]
         issued_us = int(headers["X-Desk-Robot-Tool-Receipt-At-Us"])
         assert len(receipt_id) == 32
-        assert abs(time.time_ns() // 1000 - issued_us) < 5_000_000
+        assert abs(time.monotonic_ns() // 1000 - issued_us) < 5_000_000
         message = json.dumps(
             [
                 1,

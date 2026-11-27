@@ -24,7 +24,7 @@ def _signed_headers(
     receipt_id,
     issued_us=None,
 ):
-    issued_us = time.time_ns() // 1000 if issued_us is None else issued_us
+    issued_us = time.monotonic_ns() // 1000 if issued_us is None else issued_us
     message = json.dumps(
         [
             1,
@@ -192,7 +192,7 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
             method="GET",
             path=url,
             receipt_id="4" * 32,
-            issued_us=time.time_ns() // 1000 - 6_000_000,
+            issued_us=max(1, time.monotonic_ns() // 1000 - 6_000_000),
         )
         assert client.get(url, headers={**tool, **expired}).status_code == 409
 

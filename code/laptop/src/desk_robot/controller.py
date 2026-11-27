@@ -1024,29 +1024,55 @@ class Coordinator:
                 # Dispatch WROOM stop before potentially slow canceled camera
                 # or model cleanup. No second actor may treat this as charging.
                 stop_acknowledged = False
+                repeated_cancel = False
                 try:
                     await _bounded_body_stop(self.heads[job.robot_id], job.robot_id)
                     stop_acknowledged = True
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
                     )
+                except asyncio.CancelledError:
+                    repeated_cancel = True
+                    job.error = (
+                        f"{job.error or ''}; "
+                        "STOP interrupted by repeated cancellation; rely on body watchdog"
+                    )
+                    job.state = "failed"
                 except Exception as exc:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
                 pending = [t for t in (operation, keeper, watchdog) if t is not None]
                 unresponsive: set[asyncio.Task] = set()
                 if pending:
-                    done, unresponsive = await asyncio.wait(
-                        pending, timeout=2.0
-                    )
+                    deadline = time.monotonic() + 2.0
+                    done: set[asyncio.Task] = set()
+                    while True:
+                        remaining = max(0.0, deadline - time.monotonic())
+                        try:
+                            finished, _ = await asyncio.wait(
+                                pending, timeout=remaining,
+                            )
+                            done.update(finished)
+                            break
+                        except asyncio.CancelledError:
+                            repeated_cancel = True
+                            # Continue settling within budget so cleanup and
+                            # ownership bookkeeping cannot be skipped.
                     for task in done:
                         if not task.cancelled():
                             task.exception()
+                    unresponsive = {t for t in pending if not t.done()}
                     if unresponsive:
                         job.error = (
                             f"{job.error or ''}; cancellation cleanup timed out"
                         )
                         job.state = "failed"
+                if repeated_cancel and job.state != "failed":
+                    job.state = "failed"
+                    job.error = (
+                        f"{job.error or ''}; "
+                        "repeated cancellation interrupted terminal cleanup"
+                    )
                 if job.state == "failed":
                     # A recovered HALT confirms stopping, not renewed intent.
                     # Retire deferred requests for this failed body before

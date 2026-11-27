@@ -7,8 +7,10 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import sqlite3
 import stat
+import threading
 from pathlib import Path
 
 import httpx
@@ -387,6 +389,8 @@ def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, ob
         "ollama_installed": shutil.which("ollama") is not None,
         "ffmpeg_installed": shutil.which("ffmpeg") is not None,
         "physical_test_status": "not run",
+        "trials_file": str(settings.trials_file),
+        "trials_file_present": settings.trials_file.is_file(),
         "room_station": _doctor_room_station(settings),
         "credentials_present": all(
             os.environ.get(n)
@@ -421,6 +425,26 @@ def _degraded_status(value: object, robot_id: str) -> bool:
     return isinstance(health, dict) and health.get("state") == "degraded"
 
 
+def _run_uvicorn_server(app: object, *, host: str, port: int) -> None:
+    """Run uvicorn while routing SIGHUP through clean ASGI lifespan teardown."""
+    import uvicorn
+
+    config = uvicorn.Config(
+        app, host=host, port=port, timeout_graceful_shutdown=1,
+    )
+    server = uvicorn.Server(config)
+    previous_sighup = None
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None and threading.current_thread() is threading.main_thread():
+        previous_sighup = signal.getsignal(sighup)
+        signal.signal(sighup, server.handle_exit)
+    try:
+        server.run()
+    finally:
+        if sighup is not None and previous_sighup is not None:
+            signal.signal(sighup, previous_sighup)
+
+
 def main() -> None:
     p = _build_parser()
     args = p.parse_args()
@@ -434,16 +458,11 @@ def main() -> None:
             return
         load_env(args.secrets)
         if args.action == "serve":
-            import uvicorn
-
             from .api import create_app
 
             # Bound request draining so a stuck API call cannot indefinitely
             # postpone lifespan cleanup and its independent WROOM STOP attempts.
-            uvicorn.run(
-                create_app(settings), host=args.host, port=args.port,
-                timeout_graceful_shutdown=1,
-            )
+            _run_uvicorn_server(create_app(settings), host=args.host, port=args.port)
             return
         if args.action == "doctor":
             result = _doctor_report(args, settings)

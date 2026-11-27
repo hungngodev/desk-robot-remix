@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import re
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -258,18 +259,25 @@ def summarize(rows, robot_id, *, run_manifest=None, csv_sha256=None):
 
 
 if __name__ == "__main__":
+    default_trials = Path(__file__).resolve().parents[2] / "docs/records/physical-trials.csv"
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--file",
-        type=Path,
-        default=Path(__file__).resolve().parents[2] / "docs/records/physical-trials.csv",
-    )
+    p.add_argument("--file", type=Path, default=None)
+    p.add_argument("--config", type=Path, default=None)
     p.add_argument("--robot", default="robot-01")
     p.add_argument("--run-manifest", type=Path, default=None)
     p.add_argument("--require-pass", action="store_true")
     p.add_argument("--require-manifest", action="store_true")
     args = p.parse_args()
-    canonical = args.file.resolve() == p.get_default("file").resolve()
+    if args.file is None and args.config is not None:
+        laptop_src = str(Path(__file__).resolve().parents[1] / "laptop/src")
+        if laptop_src not in sys.path:
+            sys.path.insert(0, laptop_src)
+        from desk_robot.config import load_settings
+
+        args.file = load_settings(args.config).trials_file
+    elif args.file is None:
+        args.file = default_trials
+    canonical = args.file.resolve() == default_trials.resolve()
     raw_bytes = args.file.read_bytes()
     csv_digest = hashlib.sha256(raw_bytes).hexdigest()
     manifest_data = None

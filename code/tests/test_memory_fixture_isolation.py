@@ -10,7 +10,7 @@ def test_settings_fixture_isolates_writable_state(
 ) -> None:
     # Assert containment before writing so a regression cannot touch repo data.
     assert settings.memory_dir == tmp_path / "memory"
-    assert settings.trials_file == tmp_path / "physical-trials.jsonl"
+    assert settings.trials_file == tmp_path / "physical-trials.csv"
     assert not settings.memory_dir.exists()
     assert not settings.trials_file.exists()
     settings.memory_dir.mkdir()

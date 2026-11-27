@@ -14,7 +14,7 @@ voice_vision_tools_enabled = false
 # Install a LOCAL multimodal model in Ollama, then select its actual name.
 # Set this only after running ollama pull MODEL and evaluating real scene accuracy.
 memory_dir = "../data/private/pet-memory"
-trials_file = "../data/physical-trials.jsonl"
+trials_file = "../../docs/records/physical-trials.csv"
 vision_weights = "../models/yolov8s-worldv2.pt"
 
 [[robots]]

@@ -21,7 +21,19 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Awaitable, Callable, Coroutine, Literal, Mapping, Protocol, TypedDict
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Literal,
+    Mapping,
+    Protocol,
+    Sequence,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+)
 
 from .aux import NoseDialGate, _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
@@ -111,6 +123,8 @@ _PHYSICAL_INITIATIVE_KINDS = PHYSICAL_INITIATIVE_KINDS
 
 _OPTIONAL_SPEECH_DEDUP_WINDOW_S = 600.0
 _BODY_STATUS_TIMEOUT_SECONDS = 2.5
+PeerBatchResult: TypeAlias = bool | BaseException
+_T = TypeVar("_T")
 
 
 def _initiative_evidence(change: SceneChange) -> bool:
@@ -260,7 +274,7 @@ class PetState:
     handling_gate: HandlingGate = field(default_factory=HandlingGate, repr=False)
     handling_events: int = 0
     aux_task: asyncio.Task[None] | None = field(default=None, repr=False)
-    aux_read_task: asyncio.Task | None = field(default=None, repr=False)
+    aux_read_task: asyncio.Task[dict[str, Any]] | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
     # Optional speech budget survives observer restarts and fuel recovery.
@@ -406,10 +420,10 @@ class PetController:
         # inference task to cancel. Generation fences queued VLM waiters too.
         self._vision_preemption_epoch = 0
         self._direct_vision_requests = 0
-        self.multimodal = None  # Hardware runtime attaches the ONE camera hub.
+        self.multimodal: Any = None  # Hardware runtime attaches the ONE camera hub.
         # Read the EXISTING operator Coordinator job table, never a second
         # planner or motion controller. Runtime sets the shared dict.
-        self.coordinator_jobs = None
+        self.coordinator_jobs: Mapping[str, Any] | None = None
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
         self.voice_monitor_ready = settings.mode != "hardware"
@@ -1051,7 +1065,7 @@ class PetController:
             robot_id, event_id, source_revision, sharing_grant, fanout_grant,
             current_visual_epoch, camera_receipt_current, camera_permitted,
         )
-        def persist_peer_batch() -> list:
+        def persist_peer_batch() -> list[PeerBatchResult]:
             return self._persist_observation_peer_batch(
                 robot_id, change, receipt, destinations, relay_tokens,
                 source_current, permitted,
@@ -1102,7 +1116,7 @@ class PetController:
         receipt: tuple[str, float, CameraProvenance | None],
         destinations: list[str], relay_tokens: dict[str, str],
         source_current: Callable[[], bool], permitted: Callable[[], bool],
-    ) -> list:
+    ) -> list[PeerBatchResult]:
         event_id, observed_at, camera_provenance = receipt
         # One off-loop worker owns ALL newly inserted copies. If a
         # peer stalls and the coroutine is cancelled on opt out, a
@@ -1141,7 +1155,7 @@ class PetController:
 
     async def _reconcile_observation_peer_batch(
         self, robot_id: str, event_id: str, destinations: list[str],
-        relay_tokens: dict[str, str], results: list,
+        relay_tokens: dict[str, str], results: Sequence[PeerBatchResult],
         source_current: Callable[[], bool], permitted: Callable[[], bool],
         current_visual_epoch: Callable[[], bool],
     ) -> bool:
@@ -1714,14 +1728,21 @@ class PetController:
             scan_advance = _sensor_counter_advance(current_scan, prior_scan)
             event_advance = _sensor_counter_advance(current_events, prior_events)
             # Same-boot event count can stay equal or advance (mod uint32), never
-            # move backwards. A contradictory rollback must neither emit nor rewind.
+            # move backwards or outpace completed scan_seq advances. Quarantine
+            # contradictory updates so corrupted fences cannot hide arrivals.
             event_rollback = (
                 prior_events is not None
                 and current_events != prior_events
                 and ((current_events - prior_events) & 0xffffffff) >= 0x80000000
             )
-            if scan_advance == 0 or event_rollback:
-                pass  # replay or contradictory event rollback leaves fences intact
+            impossible_event_jump = (
+                prior_events is not None
+                and scan_advance is not None
+                and event_advance is not None
+                and event_advance > scan_advance
+            )
+            if scan_advance == 0 or event_rollback or impossible_event_jump:
+                pass  # replay or contradictory counter update leaves fences intact
             else:
                 if (scan_advance is not None and prior_events is not None
                         and event_advance is not None
@@ -4121,7 +4142,7 @@ class PetController:
             {"role": "system", "content": system_text},
             {"role": "user", "content": user_text},
         ]
-        async def timely_model(call):
+        async def timely_model(call: Callable[[], Awaitable[_T]]) -> _T | None:
             # httpx's read timeout may reset on every partial reply.
             # One stalled model decision cannot own the only proactive
             # speaker candidate past its actual sensor/JPEG lifetime.

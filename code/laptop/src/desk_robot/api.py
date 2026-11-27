@@ -55,7 +55,10 @@ _PET_SHUTDOWN_TIMEOUT_S = 1.0
 # Bound camera lock acquisition as well as the transport's own I/O deadline.
 _CAMERA_PREVIEW_TIMEOUT_S = 5.0
 _TOOL_RECEIPT_MAX_AGE_US = 5_000_000
+# Retain consumed IDs strictly longer than _TOOL_RECEIPT_MAX_AGE_US on the same
+# monotonic clock domain so an expired replay entry can never become fresh again.
 _TOOL_RECEIPT_REPLAY_TTL_S = 10.0
+_TOOL_RECEIPT_MAX_REPLAY_ENTRIES = 512
 
 
 def _tool_receipt_message(
@@ -266,8 +269,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         generation = int(generation_text)
         if generation > 0x7fffffffffffffff:
             return None
-        now_us = time.time_ns() // 1000
-        if abs(now_us - issued_us) > _TOOL_RECEIPT_MAX_AGE_US:
+        # Both the local tool signer and this API run on the same Mac host, so
+        # monotonic timestamps make receipt freshness immune to NTP/wall shifts.
+        now_us = time.monotonic_ns() // 1000
+        age_us = now_us - issued_us
+        if age_us < 0 or age_us > _TOOL_RECEIPT_MAX_AGE_US:
             return None
         try:
             signing_token = secret(settings.speech_bridge_token_env)
@@ -316,12 +322,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             return None
 
         # Every signed bridge request is a one-shot provenance receipt.
-        # Prune only expired IDs and consume after all authentication checks.
+        # Prune only expired IDs and fail closed without evicting unexpired IDs.
         now = time.monotonic()
         for old_id, expires_at in tuple(consumed_tool_receipts.items()):
             if expires_at <= now:
                 consumed_tool_receipts.pop(old_id, None)
         if receipt_id in consumed_tool_receipts:
+            return None
+        if len(consumed_tool_receipts) >= _TOOL_RECEIPT_MAX_REPLAY_ENTRIES:
             return None
         consumed_tool_receipts[receipt_id] = now + _TOOL_RECEIPT_REPLAY_TTL_S
         return visual, epochs[robot_id], generation, listener, listener_epoch, robot_id

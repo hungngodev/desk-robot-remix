@@ -11,6 +11,7 @@ from desk_robot.transport import HeadError, HttpHead
 class UrgentHaltBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_halt_bypasses_each_blocked_accessory_poll(self):
         for method, path in (
+            ("status", "/api/status"),
             ("aux_status", "/api/aux"),
             ("optics_status", "/api/optics"),
             ("ir_status", "/api/ir"),

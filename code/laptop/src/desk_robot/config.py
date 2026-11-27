@@ -191,7 +191,7 @@ class Settings(BaseModel):
     fleet_text_auto_fanout_enabled: StrictBool = True  # Keep broadcast unless selective-only.
     vision_weights_sha256: str | None = None
     max_job_seconds: float = Field(default=45, strict=True, ge=1, le=120)
-    trials_file: Path = Path("data/physical-trials.jsonl")
+    trials_file: Path = Path("../../docs/records/physical-trials.csv")
     memory_dir: Path = Path("../data/private/memory")
 
     def model_post_init(self, __context: object) -> None:

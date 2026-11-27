@@ -51,7 +51,8 @@ def _receipt_headers(
 ) -> dict[str, str]:
     if type(generation) is not int or not 0 <= generation <= 0x7fffffffffffffff:
         raise ValueError("Invalid Xiaozhi tool turn generation")
-    issued_us = time.time_ns() // 1000
+    # Same-host monotonic domain matches coordinator API freshness verification.
+    issued_us = time.monotonic_ns() // 1000
     receipt_id = secrets.token_hex(16)
     signature = hmac.new(
         signing_token.encode("utf-8"),

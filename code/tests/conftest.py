@@ -13,7 +13,7 @@ def _isolated_settings(filename: str, tmp_path: Path) -> Settings:
         ROOT / "config" / filename,
         overrides={
             "memory_dir": tmp_path / "memory",
-            "trials_file": tmp_path / "physical-trials.jsonl",
+            "trials_file": tmp_path / "physical-trials.csv",
         },
     )
 

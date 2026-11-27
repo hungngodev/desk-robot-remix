@@ -141,6 +141,8 @@ class Runtime:
         self._room_dispatch_enqueued = False
         self._room_connection_epoch = 0
         self.room_context_failures = 0
+        self._room_context_outage_active = False
+        self._last_room_context_error_log_at: float | None = None
         self._closed = False
         self._close_task: asyncio.Task | None = None
         self._shutdown_step_tasks: dict[str, asyncio.Task] = {}
@@ -225,8 +227,10 @@ class Runtime:
                 self.room_context_failures = getattr(self, "room_context_failures", 0) + 1
                 now = time.monotonic()
                 last_log = getattr(self, "_last_room_context_error_log_at", None)
+                new_outage = not getattr(self, "_room_context_outage_active", False)
+                self._room_context_outage_active = True
                 if (
-                    self.room_context_failures == 1
+                    new_outage
                     or last_log is None
                     or now - last_log >= 10.0
                 ):
@@ -236,6 +240,9 @@ class Runtime:
                         self.room_context_failures,
                         type(exc).__name__,
                     )
+            else:
+                self._room_context_outage_active = False
+                self._last_room_context_error_log_at = None
 
     def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
         """Bound the USB-to-Mac handoff to one scheduled callback per runtime.

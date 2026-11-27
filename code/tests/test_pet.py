@@ -3849,8 +3849,10 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         await pet._observe_aux("robot-01", 14, authenticated(22, 0x11223344, seq=105))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 4
         # Genuine uint32 wrap on both scan and event counters emits exactly one arrival.
-        await pet._observe_aux("robot-01", 14, authenticated(0x7fffffff, 0, seq=0x7fffffff))
-        await pet._observe_aux("robot-01", 14, authenticated(0xfffffffe, 0, seq=0xfffffffe))
+        await pet._observe_aux("robot-01", 14, authenticated(0x7fffff00, 0, seq=0x7fffffff))
+        await pet._observe_aux("robot-01", 14, authenticated(0xefffff00, 0, seq=0xf0000000))
+        await pet._observe_aux("robot-01", 14, authenticated(0xefffff00, 0, seq=0x20000000))
+        await pet._observe_aux("robot-01", 14, authenticated(0xefffff00, 0, seq=0x8fffffff))
         await pet._observe_aux("robot-01", 14, authenticated(0xffffffff, 0, seq=0xffffffff))
         await pet._observe_aux("robot-01", 14, authenticated(1, 0x55667788, seq=1))
         assert (state.last_nfc_events, state.last_nfc_scan_seq) == (1, 1)
