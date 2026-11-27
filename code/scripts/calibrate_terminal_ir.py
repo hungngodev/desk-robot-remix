@@ -218,10 +218,8 @@ def load_trial_rows(path: Path) -> list[dict]:
 def _validate_trial_ir(data: dict, robot_id: str,
                        expected_dock_id: int | None) -> dict:
     reading = validate_ir(data, robot_id, expected_dock_id=expected_dock_id)
-    if expected_dock_id is not None and not all(
-        key in reading for key in ("left_code", "right_code")
-    ):
-        raise ValueError("Assigned dock calibration requires individual NEC receiver identities")
+    if not all(key in reading for key in ("left_code", "right_code")):
+        raise ValueError("Dock calibration requires individual NEC receiver identities")
     return reading
 
 

@@ -41,6 +41,7 @@ def quoted_evidence(cart):
         "quote_reference": "synthetic quoted SKU " + item["sku"],
         "quoted_at": now,
         "stock_checked_at": now,
+        "stock_availability": "in_stock",
         "stock_evidence_url": item["product_url"],
     } for item in cart["items"]]
     sellers = sorted({item["checkout_seller_candidate"] for item in cart["items"]})

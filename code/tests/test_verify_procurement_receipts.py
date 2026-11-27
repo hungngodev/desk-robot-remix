@@ -97,6 +97,14 @@ def measurement_for_gate(scope, gate):
                 } if gate == (
                     "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
                 ) else {}),
+                **({
+                    "hc123_circuit_revision": "hc123-revA",
+                    "oscilloscope_capture_id": "hc123_scope_01",
+                    "current_capture_id": "haptic_current_01",
+                    "thermal_capture_id": "haptic_thermal_01",
+                } if gate == (
+                    "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial"
+                ) else {}),
             },
             "quantities": quantities,
         }

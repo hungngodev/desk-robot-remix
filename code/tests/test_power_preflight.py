@@ -1381,7 +1381,7 @@ def test_partial_pack_ratings_still_reject_known_contradictions(ratings):
 
 
 @pytest.mark.parametrize("variant, sys_v", [("BQ24074", 4.4), ("BQ24075", 5.5)])
-@pytest.mark.parametrize("peak, expected", [(1.765, True), (1.766, False), (2.0, False)])
+@pytest.mark.parametrize("peak, expected", [(1.706, True), (1.707, False), (2.0, False)])
 def test_integrated_stack_respects_charger_bat_and_out_operating_limit(
     variant, sys_v, peak, expected
 ):
@@ -1397,13 +1397,13 @@ def test_integrated_stack_respects_charger_bat_and_out_operating_limit(
     assert result["all_power_stages_physically_verified"] is False
     assert result["qualified_1s_dock_safe_to_buy"] is False
 
-@pytest.mark.parametrize("hold_a, expected", [(None, False), (3.823, False), (3.824, True)])
+@pytest.mark.parametrize("hold_a, expected", [(None, False), (3.955, False), (3.956, True)])
 def test_stack_pack_fuse_covers_combined_low_cell_peak(hold_a, expected):
     cfg = plausible_hypothetical_one_cell_stack()
-    # Synthetic simultaneous loads, not measured motor or electronics ratings.
+    # Synthetic simultaneous loads sized at the 2.9V dropout-screened converter input minimum.
     cfg.update(active_peak_5v_a=1.5, pack_path_fuse_derated_hold_a=hold_a)
     result = one_stack(**cfg)
-    assert result["minimum_1s_peak_a_including_margin"] == 3.824
+    assert result["minimum_1s_peak_a_including_margin"] == 3.956
     assert result["checks"]["pack_path_fuse_covers_peak"] is expected
     assert all(value for key, value in result["checks"].items()
                if key != "pack_path_fuse_covers_peak")
@@ -1472,13 +1472,13 @@ def test_stack_rejects_underrated_parts_and_absent_pgood(field, value, gate):
     assert result["all_power_stages_physically_verified"] is False
 
 
-@pytest.mark.parametrize("derated_w, expected", [(0.07311487, False), (0.07311488, True)])
+@pytest.mark.parametrize("derated_w, expected", [(0.07824967, False), (0.07824968, True)])
 def test_stack_shunt_dissipation_uses_reserved_discharge_peak(derated_w, expected):
     cfg = plausible_hypothetical_one_cell_stack()
     cfg.update(active_peak_5v_a=1.5, pack_shunt_derated_w=derated_w)
     result = one_stack(**cfg)
-    # 3.824A squared times 0.005 ohm = 0.07311488W.
-    assert result["minimum_1s_peak_a_including_margin"] == 3.824
+    # 3.956A squared times 0.005 ohm = 0.07824968W.
+    assert result["minimum_1s_peak_a_including_margin"] == 3.956
     assert result["checks"]["pack_shunt_matches_firmware_and_thermal_rating"] is expected
     assert result["all_power_stages_compatible_on_paper"] is expected
 
@@ -1495,14 +1495,14 @@ def test_stack_shunt_dissipation_also_covers_reserved_charge_peak(derated_w, exp
     assert result["all_power_stages_compatible_on_paper"] is expected
 
 
-@pytest.mark.parametrize("effective_min_v, expected", [(2.88088, True), (2.880881, False)])
+@pytest.mark.parametrize("effective_min_v, expected", [(2.88022, True), (2.880221, False)])
 def test_stack_regulator_reserves_shunt_drop_in_addition_to_charger_dropout(
     effective_min_v, expected
 ):
     cfg = plausible_hypothetical_one_cell_stack()
     cfg.update(active_peak_5v_a=1.5, boost_regulator_min_input_v=effective_min_v)
     result = one_stack(**cfg)
-    # 2.9V minus 3.824A times 0.005 ohm = 2.88088V.
+    # 2.9V minus 3.956A times 0.005 ohm = 2.88022V.
     assert result["voltage_path"]["regulator_covers_charger_output_on_paper"] is True
     assert result["checks"]["regulator_covers_pack_shunt_drop"] is expected
     assert result["all_power_stages_compatible_on_paper"] is expected

@@ -222,6 +222,7 @@ def test_excluded_zero_target_inventory_allocation_keeps_payable_unknown(
     for line in ev["lines"]:
         line["quoted_at"] = date.today().isoformat()
         line["stock_checked_at"] = date.today().isoformat()
+        line["stock_availability"] = "in_stock"
     stock = {
         "role_key": "room:amg8833",
         "usable_allocated": 1,
@@ -687,6 +688,7 @@ def test_fleet_total_is_not_rejected_by_first_unit_prototype_cap():
     for line in ev["lines"]:
         line["quoted_at"] = date.today().isoformat()
         line["stock_checked_at"] = date.today().isoformat()
+        line["stock_availability"] = "in_stock"
     ev["paid_orders"][0]["total_paid_usd"] = "49.00"
     fleet = mod.account_landed_cost(
         ev, REQUIRED, CATEGORIES, expected_scope="fleet"
@@ -715,6 +717,7 @@ def _current_checkout_sample():
     for line in evidence["lines"]:
         line["quoted_at"] = date.today().isoformat()
         line["stock_checked_at"] = date.today().isoformat()
+        line["stock_availability"] = "in_stock"
     return evidence
 
 
@@ -947,6 +950,7 @@ def test_sense_payment_exact_prototype_cap_with_tax_and_freight(scope, freight, 
     for line in ev["lines"]:
         line["quoted_at"] = date.today().isoformat()
         line["stock_checked_at"] = date.today().isoformat()
+        line["stock_availability"] = "in_stock"
     ev["seller_charges"][0].update(shipping_usd=freight, tax_usd="0.32")
     out = mod.account_landed_cost(ev, REQUIRED, CATEGORIES, expected_scope=scope)
     assert out["errors"] == []
@@ -965,6 +969,7 @@ def test_unpriced_purchase_line_cannot_use_zero_fallback(scope, bad_price):
     for line in ev["lines"]:
         line["quoted_at"] = date.today().isoformat()
         line["stock_checked_at"] = date.today().isoformat()
+        line["stock_availability"] = "in_stock"
     ev["lines"][0]["package_price_usd"] = bad_price
     out = mod.account_landed_cost(ev, REQUIRED, CATEGORIES, expected_scope=scope)
     assert not out["calculation_complete_not_physical_approval"]

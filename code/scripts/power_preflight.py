@@ -459,12 +459,13 @@ def _screen_undocked_stack(
     pack_mm: tuple[float, float, float], tray_mm: tuple[float, float, float],
     pack_peak_a: float | None, pack_sustained_a: float | None, pcm_trip_a: float | None,
     connector_a: float | None, wire_crimp_a: float | None,
+    converter_min_input_v: float = 3.0,
 ) -> tuple[dict, dict]:
     """Reuse the supply and protected-pack screens for the undocked path."""
     # Source of truth: do not silently add a new third power-supply formula.
     undocked = size_5v_supply(
         active_peak_5v_a, active_sustained_5v_a,
-        cell_low_v=3.0, measured_boost_efficiency=boost_efficiency_low_cell,
+        cell_low_v=converter_min_input_v, measured_boost_efficiency=boost_efficiency_low_cell,
         boost_max_input_a=boost_input_max_a,
         boost_continuous_input_a=boost_input_continuous_a,
         boost_continuous_output_a=boost_output_at_3v_continuous_a,
@@ -633,7 +634,8 @@ def screen_one_cell_power_stack(
         boost_output_at_3v_continuous_a=boost_output_at_3v_continuous_a,
         pack_mm=pack_mm, tray_mm=tray_mm, pack_peak_a=pack_peak_a,
         pack_sustained_a=pack_sustained_a, pcm_trip_a=pcm_trip_a,
-        connector_a=connector_a, wire_crimp_a=wire_crimp_a)
+        connector_a=connector_a, wire_crimp_a=wire_crimp_a,
+        converter_min_input_v=2.9)
     vpath = screen_bq2407x_output_path(
         charger_variant,
         regulator_min_input_v=boost_regulator_min_input_v,

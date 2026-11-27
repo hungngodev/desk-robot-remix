@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BODY_PINS = "code/firmware/body/include/BodyPins.h"
+TOF_BUS_HEADER = "code/firmware/body/lib/TofBus/TofBus.h"
 HEAD_PINS = "code/firmware/head/sense/config.h"
 PLAN = "docs/hardware/full-feature-plan.json"
 
@@ -371,10 +372,39 @@ def _verify_upstream_bus(bus: dict) -> None:
         raise ValueError("Upstream I2C device identity or address conflict")
 
 
-def _verify_mux_topology(bus: dict) -> None:
+def _parse_tof_bus_constants(tof_header: str) -> dict[str, int]:
+    """Parse canonical I2C addresses from TofBus.h, ignoring comments."""
+    stripped = re.sub(
+        r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: '""' if match[0].startswith('"') else " ",
+        tof_header,
+    )
+    pattern = re.compile(
+        r"\b(kMuxAddress|kOptionalMuxAddress|kSensorAddress)\s*=\s*"
+        r"(0x[0-9a-fA-F]+|\d+)\s*;"
+    )
+    found: dict[str, int] = {}
+    for name, raw_val in pattern.findall(stripped):
+        if name in found:
+            raise ValueError(f"Duplicate TofBus.h declaration: {name}")
+        found[name] = int(raw_val, 0)
+    required = ("kMuxAddress", "kOptionalMuxAddress", "kSensorAddress")
+    missing = [name for name in required if name not in found]
+    if missing:
+        raise ValueError(f"Missing TofBus.h I2C declarations: {', '.join(missing)}")
+    return found
+
+
+def _verify_mux_topology(bus: dict, tof_constants: dict[str, int] | None = None) -> None:
     # Do not accept bool/float addresses that compare equal to an integer.
     # They would later break hex formatting or misstate the physical harness.
-    for group, expected in (("mux_ranges", 0x70), ("mux_extras", 0x71)):
+    expected_ranges = (
+        tof_constants["kMuxAddress"] if tof_constants is not None else 0x70
+    )
+    expected_extras = (
+        tof_constants["kOptionalMuxAddress"] if tof_constants is not None else 0x71
+    )
+    for group, expected in (("mux_ranges", expected_ranges), ("mux_extras", expected_extras)):
         address = bus[group]["address"]
         if type(address) is not int or address != expected:
             raise ValueError(f"Incorrect {group} mux address")
@@ -511,16 +541,21 @@ def _verify_range_power(plan: dict) -> None:
         raise ValueError("Unapproved cheap ToF 3.3V breakout identity or release")
 
 
-def _verify_range_lanes(bus: dict) -> None:
+def _verify_range_lanes(bus: dict, tof_constants: dict[str, int] | None = None) -> None:
     ranges = bus["mux_ranges"]["channels"]
+    expected_sensor = (
+        tof_constants["kSensorAddress"] if tof_constants is not None else 0x29
+    )
     # Each selected TCA9548A lane isolates one VL53L0X at its native
     # 7-bit address. Reject a manifest that silently substitutes another
     # device or claims multiple same-address range sensors on one lane.
     for lane in ranges:
         devices = lane["devices"]
         if (len(devices) != 1 or devices[0].get("name") != "VL53L0X"
-                or devices[0]["address"] != 0x29):
-            raise ValueError("Range lane must contain exactly one named VL53L0X at 0x29")
+                or devices[0]["address"] != expected_sensor):
+            raise ValueError(
+                f"Range lane must contain exactly one named VL53L0X at 0x{expected_sensor:02x}"
+            )
     expected_roles = (
         "floor_front_left", "floor_front_right", "floor_rear_left",
         "floor_rear_right", "front_obstacle", "left_obstacle",
@@ -531,19 +566,26 @@ def _verify_range_lanes(bus: dict) -> None:
         raise ValueError("Critical cliff/obstacle sensor channel mapping drift")
 
 
-def verify(plan: dict, body: str, head: str) -> None:
+def verify(plan: dict, body: str, head: str, tof_header: str | None = None) -> None:
     """Source agreement only. Passing is NEVER electrical acceptance."""
     bus = plan["bus"]
+    if tof_header is None:
+        tof_path = ROOT / TOF_BUS_HEADER
+        if tof_path.is_file():
+            tof_header = tof_path.read_text(encoding="utf-8")
+    tof_constants = (
+        _parse_tof_bus_constants(tof_header) if tof_header is not None else None
+    )
     _verify_gpio_contract(bus, body, head)
     _verify_audio_power(plan)
     _verify_upstream_bus(bus)
-    _verify_mux_topology(bus)
+    _verify_mux_topology(bus, tof_constants)
     _verify_dock_lane(bus)
     _verify_interaction_lanes(bus)
     _verify_haptic_contract(plan)
     _verify_battery_wheel_lanes(bus)
     _verify_range_power(plan)
-    _verify_range_lanes(bus)
+    _verify_range_lanes(bus, tof_constants)
 
 
 def render(plan: dict, body: str, head: str) -> str:

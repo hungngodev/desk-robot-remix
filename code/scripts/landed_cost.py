@@ -140,12 +140,25 @@ def _seller_date(value: object, label: str, *, allow_future: bool = False) -> da
     return parsed
 
 
+_AFFIRMATIVE_STOCK_AVAILABILITY = frozenset({"in_stock", "orderable"})
+
+
+def _validate_stock_availability(line: dict) -> str:
+    raw = line.get("stock_availability")
+    if type(raw) is not str or raw.strip() not in _AFFIRMATIVE_STOCK_AVAILABILITY:
+        raise ValueError(
+            "missing affirmative stock_availability ('in_stock' or 'orderable')"
+        )
+    return raw.strip()
+
+
 def _current_checkout_quote(line: dict, quoted: date) -> None:
     """Bound claimed checkout freshness; release still needs verified receipts.
 
     Dates and HTTPS links do not independently authenticate seller stock,
     physical fit or the immutable signed release gate.
     """
+    _validate_stock_availability(line)
     today = date.today()
     checked = _seller_date(line.get("stock_checked_at"), "stock_checked_at")
     if checked < quoted or (today - checked).days > CURRENT_QUOTE_MAX_AGE_DAYS:
@@ -197,6 +210,8 @@ def _parse_quote(
         raise ValueError("missing HTTPS stock evidence")
     if expected_scope in {"first_robot", "fleet"}:
         _current_checkout_quote(line, quoted)
+    elif expected_scope == "pilot_samples":
+        _validate_stock_availability(line)
     packages = positive_count(line.get("quantity_packages"), "packages")
     units = positive_count(line.get("units_per_package"), "units")
     category = role_categories[role]

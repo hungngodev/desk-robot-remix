@@ -165,6 +165,7 @@ def fit_corners(
     # enforce the same 3 px absolute corner ceiling used for live AprilTags.
     if len(rvecs) != len(image_points) or len(tvecs) != len(image_points):
         raise ValueError("Incomplete checkerboard extrinsics")
+    normals = []
     for observed, rvec, tvec in zip(image_points, rvecs, tvecs, strict=True):
         projected, _ = cv2.projectPoints(object_grid, rvec, tvec, camera, dist)
         if projected.shape != observed.shape or not np.isfinite(projected).all():
@@ -173,6 +174,27 @@ def fit_corners(
         errors = np.hypot(residual[..., 0], residual[..., 1])
         if not np.isfinite(errors).all() or np.any(errors > 3.0):
             raise ValueError("Excessive checkerboard corner reprojection error")
+        rot, _ = cv2.Rodrigues(rvec)
+        normal = rot[:, 2].astype(np.float64)
+        norm = float(np.linalg.norm(normal))
+        if not math.isfinite(norm) or norm <= 1e-6:
+            raise ValueError("Degenerate checkerboard orientation")
+        normals.append(normal / norm)
+    # Require genuine 3D board-normal tilt and pairwise angular spread so
+    # near-frontal captures cannot pass on 2D translation pixel spread alone.
+    view_tilts_deg = [
+        math.degrees(math.acos(max(-1.0, min(1.0, abs(float(n[2]))))))
+        for n in normals
+    ]
+    pairwise_spread_deg = [
+        math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(a, b))))))
+        for idx, a in enumerate(normals)
+        for b in normals[:idx]
+    ]
+    if max(view_tilts_deg, default=0.0) < 12.0 or max(pairwise_spread_deg, default=0.0) < 15.0:
+        raise ValueError(
+            "Checkerboard views are too nearly frontal; tilt board across poses"
+        )
     return {
         "schema_version": 1,
         "measured": False,  # Operator must inspect actual mounting and images.

@@ -807,6 +807,27 @@ def test_current_2w_rectangular_front_grille_renders(tmp_path):
     pocket_clearance = 0.35
     assert edge - bore_radius >= 2.0
     assert border - edge - bore_radius - pocket_clearance >= 2.0
+    # 868TfBQ: Verify the four M2 bore cylinders directly in the STL mesh.
+    expected_centers = (
+        (-18.0 + edge, -16.0 + edge),
+        (18.0 - edge, -16.0 + edge),
+        (-18.0 + edge, 16.0 - edge),
+        (18.0 - edge, 16.0 - edge),
+    )
+    mid_z_pts = [
+        p for p in points
+        if 0.4 <= p[2] <= 2.6
+        and abs(abs(p[0]) - (18.0 - edge)) <= bore_radius + 0.25
+        and abs(abs(p[1]) - (16.0 - edge)) <= bore_radius + 0.25
+    ]
+    for cx, cy in expected_centers:
+        near = [
+            p for p in mid_z_pts
+            if ((p[0] - cx) ** 2 + (p[1] - cy) ** 2) ** 0.5 <= bore_radius + 0.15
+        ]
+        assert near, f"Missing M2 bore geometry at ({cx}, {cy})"
+        xs = [abs(p[0] - cx) for p in near]
+        assert max(xs) * 2 >= 2.15
     for assignment, message in (
         ("speaker_grille_border=6", "gasket/pocket printable web"),
         ("speaker_grille_hole_edge=2", "outside printable web"),

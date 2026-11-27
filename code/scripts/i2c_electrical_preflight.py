@@ -174,15 +174,36 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             if not isinstance(owner, dict) or not isinstance(owner.get(line), dict):
                 raise ValueError(f"Missing {label} {line} circuit")
             part = owner[line]
-            power = _num(part.get("pullup_v"), f"{label}.{line}.pullup_v")
-            # Design contract prohibits 5V generic carrier pullups on WROOM.
-            if not PULLUP_MIN_V <= power <= PULLUP_MAX_V:
-                raise ValueError(f"{label}.{line}: pullup not 3.3V")
             resistors = part.get("pullup_ohms")
             if not isinstance(resistors, list):
                 raise ValueError(f"{label}.{line}: installed pullups must be listed")
-            pullups.extend((_num(v, f"{label}.{line}.pullup_ohms"), power)
-                           for v in resistors)
+            rails_v = part.get("pullup_rails_v")
+            all_per_resistor = bool(resistors) and all(isinstance(r, dict) for r in resistors)
+            default_power = (
+                _num(part.get("pullup_v"), f"{label}.{line}.pullup_v")
+                if "pullup_v" in part or (rails_v is None and not all_per_resistor)
+                else None
+            )
+            if rails_v is not None and (
+                not isinstance(rails_v, list) or len(rails_v) != len(resistors)
+            ):
+                raise ValueError(f"{label}.{line}: pullup_rails_v length mismatch")
+            for idx, entry in enumerate(resistors):
+                if isinstance(entry, dict):
+                    ohms = _num(entry.get("ohms"), f"{label}.{line}.pullup_ohms[{idx}].ohms")
+                    rail = _num(
+                        entry.get("pullup_v"), f"{label}.{line}.pullup_ohms[{idx}].pullup_v",
+                    )
+                else:
+                    ohms = _num(entry, f"{label}.{line}.pullup_ohms")
+                    rail = (
+                        _num(rails_v[idx], f"{label}.{line}.pullup_rails_v")
+                        if rails_v is not None else default_power
+                    )
+                # Design contract prohibits 5V generic carrier pullups on WROOM.
+                if rail is None or not PULLUP_MIN_V <= rail <= PULLUP_MAX_V:
+                    raise ValueError(f"{label}.{line}: pullup not 3.3V")
+                pullups.append((ohms, rail))
             total_pf += Fraction(str(_num(part.get("cap_pf"), f"{label}.{line}.cap_pf")))
             if label == "upstream":
                 upstream_count = len(pullups)

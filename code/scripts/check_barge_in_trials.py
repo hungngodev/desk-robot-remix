@@ -298,9 +298,12 @@ def _validate_control_setup(human: dict, control: dict, quiet: dict) -> None:
             )
 
 
-def _echo_control(control: dict) -> dict:
+def _echo_control(control: dict, *, actuator_only: dict | None = None) -> dict:
     duration = _number(control.get("duration_seconds"), "robot-only duration")
     echoes = control.get("self_interruptions")
+    false_vad_starts = control.get("false_vad_starts")
+    if false_vad_starts is not None and (type(false_vad_starts) is not int or false_vad_starts < 0):
+        raise ValueError("false_vad_starts must be a non-negative integer")
     speech_seconds = _number(control.get("robot_speech_seconds"), "robot speech seconds")
     if (duration < 600 or type(echoes) is not int or echoes < 0
             or not 0 < speech_seconds <= duration
@@ -342,9 +345,38 @@ def _echo_control(control: dict) -> dict:
         raise ValueError(
             "Robot-only control must exercise low, medium and high intended volumes"
         )
+    actuator_during_tts = control.get("actuator_load_during_tts_observed") is True
+    actuator_only_ok = False
+    actuator_only_false_vad: int | None = None
+    if actuator_only is not None:
+        ao_dur = _number(actuator_only.get("duration_seconds"), "actuator-only duration")
+        ao_false_vad = actuator_only.get("false_vad_starts")
+        if (type(ao_false_vad) is not int or ao_false_vad < 0):
+            raise ValueError("actuator_only false_vad_starts must be a non-negative integer")
+        actuator_only_false_vad = ao_false_vad
+        actuator_only_ok = (
+            ao_dur >= 60
+            and actuator_only.get("actuator_load_observed") is True
+            and ao_false_vad == 0
+        )
+    subgate_passed = (
+        actuator_during_tts
+        and echoes == 0
+        and false_vad_starts == 0
+        and actuator_only_ok
+    )
     return {
         "robot_only_seconds": duration,
         "self_interruptions": echoes,
+        "robot_only_false_vad_starts": false_vad_starts,
+        "robot_only_actuator_during_tts_observed": actuator_during_tts,
+        "actuator_only_false_vad_starts": actuator_only_false_vad,
+        "meets_actuator_noise_subgate": subgate_passed,
+        "robot_only_actuator_subgate_status": (
+            "recorded_not_physically_attested"
+            if subgate_passed
+            else "open_missing_or_failed_actuator_load"
+        ),
         "robot_speech_seconds": speech_seconds,
         "robot_speech_seconds_by_minute": minute_seconds,
         "robot_speech_volumes_observed": sorted(robot_volumes),
@@ -371,10 +403,18 @@ def _quiet_control(quiet: dict) -> dict:
 
 
 def evaluate(records: list[dict]) -> dict:
-    human, control, quiet = _partition_records(records)
+    actuator_only = next(
+        (r for r in records if isinstance(r, dict) and r.get("kind") == "actuator_only"),
+        None,
+    )
+    filtered = [
+        r for r in records
+        if not (isinstance(r, dict) and r.get("kind") == "actuator_only")
+    ]
+    human, control, quiet = _partition_records(filtered)
     human_report = _score_human_trials(human)
     _validate_control_setup(human[0], control, quiet)
-    echo_report = _echo_control(control)
+    echo_report = _echo_control(control, actuator_only=actuator_only)
     quiet_report = _quiet_control(quiet)
     distance_results = human_report["distance_results"]
     return {
@@ -397,6 +437,7 @@ def evaluate(records: list[dict]) -> dict:
         "meets_proposed_gate": (
             all(b["meets_human_gate"] for b in distance_results.values())
             and echo_report["self_interruptions"] == 0
+            and (echo_report["robot_only_false_vad_starts"] in (None, 0))
             and quiet_report["quiet_unsolicited_speech_events"] == 0
             and quiet_report["quiet_unsolicited_motion_events"] == 0
             and all(r["obsolete_audio_never_resumed"] for r in human)

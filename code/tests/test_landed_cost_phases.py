@@ -23,6 +23,7 @@ def _quote(role, seller, price, units=1):
         "quantity_packages": 1, "units_per_package": units,
         "package_price_usd": price, "quote_reference": "checkout",
         "quoted_at": today, "stock_checked_at": today,
+        "stock_availability": "in_stock",
         "stock_evidence_url": "https://supplier.example/stock",
     }
 

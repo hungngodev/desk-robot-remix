@@ -401,8 +401,8 @@ def main():
         time.sleep(2)
         port.reset_input_buffer()
 
-        def transact(command):
-            return transact_serial(port, command)
+        def transact(command, receipt=None):
+            return transact_serial(port, command, receipt=receipt)
 
         if args.inspect:
             samples = []
@@ -455,14 +455,31 @@ def main():
             }, indent=2))
             return
 
+        def call_transact(command_text: str, *, receipt: dict[str, object] | None = None):
+            import inspect
+            try:
+                params = inspect.signature(transact).parameters
+            except (TypeError, ValueError):
+                params = {}
+            if receipt is not None and "receipt" in params:
+                return transact(command_text, receipt=receipt)
+            return transact(command_text)
+
         if op in {"stop", "disarm", "halt"}:
-            transact(args.command)
-            print("Acknowledged " + op)
+            cmd_receipt: dict[str, object] = {}
+            ack = call_transact(args.command, receipt=cmd_receipt)
+            print(json.dumps({
+                "command": op,
+                "acknowledged": True,
+                "response": ack,
+                "receipt": cmd_receipt,
+                "physical_stop_verified": False,
+            }, indent=2))
             return
 
         # A standalone terminal reconnect usually resets the WROOM; attempting
         # arm without explicit local rearm would fail and hides the sensor state.
-        status = inspect_status(transact("status"))
+        status = inspect_status(call_transact("status"))
         if not status["eligible_for_manual_local_rearm"]:
             raise RuntimeError(
                 "Unqualified touch/range state; inspect first on catch tray. "
@@ -476,10 +493,12 @@ def main():
         if op == "rearm":
             # Local-only safety recovery: verify ACK and read-only status while
             # remaining disarmed until an independent operator permit is granted.
-            transact("rearm")
-            post_status = inspect_status(transact("status"))
+            rearm_receipt: dict[str, object] = {}
+            call_transact("rearm", receipt=rearm_receipt)
+            post_status = inspect_status(call_transact("status"))
             print(json.dumps({
                 "rearm_acknowledged": True,
+                "receipt": rearm_receipt,
                 "armed": post_status["armed"],
                 "local_guard_ready": post_status["local_guard_ready"],
                 "local_guard_fault": post_status["local_guard_fault"],
@@ -487,19 +506,42 @@ def main():
                 "physical_qualification_pass": False,
             }, indent=2))
             return
+        cmd_receipt = {}
+        halt_receipt: dict[str, object] = {}
+        primary_error: Exception | None = None
+        halt_error: Exception | None = None
         try:
-            transact("rearm")  # Direct body USB only; the guard can reject it.
-            transact("arm")
-            transact(args.command)
+            call_transact("rearm")  # Direct body USB only; the guard can reject it.
+            call_transact("arm")
+            call_transact(args.command, receipt=cmd_receipt)
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
-                transact("keepalive")
+                call_transact("keepalive")
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+        except Exception as exc:
+            primary_error = exc
+            raise
         finally:
             # End the standalone job without leaving an armed body lease.
             # HALT retains servo PWM rather than dropping a held object.
-            transact("halt")
-        print("Job ended; halt acknowledged. Servo angle is commanded, not measured.")
+            try:
+                call_transact("halt", receipt=halt_receipt)
+            except Exception as exc:
+                halt_error = exc
+                if primary_error is not None:
+                    primary_error.add_note(
+                        f"Final halt failed: {type(exc).__name__}: {exc}"
+                    )
+        if halt_error is not None:
+            raise halt_error
+        print(json.dumps({
+            "command": args.command,
+            "command_receipt": cmd_receipt,
+            "halt_acknowledged": True,
+            "halt_receipt": halt_receipt,
+            "physical_qualification_pass": False,
+            "note": "Job ended; halt acknowledged. Servo angle is commanded, not measured.",
+        }, indent=2))
 
 
 if __name__ == "__main__":

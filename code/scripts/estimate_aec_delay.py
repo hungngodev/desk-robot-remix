@@ -295,6 +295,8 @@ def estimate_clock_drift(
         lags.append(frac_lag)
         correlations.append(confidence)
     # Least-squares slope in samples of lag per sample of recording time.
+    # For short 4-5 s captures, a fractional parabolic lag error can shift ppm;
+    # keep explicit duration uncertainty bounds so callers see the resolution.
     t = np.asarray(starts, dtype=np.float64)
     y = np.asarray(lags, dtype=np.float64)
     centered = t - t.mean()
@@ -323,13 +325,25 @@ def estimate_clock_drift(
         if residual > 3.0:
             raise ValueError("Changing acoustic delay is not a stable clock drift")
     ppm = slope * 1_000_000.0
+    duration_s = len(reference) / sample_rate
+    # Empirically, smoothed broadband peaks have ~1.6-sample endpoint variance;
+    # 4-5 s captures cannot guarantee sub-25 ppm slip resolution while 10 s does.
+    uncertainty_ppm = round(1.6 / max(span, 1) * 1_000_000.0, 1)
+    within_25ppm_bound = uncertainty_ppm <= 25.0
     return {
         "clock_drift_ppm_estimate": round(ppm, 1),
+        "clock_drift_uncertainty_ppm": uncertainty_ppm,
+        "clock_drift_within_25ppm_bound": within_25ppm_bound,
+        "clock_drift_capture_seconds": round(duration_s, 3),
         "clock_drift_window_lags_samples": [round(lag, 3) for lag in lags],
         "clock_drift_min_correlation": round(min(correlations), 4),
         "clock_drift_max_fit_residual_samples": round(residual, 2),
         "clock_drift_needs_hardware_review": abs(ppm) > 100,
-        "clock_drift_status": "offline_estimate_not_hardware_qualified",
+        "clock_drift_status": (
+            "offline_estimate_not_hardware_qualified"
+            if within_25ppm_bound
+            else "short_capture_exceeds_25ppm_uncertainty_bound"
+        ),
         "aec_physically_verified": False,
         "natural_barge_in_verified": False,
     }

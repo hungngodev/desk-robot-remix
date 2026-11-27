@@ -23,6 +23,7 @@ def quote(role, sku, packages=1, *, kit=None):
         "quote_reference": "exact-cart-" + sku,
         "quoted_at": date.today().isoformat(),
         "stock_checked_at": date.today().isoformat(),
+        "stock_availability": "in_stock",
         "stock_evidence_url": "https://example.org/catalog/" + sku,
     }
     if kit is not None:

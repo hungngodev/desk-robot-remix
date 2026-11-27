@@ -425,8 +425,8 @@ def export_kit(
                         *DOCKS,
                     ),
                 })
-        # A concurrent CAD edit invalidates this candidate, even though all
-        # of its staged meshes remain tied to their original source bytes.
+        # Recheck before publishing meshes AND again after footprint screening
+        # before atomically publishing fit_kit_manifest.json last.
         for source, snapshot in snapshots.items():
             if _read_scad_source(root, source) != snapshot:
                 raise ValueError(f"SCAD source changed during export: {source.name}")
@@ -435,23 +435,28 @@ def export_kit(
             destination = out / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(stage / relative, destination)
-    report = {
-        "provisional_fit_parts_only": True,
-        "source_geometry_rendered": True,
-        "hardware_fit_verified": False,
-        "full_printable_assembly_verified": False,
-        "dock_charge_contacts_approved": False,
-        "commercial_manufacture_authorized": False,
-        "fdm_print_guidance": dict(FDM_PRINT_GUIDANCE),
-        "power_fit_scope": dict(POWER_FIT_SCOPE),
-        "source_chassis_battery_footprint": reference_body_footprint_screen(
-            root, out,
-        ),
-        "parts": rendered,
-    }
-    (out / "fit_kit_manifest.json").write_text(
-        json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8",
-    )
+        report = {
+            "provisional_fit_parts_only": True,
+            "source_geometry_rendered": True,
+            "hardware_fit_verified": False,
+            "full_printable_assembly_verified": False,
+            "dock_charge_contacts_approved": False,
+            "commercial_manufacture_authorized": False,
+            "fdm_print_guidance": dict(FDM_PRINT_GUIDANCE),
+            "power_fit_scope": dict(POWER_FIT_SCOPE),
+            "source_chassis_battery_footprint": reference_body_footprint_screen(
+                root, out,
+            ),
+            "parts": rendered,
+        }
+        staged_manifest = stage / "fit_kit_manifest.json"
+        staged_manifest.write_text(
+            json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8",
+        )
+        for source, snapshot in snapshots.items():
+            if _read_scad_source(root, source) != snapshot:
+                raise ValueError(f"SCAD source changed during export: {source.name}")
+        os.replace(staged_manifest, out / "fit_kit_manifest.json")
     return report
 
 

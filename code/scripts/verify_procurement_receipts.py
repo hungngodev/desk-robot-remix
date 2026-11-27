@@ -368,6 +368,18 @@ CRITICAL_TRIAL_GATES = {
             ("quiet_unsolicited_motion_events", "events", 0, 0, True),
         ),
     },
+    "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial": {
+        "minimum_samples": 6,
+        "quantities": (
+            ("normal_operation_trials", "trials", 3, None, True),
+            ("stuck_i2c_fault_trials", "trials", 3, None, True),
+            ("minimum_pulse_spacing_s", "s", 1.5, None, False),
+            ("measured_pulse_duration_ms", "ms", 1, 200, False),
+            ("measured_motor_current_ma", "mA", 1, 500, False),
+            ("measured_motor_temperature_c", "C", 0, 85, False),
+            ("unbounded_continuous_energizations", "events", 0, 0, True),
+        ),
+    },
 }
 
 
@@ -397,6 +409,11 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         keys.extend((
             "robot_id", "firmware_commit", "audio_config_id",
             "mic_speaker_placement_id", "trial_capture_id",
+        ))
+    if gate == "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial":
+        keys.extend((
+            "hc123_circuit_revision", "oscilloscope_capture_id",
+            "current_capture_id", "thermal_capture_id",
         ))
     if gate == "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials":
         keys.extend((
