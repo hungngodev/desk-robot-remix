@@ -84,3 +84,17 @@ async def test_vision_calls_bound_cancellation_resistant_tasks_and_recover():
     finally:
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("remaining", [
+    float("nan"), float("inf"), -float("inf"), 0, -1, True, None, 10**400,
+])
+async def test_invalid_vision_deadline_never_enters_uncontended_lock(remaining):
+    lock = asyncio.Lock()
+    with pytest.raises(RuntimeError, match="expired while queued"):
+        async with vision_lock_until(lock, remaining):
+            pytest.fail("Invalid deadline acquired the lock")
+    assert not lock.locked()
+    async with vision_lock_until(lock, 1):
+        assert lock.locked()
+    assert not lock.locked()

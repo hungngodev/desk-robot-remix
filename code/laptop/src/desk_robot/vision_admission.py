@@ -6,6 +6,8 @@ from collections.abc import Callable, Coroutine
 from contextlib import asynccontextmanager
 from typing import Any
 
+from .sensor_event_contract import is_finite_number
+
 
 class FrameAdmissionDropped(RuntimeError):
     """An optional frame lost admission; no native work was submitted."""
@@ -65,7 +67,7 @@ class LatestFrameAdmission:
 @asynccontextmanager
 async def vision_lock_until(lock: asyncio.Lock, remaining: float):
     """Retire queued JPEG references by their oldest frame's deadline."""
-    if remaining <= 0:
+    if not is_finite_number(remaining) or remaining <= 0:
         raise RuntimeError("Camera observation expired while queued")
     try:
         async with asyncio.timeout(remaining):
