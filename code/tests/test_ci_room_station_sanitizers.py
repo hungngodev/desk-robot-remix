@@ -24,16 +24,30 @@ def _assert_compiles_and_runs(calls, sources, build):
     }
     pos = 0
     for source in sources:
-        repetitions = 6 if source.name == "soil_profile_tests.cpp" else 1
+        profiles = [("-std=c++17",)]
+        if source.name == "soil_profile_tests.cpp":
+            profiles = [
+                ("-std=c++11", "-DEXPECT_SOIL_ENABLED=0"),
+                ("-std=c++11", "-DEXPECT_SOIL_ENABLED=0", "-DROOM_SOIL_FITTED=0"),
+                ("-std=c++11", "-DEXPECT_SOIL_ENABLED=1", "-DROOM_SOIL_FITTED=1"),
+                ("-std=c++17", "-DEXPECT_SOIL_ENABLED=0"),
+                ("-std=c++17", "-DEXPECT_SOIL_ENABLED=0", "-DROOM_SOIL_FITTED=0"),
+                ("-std=c++17", "-DEXPECT_SOIL_ENABLED=1", "-DROOM_SOIL_FITTED=1"),
+            ]
         executable = str(build / source.stem)
-        for _ in range(repetitions):
+        for profile in profiles:
             compile_cmd, compile_options = calls[pos]
             run_cmd, run_options = calls[pos + 1]
             pos += 2
             assert compile_cmd[0] == "c++"
             assert required_flags <= set(compile_cmd)
-            if repetitions == 1:
-                assert "-std=c++17" in compile_cmd
+            # Compare the complete profile, including absence of a soil override
+            # for the default build. A repeated or conflicting flag must fail.
+            assert tuple(
+                flag for flag in compile_cmd if flag.startswith(("-std=", "-D", "-U"))
+            ) == profile
+            assert f"-I{source.parent.parent / 'src'}" in compile_cmd
+            assert f"-I{build}" in compile_cmd
             assert compile_cmd[-3:] == [str(source), "-o", executable]
             assert compile_options["check"] and run_options["check"]
             assert compile_options["timeout"] == 30
@@ -48,19 +62,28 @@ def test_room_station_runner_discovers_new_sources(tmp_path, monkeypatch):
     includes = station / "src"
     includes.mkdir()
     (includes / "main.cpp").write_text(
-        "bool finite_temperature(float) { return true; }\nvoid jsbool();\n"
+        "#ifndef ROOM_SOIL_FITTED\n#define ROOM_SOIL_FITTED 0\n#endif\n"
+        "namespace {\nconstexpr uint32_t kReportMs = 1000;\n"
+        "bool finite_temperature(float) { return true; }\n"
+        "void jsbool(bool value) {}\nvoid number();\n"
         "void bme_step(unsigned) {}\nvoid bme_observation();\n"
+        "#if ROOM_SOIL_FITTED\nvoid soil_step() {}\n#endif\n"
+        "// The pinned Adafruit AMG88xx\n"
     )
     (sources / "bme_step_tests.cpp").touch()
     (sources / "new_tests.cpp").touch()
     (sources / "probe.cpp").touch()
+    (sources / "soil_profile_tests.cpp").touch()
     (sources / "README.md").touch()
     calls = []
     monkeypatch.setattr(RUNNER.shutil, "which", lambda _: "c++")
     monkeypatch.setattr(RUNNER.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
     RUNNER.run_tests(station, tmp_path)
     _assert_compiles_and_runs(
-        calls, [sources / name for name in ("bme_step_tests.cpp", "new_tests.cpp", "probe.cpp")],
+        calls,
+        [sources / name for name in (
+            "bme_step_tests.cpp", "new_tests.cpp", "probe.cpp", "soil_profile_tests.cpp",
+        )],
         tmp_path,
     )
     assert "void bme_step(unsigned) {}" in (tmp_path / "bme_step_under_test.h").read_text()
