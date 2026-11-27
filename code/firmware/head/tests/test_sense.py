@@ -2448,6 +2448,37 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
 using namespace desk_robot;
 using stackchan::behavior::Motion;
 int main() {
+    // Large intervals must not wrap the elapsed-to-fixed-point conversion.
+    using face_eye_detail::EaseAxis;
+    constexpr uint32_t duration = 0xfffffffcU;
+    assert(EaseAxis(-128, 127, 0, 0) == 127);
+    assert(EaseAxis(127, -128, 0xffffffffU, duration) == -128);
+    assert(EaseAxis(-128, 127, duration / 4U, duration) == -88);
+    assert(EaseAxis(-128, 127, duration / 2U, duration) == 0);
+    assert(EaseAxis(-128, 127, duration / 4U * 3U, duration) == 87);
+    assert(EaseAxis(127, -128, duration / 2U, duration) == -1);
+    for (int from = -128; from <= 127; ++from) {
+        for (int to = -128; to <= 127; ++to) {
+            int previous = from;
+            for (uint32_t elapsed : {0U, 1U, duration / 4U, duration / 2U,
+                                     duration / 4U * 3U, duration - 1U, duration}) {
+                const int value = EaseAxis(static_cast<int8_t>(from),
+                                           static_cast<int8_t>(to), elapsed, duration);
+                assert(from <= to ? previous <= value && value <= to
+                                  : previous >= value && value >= to);
+                if (elapsed == 0) assert(value == from);
+                if (elapsed == duration) assert(value == to);
+                previous = value;
+            }
+        }
+    }
+    FaceEyeAnimator priority;
+    assert(priority.Step(0xfffffff0U, Motion::kLookRight, true).x == 3);
+    const auto stopped = priority.Step(0xfffffff1U, Motion::kLookLeft, true, true);
+    assert(!stopped.visible && !stopped.closed && stopped.x == 0 && stopped.y == 0);
+    assert(stopped.lid_height == face_eye_geometry::kOpenHeight && stopped.mouth_height == 0);
+    assert(!priority.Step(0x40U, Motion::kNone, true).visible);
+    assert(!priority.Step(0x40U + 2999U, Motion::kNone, true).visible);
     FaceEyeAnimator eyes;
     auto left = eyes.Step(1000, Motion::kLookLeft, true);
     assert(left.visible && left.x == -3 && !left.closed);
@@ -2529,15 +2560,22 @@ int main() {
     assert(pet.state() == State::kAttentive && !awake.set_speech);
 }
 """
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    env = native_cpp_env()
+    env.update(ASAN_OPTIONS="halt_on_error=1", UBSAN_OPTIONS="halt_on_error=1")
     with tempfile.TemporaryDirectory() as temp:
         cpp = Path(temp) / "eyes.cpp"
-        binary = Path(temp) / "eyes"
         cpp.write_text(native)
-        subprocess.run([
-            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-            "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
-        ], check=True, capture_output=True, text=True, env=native_cpp_env())
-        subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+        for standard in ("c++11", "c++17"):
+            binary = Path(temp) / f"eyes-{standard}"
+            subprocess.run([
+                compiler, f"-std={standard}", "-Wall", "-Wextra", "-Wpedantic", "-Werror",
+                "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                "-fno-omit-frame-pointer", *pie_flags,
+                "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
+            ], check=True, capture_output=True, text=True, env=env, timeout=60)
+            subprocess.run([str(binary)], check=True, capture_output=True, text=True,
+                           env=env, timeout=30)
 
 def test_sense_builder_readme_matches_selected_local_expression_consumer():
     """Do not call the landed HSM/gaze renderer an unselected stock face."""
