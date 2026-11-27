@@ -246,19 +246,21 @@ def save_or_verify(
     if output.exists() and not overwrite:
         raise FileExistsError("Existing dock tag requires --overwrite")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=output.parent,
-        prefix=".dock-tag-", suffix=".svg", delete=False,
-    ) as staged:
-        path = Path(staged.name)
-        try:
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=output.parent,
+            prefix=".dock-tag-", suffix=".svg", delete=False,
+        ) as staged:
+            path = Path(staged.name)
             staged.write(expected)
             staged.flush()
             os.fsync(staged.fileno())
-        except BaseException:
+        os.replace(path, output)
+    except BaseException:
+        if path is not None:
             path.unlink(missing_ok=True)
-            raise
-    os.replace(path, output)
+        raise
 
 
 def main() -> None:

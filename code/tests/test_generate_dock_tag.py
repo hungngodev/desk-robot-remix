@@ -323,3 +323,27 @@ def test_duplicate_json_keys_cannot_override_dock_marker_assignment(
     with pytest.raises(ValueError, match="Duplicate dock marker assignment JSON field"):
         module.save_or_verify(output, 1, 12, assignments=path)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_dock_tag_replace_failure_cleans_stage(monkeypatch, tmp_path, existing):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    output = tmp_path / "dock01.svg"
+    if existing:
+        output.write_bytes(b"original evidence")
+    expected = module.build_svg(1, 12)
+
+    def fail_replace(staged, destination):
+        assert staged.read_text(encoding="utf-8") == expected
+        assert destination == output
+        raise OSError("injected publication failure")
+
+    monkeypatch.setattr(module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="injected publication failure"):
+        module.save_or_verify(output, 1, 12, overwrite=existing)
+    if existing:
+        assert output.read_bytes() == b"original evidence"
+    else:
+        assert not output.exists()
+    assert not list(tmp_path.glob(".dock-tag-*.svg"))
