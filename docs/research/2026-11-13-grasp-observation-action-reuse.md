@@ -2,6 +2,16 @@
 
 Research checkpoint 2026-11-13. Canonical draft PR #17; inspected head 777d5f4b8cc08dbf49b018dc3c2333fc8dcdb0ce. This is an upstream design comparison, **not** a claim of implemented or physically qualified grasp.
 
+## Current-source clarification (2026-11-27)
+
+Source inspected at `a203bedcfc62d6d1dd0a5340a0edee88b2a58658`; the November 13 proposal below is historical, not a fresh implementation backlog.
+
+* The selected three AS5600 channels are twist nose, left track and right track, not jaw position. See [full-feature-plan.json](../hardware/full-feature-plan.json) and [AccessoryReadings.h](../../code/firmware/body/lib/AccessorySensors/AccessoryReadings.h). Do not add a fourth encoder or infer measured jaw travel from a servo command.
+* [grasp_feedback.py](../../code/laptop/src/desk_robot/grasp_feedback.py) already implements `force_observation`, `guarded_grasp` and `verify_grasp_hold`. The motion/hold path requires the configured robot identity, independent jaw validity, nonclipped raw ADC, nonzero WROOM boot and jaw sequence, acquisition age below 500 ms (including request time), and fresh forward conversions in the same boot. Read-only legacy decoding is less restrictive and must not authorize motion. [aux.py](../../code/laptop/src/desk_robot/aux.py) validates independent belly and jaw channels; composite validity is not a substitute for the jaw verdict at the motion boundary.
+* [controller.py](../../code/laptop/src/desk_robot/controller.py) owns pickup and calls the existing guarded grasp and hold checks. Servo position is commanded, not measured. The tactile result explicitly reports `position_measured=false`, `force_newtons_measured=false` and `physical_acceptance_pass=false`. The visual placement receipt is also not physical acceptance. Existing [grasp regressions](../../code/tests/test_grasp_feedback.py) cover clipped/stale feedback, foreign identity, replay and reboot; do not build a duplicate observation or actuator owner.
+
+The remaining measured-force and jaw-geometry work is physical qualification, not a reason to change the approved sensor allocation. Preserve the original real-object acceptance trials and physical HOLD. This clarification is source inspection only, not a new test execution or hardware result.
+
 ## Existing robot behavior
 
 The existing supervised pickup path uses a single Coordinator permit, WROOM local stop, calibrated camera geometry, a three second hold, two fresh visual confirmations and a controlled placement. The pickup guide explicitly distinguishes `placed_visually_verified` from `physical_acceptance_pass`. FSR402/ADS1115 and AS5600 are selected for the full robot but force and jaw geometry remain unmeasured. Preserve the WROOM actuator authority and existing abort semantics. Do not infer force from commanded servo angle.
@@ -14,7 +24,7 @@ The existing supervised pickup path uses a single Coordinator permit, WROOM loca
 
 ## Smallest next implementation and deterministic regression
 
-Use the existing gripper command and telemetry owner. Add a bounded typed **read only** grasp observation containing robot identity, boot/acquisition identity, sample age, FSR ADC validity and saturation, AS5600 jaw angle validity, calibration revision, and current job ID. Invalid, stale, mismatched or uncalibrated force and angle must never be promoted to measured grasp success. Do not permit this read only observation to issue movement or bypass local WROOM stop.
+Use the existing gripper command and telemetry owner. Add a bounded typed **read only** grasp observation containing robot identity, boot/acquisition identity, sample age, FSR ADC validity and saturation, jaw angle validity if separately measured (historical proposal; no selected jaw encoder), calibration revision, and current job ID. Invalid, stale, mismatched or uncalibrated force and angle must never be promoted to measured grasp success. Do not permit this read only observation to issue movement or bypass local WROOM stop.
 
 First trace current FSR/ADS1115 and AS5600 driver and Mac job receipt wiring; **do not implement this contract if already present**. Test invalid ADC, disconnected FSR, sensor saturation, delayed sample from a previous WROOM boot, jaw angle mismatch, conflicting robot ID, force loss during hold and stale force during release. The acceptance gate remains at least 8 of 10 real key pickups and 8 of 10 real wrapped candy pickups with 10 mm lift, three second hold and controlled placement. Test fixtures alone cannot pass it.
 
