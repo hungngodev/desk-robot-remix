@@ -23,14 +23,33 @@ def test_dock_apriltag_block_restores_repo_root_before_seat_script():
     assert commands[0] == "cd code"
     assert commands[-1] == "cd .."
     assert sum(line.startswith("cd ") for line in commands) == 2
+    logical = []
+    cur = ""
+    for line in commands:
+        if cur:
+            cur = f"{cur} {line.rstrip(chr(92)).strip()}"
+        else:
+            cur = line.rstrip(chr(92)).strip()
+        if not line.endswith("\\"):
+            logical.append(shlex.split(cur))
+            cur = ""
+    tag_cmds = [c for c in logical if "scripts/generate_dock_tag.py" in c]
+    assert len(tag_cmds) == 2
+    assert any("--verify" in c for c in tag_cmds)
+    assert all((ROOT / "code/scripts/generate_dock_tag.py").is_file() for _c in tag_cmds)
     next_block = guide.index("```sh", tag_end + 4)
     next_end = guide.index("\n```", next_block + 5)
-    seat_commands = guide[next_block:next_end]
+    seat_commands = guide[next_block + 5:next_end].strip()
     assert "python3 code/scripts/screen_dock_seat_mechanics.py" in seat_commands
     assert "cd code" not in seat_commands
+    seat_args = shlex.split(seat_commands.replace("\\\n", " "))
+    assert (ROOT / seat_args[seat_args.index("python3") + 1]).is_file()
+    if "--template-for-dock" in seat_args:
+        dock_idx = int(seat_args[seat_args.index("--template-for-dock") + 1])
+        assert 1 <= dock_idx <= 5
 
 
-def test_dock_openscad_examples_find_their_source_from_repo_root():
+def test_dock_openscad_examples_find_their_source_from_repo_root(tmp_path):
     guide = GUIDE.read_text(encoding="utf-8")
     command_blocks = [
         section.split("\n```", 1)[0].strip()
@@ -45,10 +64,19 @@ def test_dock_openscad_examples_find_their_source_from_repo_root():
     ):
         args = shlex.split(command.replace("\\\n", " "))
         assert args[0] == "openscad"
+        assert "--export-format" in args and args[args.index("--export-format") + 1] == "binstl"
         assert args[args.index("-o") + 1] == f"{part}.stl"
         assert f'part="{part}"' in args
         assert args[-1] == "docs/cad/remixes/dock/dock_passive_fit.scad"
         assert (ROOT / args[-1]).is_file()
+        if __import__("shutil").which("openscad") is not None:
+            out_stl = tmp_path / f"{part}.stl"
+            subprocess.run(
+                [args[0], "--export-format", "binstl", "-o", str(out_stl),
+                 "-D", f'part="{part}"', str(ROOT / args[-1])],
+                check=True, capture_output=True, text=True, timeout=60,
+            )
+            assert out_stl.stat().st_size > 84
 
 
 def _assert_tracked_links(guide, contents, tracked, required):

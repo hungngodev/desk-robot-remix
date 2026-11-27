@@ -372,3 +372,43 @@ def test_fresh_snapshot_cannot_replan_over_stale_turn_corner():
         ), now_us=now + 1)
     fresh = plan_route(grid.to_route_snapshot(now_us=now + 1), request, envelope, now_us=now + 1)
     assert fresh.status == "planned" and fresh.cells == ((9, 7), (9, 8))
+
+
+def test_replay_boundary_guards_and_unanchored_grid_veto(navigation_replay):
+    """Exercise capture age, pre-request bound, retired anchor, frame order, and unanchored grid."""
+    query, owner, seen, grid, route, envelope, view = navigation_replay
+    query_old = replace(query, created_us=600_000)
+    stale_capture = replace(seen, captured_us=700_000, receipt_us=990_000)
+    t_stale = resolve_object_target(query_old, owner, [stale_capture], now_us=1_000_000)
+    s_stale = propose_object_search(
+        grid, route, envelope, query_old, owner, t_stale, (view,), now_us=1_000_000,
+        clock_us=lambda: 1_000_000, request_is_current=lambda: True,
+    )
+    assert t_stale.status == "last_seen" and t_stale.confirmed_floor_mm is None
+    assert t_stale.search_hint_mm == seen.floor_mm and s_stale.route is not None
+
+    pre_request = replace(seen, captured_us=890_000, receipt_us=990_000)
+    t_pre, _ = plan_replay(navigation_replay, [pre_request])
+    assert t_pre.status == "last_seen" and t_pre.confirmed_floor_mm is None
+
+    retired_anchor = replace(seen, anchor_id="tag-retired", receipt_us=990_000)
+    t_ret, _ = plan_replay(navigation_replay, [retired_anchor])
+    assert t_ret.status == "last_seen"
+    assert t_ret.confirmed_floor_mm is None and t_ret.search_hint_mm is None
+
+    absent_24 = replace(
+        seen, source="camera_not_seen", frame_seq=24, receipt_us=970_000,
+        captured_us=960_000, floor_mm=None, projection_qualified=False,
+    )
+    late_frame_23 = replace(seen, frame_seq=23, receipt_us=990_000, captured_us=940_000)
+    t_order, s_order = plan_replay(navigation_replay, [absent_24, late_frame_23])
+    assert t_order.status == "last_seen" and t_order.confirmed_floor_mm is None
+    assert s_order.status == "viewpoint_proposal"
+
+    unanchored = replace(grid, anchored=False)
+    unanchored_search = propose_object_search(
+        unanchored, route, envelope, query_old, owner, t_stale, (view,),
+        now_us=1_000_000, clock_us=lambda: 1_000_000, request_is_current=lambda: True,
+    )
+    assert unanchored_search.status == "rejected"
+    assert unanchored_search.route is None and unanchored_search.may_execute is False

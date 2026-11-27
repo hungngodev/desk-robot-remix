@@ -61,9 +61,29 @@ def test_ci_collects_all_configured_host_suites():
         if step.get("name") == "Verify bounded Mac voice, memory and fleet ownership"
     )
     selected = shlex.split(fast["run"].replace(chr(92) + "\n", ""))
-    assert {"tests/test_ci_collection_scope.py", "tests/test_ci_python_dependencies.py"} <= set(
-        selected
-    )
+    required_fast = {
+        "tests/test_attention.py",
+        "tests/test_memory_*.py",
+        "tests/test_conversation_*.py",
+        "tests/test_native_startup_memory_fence.py",
+        "tests/test_native_omni_consent_grant.py",
+        "tests/test_native_spoken_grant.py",
+        "tests/test_native_transcript_consent_grant.py",
+        "tests/test_tool_receipt_bridge_signature.py",
+        "tests/test_tool_receipt_operator_scope.py",
+        "tests/test_api_conversation.py",
+        "tests/test_api_motion_lifecycle.py",
+        "tests/test_pet.py",
+        "tests/test_ci_python_imports.py",
+        "tests/test_ci_upstream_fixture.py",
+        "tests/test_ci_collection_scope.py",
+        "tests/test_ci_python_dependencies.py",
+        "tests/test_ci_lane_concurrency.py",
+    }
+    assert required_fast <= set(selected)
+    # Negative control: removing any newly guarded path fails the membership gate.
+    mutated = set(selected) - {"tests/test_memory_*.py"}
+    assert not (required_fast <= mutated)
 
 
 def test_tracked_python_test_modules_are_inside_host_suites():

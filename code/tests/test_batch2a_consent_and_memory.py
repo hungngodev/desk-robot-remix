@@ -435,3 +435,65 @@ def test_clock_step_between_completions_preserves_receipt_chronology():
     )
     assert r1 is not None and r2 is not None
     assert r1[1] < r2[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("mode", ["fresh", "expired", "usb_invalidated"])
+async def test_conversation_run_blocks_expired_or_usb_invalidated_room_speech(
+    monkeypatch, tmp_path, streaming, mode,
+):
+    from desk_robot import conversation as conv_mod
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+
+    now = [1000.0]
+    monkeypatch.setattr(conv_mod.time, "monotonic", lambda: now[0])
+
+    settings = Settings(
+        mode="hardware",
+        robots=_robots(2),
+        fleet_text_sharing_enabled=True,
+        room_station_enabled=True,
+        room_station_port="/dev/cu.usbserial-1",
+        room_station_context_enabled=True,
+    )
+    ids = ["robot-01", "robot-02"]
+    hub = CameraFrameHub(ids, room_settings=settings)
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=1000.0, readings={},
+        summary="Unique reading 742 ppm",
+    ))
+
+    class Chat:
+        async def reply(self, _history):
+            if mode == "expired":
+                now[0] = 1013.0
+            elif mode == "usb_invalidated":
+                hub.invalidate_room()
+            return "Current reading is 742 ppm."
+
+    if streaming:
+        async def stream_reply(_history):
+            if mode == "expired":
+                now[0] = 1013.0
+            elif mode == "usb_invalidated":
+                hub.invalidate_room()
+            yield "Current reading is 742 ppm."
+
+        chat = Chat()
+        chat.stream_reply = stream_reply
+    else:
+        chat = Chat()
+
+    speaker = SimulatedSpeaker()
+    mem = MemoryStore(tmp_path / "mem", ids)
+    conv = Conversation(settings, chat, speaker, memory=mem)
+    conv.multimodal = SimpleNamespace(hub=hub)
+    if mode == "fresh":
+        transcript = await conv.run(ids, "Check room", 1)
+        assert len(transcript) == 1 and len(speaker.spoken) == 1
+    else:
+        with pytest.raises(RuntimeError, match="revoked"):
+            await conv.run(ids, "Check room", 1)
+        assert speaker.spoken == []

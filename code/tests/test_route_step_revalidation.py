@@ -121,22 +121,25 @@ def test_map_expiry_during_search_precedes_request_deadline():
         'rejected', 'deadline_or_map_expired', (), False)
 
 
-@pytest.mark.parametrize("cell", [(4, 6), (6, 9)])
-def test_turn_margin_and_independent_departure_arrival_clearance_veto(cell):
-    """Turn radius includes both error/margin and validates departure + arrival."""
+@pytest.mark.parametrize("cell", [(8, 6), (3, 6)])
+def test_turn_margin_west_heading_vetoes_swept_offset_cells(cell):
+    """Turn into west move checks lateral turn-clearance cells along the swept arc."""
     grid = GridSnapshot(
         "pet", "origin", 3, "tag", "cal", 15, 15, 20,
         ("safe",) * 225, 500, 4000, True,
     )
-    start, goal = (6, 6), (6, 7)
+    start, goal = (6, 6), (5, 6)
     envelope = SafetyEnvelope(5, 2, 2, 27, True)
-    request = RouteRequest("pet", "origin", 3, "tag", "s", "t", start, 0, goal, 3000)
+    request = RouteRequest("pet", "origin", 3, "tag", "s", "t", start, 1, goal, 3000)
     route = plan_route(grid, request, envelope, now_us=1000)
     assert route.cells == (start, goal) and not route.may_execute
+    assert revalidate_route_step(
+        grid, route, envelope, start=start, goal=goal, heading=1, now_us=1500,
+    )
 
     support = list(grid.support)
     support[cell[1] * grid.width + cell[0]] = "unknown"
     updated = replace(grid, support=tuple(support), observed_at_us=1400)
     assert not revalidate_route_step(
-        updated, route, envelope, start=start, goal=goal, heading=0, now_us=1500,
+        updated, route, envelope, start=start, goal=goal, heading=1, now_us=1500,
     )

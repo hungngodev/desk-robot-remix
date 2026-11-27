@@ -3423,6 +3423,64 @@ def test_signed_status_result_drops_when_source_changes_during_head_await(
     assert not hub.tool_history[robot]
 
 
+@pytest.mark.parametrize("stale_axis", ["mac", "listener", "visual"])
+def test_signed_tool_status_rejects_each_single_epoch_change(
+    settings, tokens, monkeypatch, stale_axis,
+):
+    """868AwRd: mutating any one epoch independently still fences late status."""
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from desk_robot.api import create_app
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi.testclient import TestClient
+
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([robot])
+    visual = SimpleNamespace(hub=hub, _turn_epoch={robot: 15})
+    entered, release = threading.Event(), threading.Event()
+
+    class Head:
+        async def status(self):
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 3)
+            return {"robot_id": robot, "safety": {"fault": "none"}}
+
+    async def noop():
+        pass
+
+    listener = SimpleNamespace(monitor_ready=True, _event_generation=0)
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid), heads={robot: Head()},
+        ),
+        multimodal=visual, _voice_turn_generations={robot: 61},
+        voice_events=listener, pet=SimpleNamespace(voice_monitor_ready=True),
+        start=noop, close=noop,
+    )
+    path = f"/v1/robots/{robot}/status"
+    old = _signed_tool_headers(settings, tokens, robot, path, 61, monkeypatch)
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(client.get, path, headers=old)
+            try:
+                assert entered.wait(2)
+                if stale_axis == "mac":
+                    runtime._voice_turn_generations[robot] = 62
+                elif stale_axis == "listener":
+                    listener._event_generation += 1
+                else:
+                    visual._turn_epoch[robot] = 16
+            finally:
+                release.set()
+            result = pending.result(timeout=4)
+            assert result.status_code == 409
+            assert "superseded" in result.json()["detail"]
+    assert not hub.tool_history[robot]
+
+
 def test_signed_tool_receipt_owner_cannot_be_reused_for_peer(settings, tokens, monkeypatch):
     """Equal Mac and Xiaozhi epochs do not make two robots interchangeable."""
     from types import SimpleNamespace

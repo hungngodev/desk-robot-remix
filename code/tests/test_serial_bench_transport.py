@@ -412,3 +412,26 @@ def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, caps
     with pytest.raises(RuntimeError, match="Unqualified touch/range state"):
         transact.__globals__["main"]()
     assert sent == ["status"]
+
+
+@pytest.mark.parametrize("command, valid_reply, mutated_reply", [
+    ("drive 10 -10 250", b"OK drive left=10 right=-10 ms=250\n", b"OK drive left=10 right=10 ms=250\n"),
+    ("drive 10 10 100", b"OK drive left=10 right=10 ms=100\n", b"OK drive left=10 right=10 ms=101\n"),
+    ("lift 95", b"OK lift angle=95\n", b"OK lift angle=96\n"),
+    ("grip 95", b"OK grip angle=95\n", b"OK grip angle=94\n"),
+    ("arm", b"OK arm\n", b"OK arm extra\n"),
+    ("keepalive", b"OK keepalive\n", b"OK keepalive 1\n"),
+    ("halt", b"OK halt\n", b"OK halt now\n"),
+])
+def test_independent_firmware_ack_fixtures_reject_mutated_replies(
+    monkeypatch, command, valid_reply, mutated_reply,
+):
+    """Fixed wire-format ACK fixtures independently reject mutated fields."""
+    port_ok = FakePort([valid_reply])
+    clock(monkeypatch, port_ok)
+    assert transact(port_ok, command) == valid_reply.decode("ascii").strip()
+
+    port_bad = FakePort([mutated_reply])
+    clock(monkeypatch, port_bad)
+    with pytest.raises(TimeoutError, match="Uncertain USB response"):
+        transact(port_bad, command)

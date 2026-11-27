@@ -25,8 +25,8 @@ def measured_samples():
 def test_recommends_signed_raw_limits_without_marking_physical_success():
     result = propose(measured_samples())
     assert result["grip_force_sign"] == 1
-    assert 300 <= result["grip_force_delta_raw"] < 600
-    assert result["grip_force_limit_raw"] > result["grip_force_delta_raw"]
+    assert result["grip_force_delta_raw"] == 330
+    assert result["grip_force_limit_raw"] == 1600
     assert not result["newtons_measured"]
     assert not result["physical_force_safety_qualified"]
     assert result["manual_review_required"]
@@ -47,7 +47,10 @@ def test_inverted_adc_polarity_supported():
     for rows in samples.values():
         for i, row in enumerate(rows):
             rows[i] = (5000 - row[0], row[1])
-    assert propose(samples)["grip_force_sign"] == -1
+    inv = propose(samples)
+    assert inv["grip_force_sign"] == -1
+    assert inv["grip_force_delta_raw"] == 330
+    assert inv["grip_force_limit_raw"] == 1600
 
 
 def test_flat_contact_and_duplicate_or_reordered_hardware_frames_rejected():

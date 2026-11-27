@@ -1201,7 +1201,8 @@ async def test_shared_room_group_speech_stays_out_of_all_five_private_databases(
             if "630 ppm" in str(history):
                 # The first turn sees the station; later turns may only
                 # receive its derivative through digitally relayed speech.
-                hub.invalidate_room()
+                # Clear cached reading without bumping USB disconnect epoch.
+                hub._shared_room = None
                 return "The shared station reported 630 ppm."
             return "A new unrelated topic."
 
