@@ -1,6 +1,7 @@
 """Host-only checks for optional personality policy, not physical qualification."""
 
 import math
+from decimal import Decimal
 
 import pytest
 from desk_robot.personality_policy import (
@@ -75,7 +76,7 @@ def test_extra_wait_exact_float_boundaries(profile, upper):
 
 @pytest.mark.parametrize("elapsed", [
     None, math.nan, -math.inf, math.nextafter(0.0, -math.inf), -1.0,
-    True, False, "120", 10**400,
+    True, False, "120", 10**400, Decimal("Infinity"), Decimal("sNaN"),
 ])
 def test_invalid_elapsed_defers_optional_activity(elapsed):
     assert profile_waits_beyond_fleet_floor("balanced", elapsed=elapsed, base=0)
@@ -85,7 +86,7 @@ def test_invalid_elapsed_defers_optional_activity(elapsed):
     (math.nan, 0), (math.inf, 0), (-math.inf, 0), (math.inf, -math.inf),
     (0, math.nan), (0, math.inf), (True, -math.inf), (1, False),
     (1, 2), (math.nextafter(1.0, -math.inf), 1), (10**400, 0),
-    (1e308, -1e308),
+    (1e308, -1e308), (1, Decimal("-Infinity")), (1, Decimal("sNaN")),
 ])
 def test_invalid_or_regressing_fleet_clock_defers(now, last):
     elapsed = fleet_speech_elapsed(now, last)
@@ -102,3 +103,13 @@ def test_valid_fleet_clock_recovers_without_consuming_first_speech():
     assert profile_waits_beyond_fleet_floor("calm", elapsed=120, base=120)
     assert fleet_speech_elapsed(280, 100) == 180
     assert not profile_waits_beyond_fleet_floor("calm", elapsed=180, base=120)
+
+
+@pytest.mark.parametrize("profile", ["unknown", "CALM", " calm", None, True, 1, [], {}])
+def test_invalid_profile_rejected_consistently(profile):
+    with pytest.raises(ValueError, match="Invalid personality profile"):
+        passive_interval(profile, 120)
+    with pytest.raises(ValueError, match="Invalid personality profile"):
+        expression_guidance(profile)
+    with pytest.raises(ValueError, match="Invalid personality profile"):
+        profile_waits_beyond_fleet_floor(profile, elapsed=math.inf, base=120)
