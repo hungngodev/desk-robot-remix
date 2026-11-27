@@ -8,8 +8,12 @@ import pytest
 HEAD = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("variant", ["waveshare", "modular", "sense"])
-def test_secondary_gpio_contract(tmp_path, variant):
+@pytest.mark.parametrize(
+    ("variant", "standard"),
+    [("waveshare", "c++17"), ("modular", "c++17"),
+     ("sense", "c++17"), ("sense", "c++11")],
+)
+def test_secondary_gpio_contract(tmp_path, variant, standard):
     driver = tmp_path / "driver"
     driver.mkdir()
     (driver / "gpio.h").write_text(
@@ -41,7 +45,7 @@ def test_secondary_gpio_contract(tmp_path, variant):
         (tmp_path / "config.h").write_text(text)
         source.write_text('#include "config.h"\nint main() {}\n')
         return subprocess.run(
-            ["g++", "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
+            ["g++", f"-std={standard}", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
              "-I", str(tmp_path), str(source)],
             capture_output=True, text=True, check=False, timeout=15,
         )
@@ -69,6 +73,9 @@ def test_secondary_gpio_contract(tmp_path, variant):
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_22", "reserved GPIO"),
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_46", "reserved GPIO"),
             ("BOOT_BUTTON_GPIO GPIO_NUM_0", "BOOT_BUTTON_GPIO GPIO_NUM_9", "GPIO collision"),
+            ("CAMERA_PIN_D7 GPIO_NUM_48", "CAMERA_PIN_D7 GPIO_NUM_18", "GPIO collision"),
+            ("CAMERA_PIN_D7 GPIO_NUM_48", "CAMERA_PIN_D7 GPIO_NUM_NC", "reserved GPIO"),
+            ("CAMERA_PIN_D7 GPIO_NUM_48", "CAMERA_PIN_D7 49", "reserved GPIO"),
             # Digital I2S disable must not imply a qualified physical amp shutdown pin.
             ("AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_NC", "AUDIO_AMP_SD_MODE_GPIO GPIO_NUM_44",
              "Sense amplifier has no qualified MCU shutdown connection"),

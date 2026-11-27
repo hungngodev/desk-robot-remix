@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <driver/gpio.h>
 #include <driver/i2c_types.h>
 #include "sdkconfig.h"
@@ -60,29 +61,35 @@
 // and external LED power/logic remain independent physical qualification gates.
 #define RGB_HEART_GPIO GPIO_NUM_9
 
-static_assert([] {
-    constexpr int pins[] = {
-        AUDIO_PDM_MIC_GPIO_SCK, AUDIO_PDM_MIC_GPIO_DIN,
-        AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
-        BOOT_BUTTON_GPIO, DISPLAY_SDA_PIN, DISPLAY_SCL_PIN,
-        CAMERA_PIN_D0, CAMERA_PIN_D1, CAMERA_PIN_D2, CAMERA_PIN_D3,
-        CAMERA_PIN_D4, CAMERA_PIN_D5, CAMERA_PIN_D6, CAMERA_PIN_D7,
-        CAMERA_PIN_XCLK, CAMERA_PIN_PCLK, CAMERA_PIN_VSYNC, CAMERA_PIN_HREF,
-        CAMERA_PIN_SIOD, CAMERA_PIN_SIOC, ROBOT_UART_TX, ROBOT_UART_RX,
-        SD_CARD_CS_GPIO, RGB_HEART_GPIO,
-    };
-    for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
-        const int pin = pins[i];
-        if (pin < 0 || pin > 48 || pin == 3 || pin == 19 || pin == 20 ||
-            (pin >= 22 && pin <= 37) || (pin >= 43 && pin <= 46)) {
-            return false;
-        }
-        for (unsigned j = 0; j < i; ++j) {
-            if (pin == pins[j]) return false;
-        }
-    }
-    return true;
-}(), "Sense peripheral GPIO collision or reserved GPIO");
+namespace desk_robot_sense_config {
+// Single-return constexpr functions also work in the C++11 host lane.
+constexpr bool valid_pin(int pin) {
+    return pin >= 0 && pin <= 48 && pin != 3 && pin != 19 && pin != 20 &&
+           !(pin >= 22 && pin <= 37) && !(pin >= 43 && pin <= 46);
+}
+constexpr bool unique_before(const int* pins, int pin, std::size_t count) {
+    return count == 0 ||
+           (pins[count - 1] != pin && unique_before(pins, pin, count - 1));
+}
+constexpr bool valid_pins(const int* pins, std::size_t count) {
+    return count == 0 ||
+           (valid_pin(pins[count - 1]) &&
+            unique_before(pins, pins[count - 1], count - 1) &&
+            valid_pins(pins, count - 1));
+}
+constexpr int pins[] = {
+    AUDIO_PDM_MIC_GPIO_SCK, AUDIO_PDM_MIC_GPIO_DIN,
+    AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
+    BOOT_BUTTON_GPIO, DISPLAY_SDA_PIN, DISPLAY_SCL_PIN,
+    CAMERA_PIN_D0, CAMERA_PIN_D1, CAMERA_PIN_D2, CAMERA_PIN_D3,
+    CAMERA_PIN_D4, CAMERA_PIN_D5, CAMERA_PIN_D6, CAMERA_PIN_D7,
+    CAMERA_PIN_XCLK, CAMERA_PIN_PCLK, CAMERA_PIN_VSYNC, CAMERA_PIN_HREF,
+    CAMERA_PIN_SIOD, CAMERA_PIN_SIOC, ROBOT_UART_TX, ROBOT_UART_RX,
+    SD_CARD_CS_GPIO, RGB_HEART_GPIO,
+};
+static_assert(valid_pins(pins, sizeof(pins) / sizeof(pins[0])),
+              "Sense peripheral GPIO collision or reserved GPIO");
+}  // namespace desk_robot_sense_config
 static_assert(AUDIO_OUTPUT_SAMPLE_RATE == 32000 && AUDIO_INPUT_SAMPLE_RATE == 16000,
               "Sense MAX98357A LRCLK and PDM/AEC rates must remain 32/16 kHz");
 static_assert(AUDIO_I2S_SPK_GPIO_BCLK == GPIO_NUM_4 &&
