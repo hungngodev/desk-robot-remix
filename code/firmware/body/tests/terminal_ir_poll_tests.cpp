@@ -105,6 +105,33 @@ void check_mixed_arrivals(unsigned side, unsigned total, bool noise_first) {
   CHECK(ir.evidence(now).right_seq == prior.right_seq + 1);
   CHECK(!ir.begin(36, 36));
 }
+// Fresh, checksum-valid frames from different docks must revoke a previous
+// agreement without losing the independently observed receiver diagnostics.
+void check_mismatched_dock_ids(unsigned changed_side) {
+  reset_fixture();
+  desk_robot::TerminalIr ir;
+  CHECK(ir.begin(36, 39));
+  poll(ir, 100);
+  pair(); poll(ir, 125); check_matched(ir, 25);
+  const auto before = ir.evidence(now);
+  constexpr std::uint32_t other_code = 0xca35ed12U;
+  push(changed_side, 1, other_code);
+  push(1 - changed_side);
+  poll(ir, 150);
+  const auto mixed = ir.evidence(now);
+  CHECK(mixed.left_fresh && mixed.right_fresh && !mixed.same_code);
+  CHECK(mixed.left_code == (changed_side == 0 ? other_code : kCode));
+  CHECK(mixed.right_code == (changed_side == 1 ? other_code : kCode));
+  CHECK(mixed.code == 0);
+  CHECK(mixed.left_seq == before.left_seq + 1);
+  CHECK(mixed.right_seq == before.right_seq + 1);
+  CHECK(mixed.left_age_ms == 25 && mixed.right_age_ms == 25);
+  CHECK(!mixed.motor_authorized && !mixed.charging_authorized);
+  pair(); poll(ir, 175); check_matched(ir, 25);
+  CHECK(ir.evidence(now).left_seq == mixed.left_seq + 1);
+  CHECK(ir.evidence(now).right_seq == mixed.right_seq + 1);
+  CHECK(!ir.begin(36, 36));
+}
 // Individually fresh, matching IDs are not necessarily a paired bearing.
 // Include drain time in the later receiver's uncertainty, on either side.
 void check_receipt_window_pair(unsigned first_side, unsigned separation) {
@@ -343,6 +370,7 @@ int main(int argc, char** argv) {
     CHECK(!ir.begin(36, 36));
     CHECK(!queues[0].installed && !queues[1].installed);
     for (unsigned side = 0; side != 2; ++side) {
+      check_mismatched_dock_ids(side);
       check_receipt_window_pair(side, 120);
       check_receipt_window_pair(side, 121);
       for (unsigned total : {2U, 7U, 8U, 9U}) {
