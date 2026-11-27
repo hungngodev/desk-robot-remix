@@ -135,6 +135,7 @@ class APIIngress:
             return
 
         body = bytearray()
+        oversized = False
         try:
             async with asyncio.timeout(BODY_TIMEOUT_SECONDS):
                 while True:
@@ -143,13 +144,17 @@ class APIIngress:
                         return
                     chunk = message.get("body", b"")
                     if len(chunk) > MAX_REQUEST_BYTES - len(body):
-                        await reject(413, "Request body too large")
-                        return
+                        oversized = True
+                        break
                     body.extend(chunk)
                     if not message.get("more_body", False):
                         break
         except TimeoutError:
             await reject(408, "Request body deadline exceeded")
+            return
+        # Sending a rejection must not run under the body-read deadline.
+        if oversized:
+            await reject(413, "Request body too large")
             return
         if length is not None and int(length) != len(body):
             await reject(400, "Content-Length mismatch")
