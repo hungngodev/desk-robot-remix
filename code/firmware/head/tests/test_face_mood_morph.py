@@ -48,8 +48,32 @@ static void CheckRecovery(uint32_t start, uint32_t hold_ms) {
     assert(face.Step(recovery + 301, "neutral", true) == 0);
 }
 
+static void CheckGesturePriority(uint32_t start) {
+    FaceMoodMorph face;
+    assert(face.Step(start, "neutral", true, true) == 10);
+    assert(face.Step(start + 1, "surprised", true, true) == 10);
+    assert(face.Step(start + 151, "surprised", true, true) == 12);
+    // Even a visible gesture cannot keep a preempted aperture alive.
+    assert(face.Step(start + 152, "surprised", false, true) == 0);
+    assert(face.Step(start + 153, "surprised", false, true) == 0);
+    // Readmission starts from the new mood, not the interrupted aperture.
+    assert(face.Step(start + 154, "sad", true, true) == 6);
+    assert(face.Step(start + 155, "sad", true, false) == 0);
+    assert(face.Step(start + 156, "thinking", true, true) == 6);
+    assert(face.Step(start + 306, "thinking", true, true) == 8);
+    // Unsupported input must clear active interpolation even during a gesture.
+    assert(face.Step(start + 307, "unsupported", true, true) == 0);
+    assert(face.Step(start + 308, "angry", true, true) == 5);
+    assert(face.Step(start + 309, "happy", true, false) == 5);
+    assert(face.Step(start + 608, "happy", true, false) == 8);
+    assert(face.Step(start + 609, "happy", true, false) == 0);
+    assert(face.Step(start + 610, "happy", true, true) == 8);
+    assert(face.Step(start + 611, "happy", true, false) == 0);
+}
+
 int main() {
     for (uint32_t start : {0U, 0xffffff00U}) {
+        CheckGesturePriority(start);
         CheckRecovery(start, 150);   // brief cosmetic cue, recovery mid-morph
         CheckRecovery(start, 1600);  // held cosmetic cue, full recovery
     }
