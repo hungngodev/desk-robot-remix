@@ -1667,7 +1667,7 @@ async def test_installed_pinned_audio_function_delivers_vad_before_native_pcm(
     async def interrupt_normal(conn, voice):
         calls.append("head_stop")
 
-    def observe_idle(conn, voice):
+    def observe_idle(conn, voice, pcm=None):
         calls.append("authenticated_vad")
 
     def native_route(conn, pcm, voice):
@@ -2089,8 +2089,8 @@ async def test_events_snapshot_recovers_missed_active_vad_and_cleans_up(bridge):
         payload = await snapshot.json()
         assert payload["active_human_robots"] == ["robot-01"]
         assert payload["events"] == []  # Live state even without replay.
-        assert not bridge.observe_idle_human_voice(first, False)
-        assert not bridge.observe_idle_human_voice(first, False)
+        assert not bridge.observe_idle_human_voice(first, False, b"\x00" * (32 * 400))
+        assert not bridge.observe_idle_human_voice(first, False, b"\x00" * (32 * 400))
         ended = await client.get("/events?after=1", headers=headers)
         assert (await ended.json())["active_human_robots"] == []
     bridge.unregister(first)
@@ -2161,13 +2161,13 @@ def test_idle_real_human_vad_queues_one_voice_video_hint_per_utterance(bridge):
     assert first["kind"] == "speech_start"
     assert first["source"] == "xiaozhi_server_vad"
     assert first["robot_id"] == "robot-01"
-    assert not bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, False, b"\x00" * (32 * 400))
     # A single momentary silent VAD frame must NOT end a live phrase.
     assert not bridge.observe_idle_human_voice(one, True)
     assert not bridge.observe_idle_human_voice(one, True)
     assert len(bridge.voice_event_history) == 1
-    assert not bridge.observe_idle_human_voice(one, False)
-    assert not bridge.observe_idle_human_voice(one, False)
+    assert not bridge.observe_idle_human_voice(one, False, b"\x00" * (32 * 400))
+    assert not bridge.observe_idle_human_voice(one, False, b"\x00" * (32 * 400))
     assert bridge.voice_event_history[-1]["kind"] == "speech_end"
     assert bridge.voice_event_history[-1]["source"] == "xiaozhi_server_vad"
     assert not bridge.observe_idle_human_voice(one, True)
@@ -2232,11 +2232,75 @@ def test_ongoing_voice_refreshes_floor_without_replaying_speech_start(bridge):
     assert bridge.observe_idle_human_voice(head, True) is False
     assert bridge.voice_event_cursor == 1
     assert bridge.human_speech_active() is True
-    assert not bridge.observe_idle_human_voice(head, False)
-    assert not bridge.observe_idle_human_voice(head, False)
+    half_silence = b"\x00" * (32 * 400)
+    assert not bridge.observe_idle_human_voice(head, False, half_silence)
+    assert bridge.voice_event_history[-1]["kind"] == "speech_start"
+    assert not bridge.observe_idle_human_voice(head, False, half_silence)
     assert bridge.voice_event_history[-1]["kind"] == "speech_end"
     bridge.unregister(head)
     assert bridge.human_speech_active() is False
+
+
+@pytest.mark.parametrize(("chunk_ms", "expected_frames"), [
+    (20, 40),
+    (50, 16),
+    (60, 14),
+    (100, 8),
+])
+def test_idle_speech_end_gates_on_pcm_duration_across_chunkings_and_short_pauses(
+    bridge, chunk_ms, expected_frames,
+):
+    head = conn("mac-01")
+    head.client_listen_mode = "realtime"
+    bridge.register(head)
+    chunk = b"\x00" * (32 * chunk_ms)
+    assert bridge.observe_idle_human_voice(head, True, chunk) is False
+    assert bridge.observe_idle_human_voice(head, True, chunk) is True
+    assert bridge.voice_event_history[-1]["kind"] == "speech_start"
+
+    # A brief pause (even 2..expected-1 non-speech callbacks) must NOT end the
+    # turn when elapsed non-speech PCM is below 800 ms, and resumed speech resets
+    # the silence budget back to zero.
+    for _ in range(expected_frames - 1):
+        assert not bridge.observe_idle_human_voice(head, False, chunk)
+        assert bridge.voice_event_history[-1]["kind"] == "speech_start"
+    assert not bridge.observe_idle_human_voice(head, False, None)
+    assert not bridge.observe_idle_human_voice(head, False, b"")
+    assert bridge.voice_event_history[-1]["kind"] == "speech_start"
+    assert not bridge.observe_idle_human_voice(head, True, chunk)
+
+    # Full elapsed non-speech PCM across any chunking emits speech_end cleanly
+    # only once >= 800 ms accumulates continuously.
+    for idx in range(expected_frames):
+        assert not bridge.observe_idle_human_voice(head, False, chunk)
+        expected_kind = "speech_end" if idx == expected_frames - 1 else "speech_start"
+        assert bridge.voice_event_history[-1]["kind"] == expected_kind
+    bridge.unregister(head)
+
+
+async def test_urgent_barge_in_is_immediate_independent_of_speech_end_silence_gate(bridge):
+    class Socket:
+        async def send(self, frame):
+            pass
+
+    head = conn("mac-01")
+    head.client_listen_mode = "realtime"
+    head.device_aec_measured = True
+    head.session_id = "live-device"
+    head.websocket = Socket()
+    head.clear_queues = lambda: None
+    head.clearSpeakStatus = lambda: setattr(head, "client_is_speaking", False)
+    bridge.register(head)
+    head.client_is_speaking = True
+    head.client_abort = False
+    bridge.lease_ids = frozenset(["mac-01"])
+    bridge.lease_until = time.monotonic() + 10.0
+    bridge.active_device_id = "mac-01"
+    assert not await bridge.interrupt_for_user_voice(head, True)
+    assert await bridge.interrupt_for_user_voice(head, True)
+    assert bridge.voice_event_history[-1]["kind"] == "group"
+    assert head.client_abort is True
+    bridge.unregister(head)
 
 
 def test_authenticated_vad_invalidates_old_tool_requests_but_not_speech_end(bridge):
@@ -3401,7 +3465,7 @@ async def test_installed_xiaozhi_keeps_first_human_pcm_when_head_stop_fails(
         if failure == "normal":
             raise TimeoutError("head physical STOP timed out")
 
-    def observe_idle(conn, voice):
+    def observe_idle(conn, voice, pcm=None):
         calls.append("vad")
 
     def native_route(conn, pcm, voice):
@@ -3465,7 +3529,7 @@ async def test_installed_xiaozhi_propagates_cancel_without_using_stale_pcm(
     monkeypatch.setitem(sys.modules, "desk_robot_bridge", types.SimpleNamespace(
         interrupt_for_user_voice=cancelled,
         interrupt_for_normal_voice=cancelled,
-        observe_idle_human_voice=lambda conn, voice: seen.append("vad"),
+        observe_idle_human_voice=lambda conn, voice, pcm=None: seen.append("vad"),
     ))
     monkeypatch.setitem(sys.modules, "desk_robot_native_omni",
                         types.SimpleNamespace(route_audio=lambda *args: seen.append("pcm")))
@@ -3498,13 +3562,13 @@ async def test_retired_head_callbacks_cannot_touch_replacement_voice_state(bridg
     bridge.idle_voice_count["mac-01"] = 1
     bridge.idle_voice_last_at["mac-01"] = now
     bridge.idle_voice_emitted.add("mac-01")
-    bridge.idle_voice_quiet_frames["mac-01"] = 1
-    assert not bridge.observe_idle_human_voice(old, False)
+    bridge.idle_voice_silence_ms["mac-01"] = 480.0
+    assert not bridge.observe_idle_human_voice(old, False, b"\x00" * (32 * 400))
     assert not bridge.observe_idle_human_voice(old, True)
     assert bridge.idle_voice_count["mac-01"] == 1
     assert bridge.idle_voice_last_at["mac-01"] == now
     assert "mac-01" in bridge.idle_voice_emitted
-    assert bridge.idle_voice_quiet_frames["mac-01"] == 1
+    assert bridge.idle_voice_silence_ms["mac-01"] == 480.0
     assert bridge.voice_event_cursor == 0
 
     # The newest head owns a concurrent multi-pet speaker lease. A VAD

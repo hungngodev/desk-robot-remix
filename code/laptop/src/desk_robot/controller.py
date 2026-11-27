@@ -70,6 +70,21 @@ async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
         raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched") from exc
 
 
+def _valid_ranging_samples(
+    readings: object, ages: object, *, max_age_inclusive: int,
+) -> bool:
+    """Validate all five ToF lanes, enforcing >30 mm on forward obstacle lane 4."""
+    return (
+        isinstance(ages, list) and len(ages) == 5
+        and isinstance(readings, list) and len(readings) == 5
+        and all(type(age) is int and 0 <= age <= max_age_inclusive for age in ages)
+        and all(
+            type(mm) is int and (31 if lane == 4 else 30) <= mm <= 1300
+            for lane, mm in enumerate(readings)
+        )
+    )
+
+
 def _require_safe_fuel_sample(
     power: object, *, min_cell_mv: int, min_soc_centi: int,
     context: str, depleted_message: str,
@@ -304,12 +319,7 @@ class Coordinator:
             raise OperationError("Hardware preflight: missing or invalid ToF channels")
         ages = ranges.get("age_ms")
         readings = ranges.get("mm")
-        if (
-            not isinstance(ages, list) or len(ages) != 5
-            or not isinstance(readings, list) or len(readings) != 5
-            or any(type(age) is not int or not 0 <= age < 200 for age in ages)
-            or any(type(mm) is not int or not 30 <= mm <= 1300 for mm in readings)
-        ):
+        if not _valid_ranging_samples(readings, ages, max_age_inclusive=199):
             raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
         _require_safe_fuel_sample(
             status.get("power"), min_cell_mv=3350, min_soc_centi=500,
@@ -1178,9 +1188,9 @@ class Coordinator:
             or len(ranges["mm"]) != 5
             or not isinstance(ranges.get("age_ms"), list)
             or len(ranges["age_ms"]) != 5
-            or any(type(n) is not int or not 30 <= n <= 1300 for n in ranges["mm"])
-            or any(type(age) is not int or not 0 <= age <= 150
-                   for age in ranges["age_ms"])
+            or not _valid_ranging_samples(
+                ranges["mm"], ranges["age_ms"], max_age_inclusive=150,
+            )
             or (require_front_clearance and ranges["mm"][4] <= 250)
             or not isinstance(imu, dict)
             or imu.get("valid") is not True

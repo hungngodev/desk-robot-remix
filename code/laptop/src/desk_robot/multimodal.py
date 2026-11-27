@@ -36,7 +36,7 @@ from .scene_motion import change_fraction
 from .scene_motion import scene_change_mask as scene_change_mask
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .sleep_clock import continuous_monotonic
-from .vision import OllamaScene
+from .vision import OllamaScene, valid_visual_text
 from .vision_admission import (
     FrameAdmissionDropped,
     LatestFrameAdmission,
@@ -2379,6 +2379,9 @@ class MultimodalOrchestrator:
                 seconds=remaining,
                 timeout_message="Live visual analysis timed out",
             )
+            if not valid_visual_text(answer, 1, 400):
+                raise ValueError("Unbounded or malformed local vision answer")
+            answer = answer.strip()
             metrics["model_latency_last_ms"] = round(
                 (time.monotonic() - model_started) * 1000
             )

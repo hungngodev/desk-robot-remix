@@ -13,6 +13,7 @@ import copy
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -135,7 +136,9 @@ voice_event_history: deque[dict] = deque(maxlen=128)
 idle_voice_count: dict[str, int] = {}
 idle_voice_last_at: dict[str, float] = {}
 idle_voice_emitted: set[str] = set()
-idle_voice_quiet_frames: dict[str, int] = {}
+idle_voice_silence_ms: dict[str, float] = {}
+_IDLE_SPEECH_END_SILENCE_MS = 800.0
+_DEFAULT_PCM_SAMPLE_RATE_HZ = 16000
 # Source-authenticated VAD leases. Audio is never stored here. Only current
 # registered heads can keep the floor reserved; absent speech automatically
 # expires even if an upstream connection never delivered speech_end.
@@ -532,7 +535,7 @@ def _revoke_connection(conn):
         idle_voice_count.pop(conn.device_id, None)
         idle_voice_last_at.pop(conn.device_id, None)
         idle_voice_emitted.discard(conn.device_id)
-        idle_voice_quiet_frames.pop(conn.device_id, None)
+        idle_voice_silence_ms.pop(conn.device_id, None)
         _normal_barge_recorded.discard(conn.device_id)
         human_vad_until.pop(conn.device_id, None)
         # A queued request may outlive this socket and a replacement register.
@@ -595,7 +598,32 @@ def duplex_available(conn) -> bool:
     )
 
 
-def observe_idle_human_voice(conn, have_voice: bool) -> bool:
+def _silence_threshold_ms(conn) -> float:
+    """Return configured SileroVAD silence threshold (ms), defaulting to 800 ms."""
+    threshold = getattr(getattr(conn, "vad", None), "silence_threshold_ms", None)
+    if (type(threshold) in (int, float)
+            and math.isfinite(threshold) and threshold > 0):
+        return float(threshold)
+    return _IDLE_SPEECH_END_SILENCE_MS
+
+
+def _pcm_frame_duration_ms(conn, pcm_frame: object) -> float:
+    """Convert one 16-bit mono PCM callback chunk into elapsed milliseconds."""
+    if not isinstance(pcm_frame, (bytes, bytearray, memoryview)) or len(pcm_frame) <= 0:
+        return 0.0
+    sample_rate = getattr(conn, "sample_rate", None)
+    if (type(sample_rate) not in (int, float)
+            or not math.isfinite(sample_rate) or sample_rate <= 0):
+        sample_rate = getattr(getattr(conn, "vad", None), "sample_rate", None)
+    if (type(sample_rate) not in (int, float)
+            or not math.isfinite(sample_rate) or sample_rate <= 0):
+        sample_rate = _DEFAULT_PCM_SAMPLE_RATE_HZ
+    return len(pcm_frame) * 1000.0 / (2.0 * float(sample_rate))
+
+
+def observe_idle_human_voice(
+    conn, have_voice: bool, pcm_frame: bytes | bytearray | memoryview | None = None,
+) -> bool:
     """Emit real human VAD START while Xiaozhi is listening and not talking.
 
     Native Xiaozhi ASR still receives every original audio packet. This
@@ -610,16 +638,19 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
         idle_voice_count.pop(device, None)
         idle_voice_last_at.pop(device, None)
         if device in idle_voice_emitted:
-            quiet = idle_voice_quiet_frames.get(device, 0) + 1
-            idle_voice_quiet_frames[device] = quiet
-            if quiet >= 2:
-                # Two genuine VAD-negative calls end the user turn. A brief
-                # pause inside a word/phrase does not terminate video early.
-                # The original Xiaozhi ASR/speaker state stays untouched.
+            frame_ms = _pcm_frame_duration_ms(conn, pcm_frame)
+            if frame_ms <= 0:
+                return False
+            silence_ms = idle_voice_silence_ms.get(device, 0.0) + frame_ms
+            if silence_ms + 1e-9 >= _silence_threshold_ms(conn):
+                # Gate speech_end on cumulative non-speech PCM duration rather than
+                # bare callback count so short mid-thought pauses cannot end the turn.
                 if connections.get(device) is conn:
                     record_human_voice(conn, "speech_end")
                 idle_voice_emitted.discard(device)
-                idle_voice_quiet_frames.pop(device, None)
+                idle_voice_silence_ms.pop(device, None)
+            else:
+                idle_voice_silence_ms[device] = silence_ms
         return False
     if (connections.get(device) is not conn
             or _echo_isolated(device) or lease_stopping
@@ -629,7 +660,7 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
         idle_voice_count.pop(device, None)
         idle_voice_last_at.pop(device, None)
         return False
-    idle_voice_quiet_frames.pop(device, None)
+    idle_voice_silence_ms.pop(device, None)
     if device in idle_voice_emitted:
         # Real VAD continues to sustain this current human turn. Do not let
         # the floor expire during a sentence longer than one second.

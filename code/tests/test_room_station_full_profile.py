@@ -1206,3 +1206,7 @@ def test_partial_room_profile_is_explicit_at_receipt_and_after_expiry():
     assert empty.sensor_ages_ms == {}
     assert empty.summary == "No fresh room station measurements"
     assert fresh_room_summary(empty, now=12.0) is None
+
+    # Sub-millisecond negative deltas must fail closed before rounding to 0 ms.
+    assert fresh_room_summary(full, now=full.received_at - 0.0004) is None
+    assert fresh_room_summary(partial, now=partial.received_at - 0.0004) is None

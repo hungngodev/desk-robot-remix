@@ -4870,3 +4870,48 @@ def test_timeline_expired_vad_still_fences_prior_turn_transcript():
     assert timeline[0]["transcription_verified"] is False
     assert timeline[0]["speaker_identity_verified"] is False
     assert not hub.interaction_timeline(robot, 130.001)
+
+
+@pytest.mark.parametrize("bad_output", [
+    "x" * 401,
+    "",
+    "   \n\t  ",
+    "\ud800",
+    None,
+    123,
+    True,
+    {"answer": "I see a cup"},
+])
+async def test_look_validates_non_ollama_scene_adapter_outputs(bad_output):
+    class UnboundedScene:
+        def __init__(self, reply):
+            self._reply = reply
+
+        async def answer(self, question, frames):
+            return self._reply
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        UnboundedScene(bad_output), asyncio.Lock(),
+    )
+    try:
+        baseline_metrics = service._metrics["robot-01"].copy()
+        with pytest.raises(ValueError, match="Unbounded or malformed local vision answer"):
+            await service.look("robot-01", "What is on my desk?")
+        assert service._metrics["robot-01"]["model_latency_last_ms"] is None
+        assert service._metrics["robot-01"]["visual_errors"] == (
+            baseline_metrics["visual_errors"] + 1
+        )
+        assert service.hub.recent_tool_context("robot-01", time.monotonic()) == []
+
+        valid_service = MultimodalOrchestrator(
+            config(), {"robot-01": Head(), "robot-02": Head()},
+            UnboundedScene("  A dark square sits on the desk.  "), asyncio.Lock(),
+        )
+        try:
+            reply = await valid_service.look("robot-01", "What is on my desk?")
+            assert reply["answer"] == "A dark square sits on the desk."
+        finally:
+            await valid_service.close()
+    finally:
+        await service.close()

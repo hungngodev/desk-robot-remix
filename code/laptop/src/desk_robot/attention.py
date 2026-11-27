@@ -37,6 +37,12 @@ def _text(value: str, max_length: int) -> str:
     return " ".join(value.split())[:max_length]
 
 
+def _is_handling_interrupt(kind: str, detail: str | None) -> bool:
+    return kind in {"handling_tilt", "handling_shake"} or (
+        kind == "safety_fault" and detail == "floor_out_of_range_upright_lift"
+    )
+
+
 @dataclass
 class _Attention:
     generation: int = 0
@@ -63,6 +69,9 @@ class _Attention:
     # One previous ASR fragment, with its original receipt and consent grant.
     # Only a handling interruption can carry it into the next voice epoch.
     interrupted_asr: tuple[str, str, float, int | None] | None = None
+    # Short-lived candidate stashed across human_started() so handling status
+    # arriving slightly after VAD onset can reconcile with the same fences.
+    pending_interrupted_asr: tuple[str, str, float, int | None, float] | None = None
     heard_ids: deque[str] = field(default_factory=lambda: deque(maxlen=24))
     sent: str = ""
     sent_at: float = -math.inf
@@ -128,6 +137,7 @@ class AttentionLedger:
             # triggering utterance.
             had_interrupted_asr = state.interrupted_asr is not None
             state.interrupted_asr = None
+            state.pending_interrupted_asr = None
             if had_interrupted_asr or state.asr_at < state.topic_started_at:
                 state.asr = ""
                 state.asr_consent_generation = None
@@ -191,14 +201,21 @@ class AttentionLedger:
                 and 0 <= at - state.asr_at <= 90
                 and any(
                     max(state.voice_at, state.asr_at - 90) <= stamp <= at
-                    and (kind in {"handling_tilt", "handling_shake"}
-                         or (kind == "safety_fault" and state.sensor_details.get(kind)
-                             == "floor_out_of_range_upright_lift"))
+                    and _is_handling_interrupt(kind, state.sensor_details.get(kind))
                     for kind, stamp, _ in state.sensor_edges
                 )):
             state.interrupted_asr = (
                 state.last_heard_id, state.asr, state.asr_at, state.asr_consent_generation,
             )
+            state.pending_interrupted_asr = None
+        elif (state.asr and state.last_heard_id is not None
+              and 0 <= at - state.asr_at <= 90):
+            state.pending_interrupted_asr = (
+                state.last_heard_id, state.asr, state.asr_at,
+                state.asr_consent_generation, at,
+            )
+        else:
+            state.pending_interrupted_asr = None
         state.voice_at = at
         state.voice_active = True
         state.human_turns += 1
@@ -252,6 +269,12 @@ class AttentionLedger:
         if state.interrupted_asr is not None and state.interrupted_asr[0] == event_id:
             state.interrupted_asr = None
             return True
+        if (state.pending_interrupted_asr is not None
+                and state.pending_interrupted_asr[0] == event_id):
+            if state.asr_at == state.pending_interrupted_asr[2]:
+                state.asr_at = -math.inf
+            state.pending_interrupted_asr = None
+            return True
         if state.last_heard_id != event_id:
             return False
         state.asr = ""
@@ -295,7 +318,17 @@ class AttentionLedger:
                 and at < state.topic_updated_at):
             # An old queued callback cannot become fresh context for a new goal.
             return False
+        pending = state.pending_interrupted_asr
+        reconciles_pending = (
+            pending is not None
+            and _is_handling_interrupt(kind, detail)
+            and state.interrupted_asr is None
+            and state.voice_at == pending[4]
+            and pending[2] <= at <= pending[4] + 5.0
+            and 0 <= at - pending[2] <= 90.0
+        )
         if (state.topic_state != "active"
+                and not reconciles_pending
                 and not 0 <= at - max(state.asr_at, state.sent_at) <= 120):
             return False
         if state.sensor_edges and at < state.sensor_edges[-1][1]:
@@ -329,6 +362,9 @@ class AttentionLedger:
             state.sensor_details[kind] = detail
         else:
             state.sensor_details.pop(kind, None)
+        if reconciles_pending:
+            state.interrupted_asr = (pending[0], pending[1], pending[2], pending[3])
+            state.pending_interrupted_asr = None
         return True
 
     def timeline(

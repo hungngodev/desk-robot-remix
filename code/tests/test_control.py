@@ -502,6 +502,48 @@ async def test_hardware_range_bounds_reject_contradictory_valid_masks(
         await coordinator.close()
 
 
+@pytest.mark.parametrize(("lane", "distance", "accepted"), [
+    (0, 30, True),
+    (1, 30, True),
+    (2, 30, True),
+    (3, 30, True),
+    (4, 30, False),
+    (4, 31, True),
+])
+async def test_hardware_lane4_rejects_30mm_while_floor_lanes_accept_30mm(
+    settings, lane, distance, accepted,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["power"] = {
+        "fuel_valid": True, "cell_mv": 3800, "soc_centi": 7000,
+    }
+    head.body_status["ranges"]["mm"] = [50, 50, 50, 50, 260]
+    head.body_status["ranges"]["mm"][lane] = distance
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        if accepted:
+            permit = await coordinator.operator_arm("robot-01")
+            assert permit["operator_permit"] is True
+            head.body_status["armed"] = True
+            assert await coordinator._assert_armed_health(
+                "robot-01", require_front_clearance=False,
+            )
+        else:
+            with pytest.raises(OperationError, match="stale or malformed ranging"):
+                await coordinator.operator_arm("robot-01")
+            assert "robot-01" not in coordinator.permits
+            assert not head.commands
+            head.body_status["armed"] = True
+            for clearance in (False, True):
+                with pytest.raises(OperationError, match="local sensor or corridor"):
+                    await coordinator._assert_armed_health(
+                        "robot-01", require_front_clearance=clearance,
+                    )
+    finally:
+        await coordinator.close()
+
+
 @pytest.mark.parametrize("power", [
     {"fuel_valid": True, "cell_mv": "0", "soc_centi": None},
     {"fuel_valid": True, "cell_mv": True, "soc_centi": 7000},

@@ -365,3 +365,36 @@ def test_excessive_pose_clock_values_revoke_continuity(bad):
         assert gate.current(100.2) is None
         recovered = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
         assert gate.current(100.3) is recovered
+
+
+@pytest.mark.parametrize("field", ["x_mm", "y_mm", "yaw_mrad", "seq", "sample_us"])
+@pytest.mark.parametrize("bad_value", [
+    True,
+    False,
+    None,
+    float("nan"),
+    float("inf"),
+    float("-inf"),
+    "__MISSING__",
+], ids=["true", "false", "none", "nan", "inf", "neg_inf", "missing"])
+def test_malformed_or_missing_coordinate_clears_pose_and_requires_reanchor(
+    field, bad_value,
+):
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0)
+    fresh = gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+    assert gate.current(100.1) is fresh
+
+    corrupted = pose(seq=3, sample_us=1_200_000)
+    if bad_value == "__MISSING__":
+        del corrupted[field]
+    else:
+        corrupted[field] = bad_value
+
+    with pytest.raises(PoseError):
+        decode_pose(corrupted, "robot-01", 100.2)
+    with pytest.raises(PoseError):
+        gate.observe(corrupted, 100.2)
+    assert gate.current(100.2) is None
+    assert not gate.owns_continuous_receipt(fresh)
+    assert gate.needs_reanchor is True

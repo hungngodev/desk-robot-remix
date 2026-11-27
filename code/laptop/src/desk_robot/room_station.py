@@ -225,6 +225,8 @@ def fresh_room_summary(observation: RoomObservation, *, now: float) -> str | Non
     """
     if observation.sensor_ages_ms is None:
         return observation.summary
+    if now < observation.received_at:
+        return None
     elapsed_ms = round(1000 * (now - observation.received_at))
     if elapsed_ms < 0:
         return None

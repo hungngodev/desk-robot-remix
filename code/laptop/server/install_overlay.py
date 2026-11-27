@@ -333,7 +333,7 @@ def files(root):
         "            'Xiaozhi speaker STOP unconfirmed; preserving human PCM: %s',\n"
         "            type(stop_error).__name__,\n"
         "        )\n"
-        "    desk_robot_bridge.observe_idle_human_voice(conn, have_voice)\n"
+        "    desk_robot_bridge.observe_idle_human_voice(conn, have_voice, pcm_frame)\n"
         "    import desk_robot_native_omni\n"
         "    if desk_robot_native_omni.route_audio(conn, pcm_frame, have_voice):\n"
         "        return\n"
