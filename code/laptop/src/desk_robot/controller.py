@@ -392,7 +392,9 @@ class Coordinator:
                 or self._robot_busy(robot_id)):
             raise OperationError("Operator arm superseded or robot became busy")
         self.permits[robot_id] = time.monotonic() + 30
-        self._permit_continuous_deadlines[robot_id] = continuous_monotonic() + 30
+        deadlines = getattr(self, "_permit_continuous_deadlines", None)
+        if deadlines is not None:
+            deadlines[robot_id] = continuous_monotonic() + 30
         return {
             "robot_id": robot_id,
             "operator_permit": True,
@@ -1280,10 +1282,11 @@ class Coordinator:
         if self.dock_inhibited(robot_id):
             return None
         try:
-            load_real_dock_calibration(
-                robot.dock_calibration, robot_id=robot_id,
-                expected_marker_id=getattr(robot, "dock_marker_id", None),
-            )
+            expected_marker = getattr(robot, "dock_marker_id", None)
+            cal_kwargs: dict[str, object] = {"robot_id": robot_id}
+            if expected_marker is not None:
+                cal_kwargs["expected_marker_id"] = expected_marker
+            load_real_dock_calibration(robot.dock_calibration, **cal_kwargs)
         except (OSError, ValueError) as exc:
             # Calibration paths and parser messages may contain private data.
             logging.getLogger(__name__).warning(

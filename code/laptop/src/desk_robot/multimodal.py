@@ -508,11 +508,12 @@ class CameraFrameHub:
         )
         self.last_capture[robot_id] = received_at
         self.urgent[robot_id] = False
+        wall_clock = getattr(time, "time", None)
         evidence = CameraEvidence(
             reduced, received_at, motion, source,
             trigger_kind, source_identity,
             received_continuous_at=continuous_monotonic(),
-            received_wall_at=time.time(),
+            received_wall_at=wall_clock() if callable(wall_clock) else None,
         )
         self.frames[robot_id].append(evidence)
         return evidence
@@ -1191,14 +1192,7 @@ class MultimodalOrchestrator:
             self._camera_grant_valid(robot_id, self._camera_grants[robot_id])
         self._frame_admission.notify()
         active_tasks = set(self._model_admission.active())
-        for owner in (
-            self._look_tasks,
-            self._proactive_snapshots,
-            self._head_snapshot_tasks,
-            self._capture_tasks,
-            self._sensor_tasks,
-        ):
-            active_tasks.update(owner.values())
+        active_tasks.update(self._look_tasks.values())
         for task in active_tasks:
             if not task.done() and not task.cancelling():
                 task.cancel()
@@ -2500,9 +2494,15 @@ class MultimodalOrchestrator:
             raise
         except asyncio.CancelledError:
             metrics["visual_errors"] += 1
-            if (not self.settings.voice_vision_tools_enabled
-                    or self.settings.camera_consent_generation != camera_consent_generation):
-                raise RuntimeError("Visual query cancelled by camera consent revocation") from None
+            if (
+                not getattr(self.settings, "voice_vision_tools_enabled", False)
+                or (
+                    camera_consent_generation is not None
+                    and getattr(self.settings, "camera_consent_generation", None)
+                    != camera_consent_generation
+                )
+            ):
+                raise RuntimeError("Camera consent revoked during visual query") from None
             if not current_turn():
                 reason = (
                     "newer speech" if self._turn_epoch[robot_id] != turn

@@ -376,7 +376,7 @@ async def test_camera_opt_out_cancels_inflight_look_and_prevents_stale_reply():
         await asyncio.wait_for(entered.wait(), timeout=1.0)
         settings.voice_vision_tools_enabled = False
         settings.voice_vision_tools_enabled = True
-        with pytest.raises(RuntimeError, match="revocation"):
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
             await asyncio.wait_for(task, timeout=1.0)
     finally:
         gate.set()

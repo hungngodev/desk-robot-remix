@@ -439,8 +439,9 @@ class PetController:
         self._restore_fleet_cooldowns()
 
     def _cooldown_state_path(self):
-        memory_dir = getattr(self.settings, "memory_dir", None)
-        if memory_dir is None or getattr(self.settings, "mode", None) != "hardware":
+        settings = getattr(self, "settings", None)
+        memory_dir = getattr(settings, "memory_dir", None)
+        if memory_dir is None or getattr(settings, "mode", None) != "hardware":
             return None
         return memory_dir / ".fleet_speech_cooldowns.json"
 
@@ -2317,14 +2318,10 @@ class PetController:
         # Their counters remain monotonic within a boot even while disabled.
         for key, bit, kind, description in (
             ("bumps", 1, "bumper", "My optional bumper registered a contact and stopped my tracks"),
-            (
-                "reed_count", 2, "magnet",
-                "My optional reed switch detected a magnetic accessory closure",
-            ),
-            (
-                "pir_count", 4, "pir",
-                "My optional PIR detected changing infrared motion, not an identified person",
-            ),
+            ("reed_count", 2, "magnet",
+             "My optional reed switch detected a magnetic accessory closure"),
+            ("pir_count", 4, "pir",
+             "My optional PIR detected changing infrared motion, not an identified person"),
         ):
             current = values[key]
             prior = previous.get(key)
