@@ -31,6 +31,12 @@
 
 #include <algorithm>
 #include <esp_timer.h>
+#ifdef ESP_PLATFORM
+#include <esp_attr.h>
+#endif
+#ifndef IRAM_ATTR
+#define IRAM_ATTR
+#endif
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include <esp_heap_caps.h>
 #include <cstddef>
@@ -48,6 +54,49 @@ SenseReferenceCodec::SenseReferenceCodec(
     input_reference_ = true;
     input_channels_ = 2;
     duplex_ = true;
+    // Register ISR RX queue-overflow telemetry while rx_handle_ is still in
+    // READY (disabled) state prior to AudioCodec::Start() enabling DMA RX.
+    if (rx_handle_ != nullptr) {
+        i2s_event_callbacks_t cbs{};
+        cbs.on_recv_q_ovf = &SenseReferenceCodec::OnRxQueueOverflowIsr;
+        ESP_ERROR_CHECK(
+            i2s_channel_register_event_callback(rx_handle_, &cbs, this));
+    }
+}
+
+void IRAM_ATTR SenseReferenceCodec::RecordRxQueueOverflowFromIsr(
+    size_t dropped_bytes) noexcept {
+    uint32_t expected_ovf =
+        rx_queue_overflows_.load(std::memory_order_relaxed);
+    while (expected_ovf != UINT32_MAX &&
+           !rx_queue_overflows_.compare_exchange_weak(
+               expected_ovf, expected_ovf + 1U,
+               std::memory_order_acq_rel, std::memory_order_relaxed)) {
+    }
+    const uint32_t clamped = dropped_bytes > static_cast<size_t>(UINT32_MAX)
+        ? UINT32_MAX : static_cast<uint32_t>(dropped_bytes);
+    uint32_t expected_bytes =
+        rx_queue_overflow_bytes_.load(std::memory_order_relaxed);
+    while (expected_bytes != UINT32_MAX) {
+        const uint32_t room = UINT32_MAX - expected_bytes;
+        const uint32_t next_bytes =
+            clamped > room ? UINT32_MAX : expected_bytes + clamped;
+        if (rx_queue_overflow_bytes_.compare_exchange_weak(
+                expected_bytes, next_bytes,
+                std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            break;
+        }
+    }
+}
+
+bool IRAM_ATTR SenseReferenceCodec::OnRxQueueOverflowIsr(
+    i2s_chan_handle_t handle, i2s_event_data_t* event, void* user_ctx) {
+    (void)handle;
+    auto* self = static_cast<SenseReferenceCodec*>(user_ctx);
+    if (self != nullptr) {
+        self->RecordRxQueueOverflowFromIsr(event != nullptr ? event->size : 0U);
+    }
+    return false;
 }
 
 void SenseReferenceCodec::PushLocked(int16_t sample) {
@@ -205,8 +254,16 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     // not a hardware exposure or acoustic speaker-playback receipt.
     const int64_t capture_end_us = esp_timer_get_time();
     bool reference_ready = false;
+    bool rx_overflow_detected = false;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
+        const uint32_t current_rx_overflows =
+            rx_queue_overflows_.load(std::memory_order_acquire);
+        if (current_rx_overflows != observed_rx_queue_overflows_) {
+            observed_rx_queue_overflows_ = current_rx_overflows;
+            reference_integrity_failed_ = true;
+            rx_overflow_detected = true;
+        }
         // Only successful, complete microphone reads advance actual input
         // activity. Counting attempted reads would fake an active PDM stream.
         microphone_frames_read_ += std::min(
@@ -216,6 +273,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             reference_frame_.data(), frames, capture_end_us);
     }
     (void)reference_ready;
+    (void)rx_overflow_detected;
     // Integrity counters are exposed by GetReferenceDiagnostics(). Never
     // synchronously log on the microphone task, even outside the ring lock.
     for (int i = 0; i < frames; ++i) {
@@ -239,9 +297,13 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
             const bool already_ready = bench_window_.ready();
             const bool had_frames = bench_window_.frames_received() != 0;
-            bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
-                                static_cast<uint32_t>(frames), capture_end_us,
-                                reference_ready);
+            if (rx_overflow_detected) {
+                bench_window_.invalidate_read(capture_end_us);
+            } else {
+                bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
+                                    static_cast<uint32_t>(frames), capture_end_us,
+                                    reference_ready);
+            }
             if (!had_frames && bench_window_.frames_received() != 0) {
                 std::lock_guard<std::mutex> reference_lock(reference_mutex_);
                 speaker_activity_.FenceWindowStart(
@@ -362,13 +424,18 @@ void SenseReferenceCodec::ClearReference() {
 SenseReferenceCodec::ReferenceDiagnostics
 SenseReferenceCodec::GetReferenceDiagnostics() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
+    const uint32_t rx_ovf =
+        rx_queue_overflows_.load(std::memory_order_acquire);
+    const uint32_t rx_ovf_bytes =
+        rx_queue_overflow_bytes_.load(std::memory_order_acquire);
     return ReferenceDiagnostics{
         missing_reference_reads_, reference_overwrite_reads_,
         stale_publish_discards_, short_output_writes_, short_input_reads_,
         microphone_frames_read_, speaker_frames_accepted_,
         microphone_privacy_muted_.load(std::memory_order_acquire),
         microphone_privacy_epoch_.load(std::memory_order_acquire),
-        reference_integrity_failed_};
+        reference_integrity_failed_ || rx_ovf != 0U,
+        rx_ovf, rx_ovf_bytes};
 }
 
 void SenseReferenceCodec::EnableOutput(bool enable) {

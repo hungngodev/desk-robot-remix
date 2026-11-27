@@ -284,7 +284,9 @@ foreach(scenario
     guarded_head_timeout_cannot_rearm_from_reconnected_uart
     guarded_transition_sequences
     guarded_reboot_fault_matrix
-    deterministic_stream_stress)
+    deterministic_stream_stress
+    uart_frame_integrity_mutation_check
+    body_control_heartbeat_lease_boundary)
   body_add_test(${scenario} body_tests ${scenario})
 endforeach()
 

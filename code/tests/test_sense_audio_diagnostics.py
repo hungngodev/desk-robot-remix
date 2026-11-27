@@ -72,6 +72,10 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
     {"aec_delay_config_ms": "0"},
     {"aec_delay_config_ms": -1},
     {"aec_delay_config_ms": 251},
+    {"rx_queue_overflows": -1},
+    {"rx_queue_overflows": True},
+    {"rx_queue_overflow_bytes": 0x1_0000_0000},
+    {"rx_queue_overflows": 1, "reference_integrity_failed": False},
     {"speaker_playback_verified": True},
     {"aec_physically_qualified": True},
 ])

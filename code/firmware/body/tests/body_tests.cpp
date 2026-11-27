@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "MotorHeartbeat.h"
 #include "BodyReplyFormat.h"
 #include "BodyCommandParser.h"
 #include "AttitudeNorm.h"
@@ -1319,6 +1320,40 @@ void uart_frame_integrity_mutation_check() {
   CHECK(body.state().left == 40 && body.drive_remaining(110) == 160U);
 }
 
+void body_control_heartbeat_lease_boundary() {
+  for (const std::uint32_t start :
+       {100U, std::numeric_limits<std::uint32_t>::max() - 99U}) {
+    BodyControl body;
+    desk_robot::MotorHeartbeat heartbeat;
+    heartbeat.reset();
+    CHECK(send(body, "arm", start) == "OK arm");
+    CHECK(send(body, "drive 30 -30 250", start) ==
+          "OK drive left=30 right=-30 ms=250");
+    for (std::uint32_t offset = 0; offset <= 240U; offset += 15U) {
+      const std::uint32_t now = start + offset;
+      body.tick(now);
+      if (offset > 0U && (offset % 150U == 0U)) {
+        CHECK(send(body, "keepalive", now) == "OK keepalive");
+      }
+      CHECK(body.drive_remaining(now) == 250U - offset);
+      CHECK(body.state().left == 30 && body.state().right == -30);
+      heartbeat.update(now, body.drive_remaining(now) > 0U);
+      CHECK(!heartbeat.missed_deadline());
+    }
+    body.tick(start + 249U);
+    CHECK(body.drive_remaining(start + 249U) == 1U);
+    CHECK(body.state().left == 30 && body.state().right == -30);
+    heartbeat.update(start + 249U, body.drive_remaining(start + 249U) > 0U);
+    CHECK(!heartbeat.missed_deadline());
+
+    body.tick(start + 250U);
+    CHECK(body.drive_remaining(start + 250U) == 0U);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(!heartbeat.update(start + 250U, body.drive_remaining(start + 250U) > 0U));
+    CHECK(!heartbeat.missed_deadline());
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1354,7 +1389,9 @@ int main(int argc, char** argv) {
       {"guarded_transition_sequences", guarded_transition_sequences},
       {"guarded_reboot_fault_matrix", guarded_reboot_fault_matrix},
       {"deterministic_stream_stress", deterministic_stream_stress},
-      {"uart_frame_integrity_mutation_check", uart_frame_integrity_mutation_check}};
+      {"uart_frame_integrity_mutation_check", uart_frame_integrity_mutation_check},
+      {"body_control_heartbeat_lease_boundary",
+       body_control_heartbeat_lease_boundary}};
   int ran = 0;
   for (const auto& test : tests) {
     if (argc > 1 && std::strcmp(argv[1], test.first) != 0) continue;

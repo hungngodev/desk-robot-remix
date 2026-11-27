@@ -33,6 +33,18 @@ def test_room_station_source_pins():
             assert not {'lib_deps', 'platform', 'board', 'framework'} & ini[section].keys()
 
 
+def test_dock_source_pins():
+    lock = json.loads((CODE / 'toolchain-lock.json').read_text())['dock']
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.read(CODE / 'firmware/dock/platformio.ini')
+    assert ini['env']['platform'] == f"atmelavr@{lock['atmelavr']}"
+    direct = lock['direct_libraries']
+    assert all(re.fullmatch(r'[0-9a-f]{40}', item['commit']) for item in direct.values())
+    assert set(ini['env']['lib_deps'].split()) == {
+        f"{item['url']}#{item['commit']}" for item in direct.values()
+    }
+
+
 @pytest.mark.parametrize('fault', ['none', 'missing', 'extra', 'duplicate', 'version', 'uri', 'sha'])
 def test_room_station_resolved_inventory(tmp_path, fault):
     packages = []

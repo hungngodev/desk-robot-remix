@@ -162,6 +162,47 @@ static void check_jaw_adc_rail_isolation() {
     CHECK(!wire.unsafe_parallel_mux);
   }
 }
+static void check_belly_adc_rail_isolation() {
+  for (const auto rail : {0x7fffU, 0x8000U}) {
+    TwoWire wire;
+    desk_robot::AccessorySensors sensors;
+    CHECK(sensors.begin(wire));
+    for (std::uint32_t ms = 0; ms <= 516; ms += 12) sensors.poll(ms);
+    CHECK(wire.ads_config_high == 0xD3U);
+    const auto before = sensors.readings().force;
+    CHECK(before.valid && before.valid_mask == 3U);
+    // Let channel 1 complete cleanly, then drive channel 0 (belly) to saturation.
+    for (std::uint32_t ms = 528; ms <= 600; ms += 12) sensors.poll(ms);
+    const auto pre_clip = sensors.readings().force;
+    CHECK(pre_clip.valid && pre_clip.valid_mask == 3U);
+    wire.ads_belly_raw = static_cast<std::uint16_t>(rail);
+    for (std::uint32_t ms = 612; ms <= 768; ms += 12) sensors.poll(ms);
+    const auto clipped = sensors.readings().force;
+    CHECK(!clipped.valid && clipped.valid_mask == 2U);
+    CHECK(clipped.adc[0] == pre_clip.adc[0]);
+    CHECK(clipped.belly_sample_seq == pre_clip.belly_sample_seq);
+    CHECK(clipped.belly_at_ms == pre_clip.belly_at_ms);
+    CHECK(clipped.adc[1] == pre_clip.adc[1]);
+    CHECK(clipped.jaw_sample_seq == pre_clip.jaw_sample_seq);
+    CHECK(clipped.jaw_at_ms == pre_clip.jaw_at_ms);
+    CHECK(clipped.at_ms == pre_clip.at_ms);
+    for (std::uint32_t ms = 780; ms <= 936; ms += 12) sensors.poll(ms);
+    const auto jaw = sensors.readings().force;
+    CHECK(!jaw.valid && jaw.valid_mask == 2U);
+    CHECK(jaw.jaw_sample_seq > pre_clip.jaw_sample_seq);
+    CHECK(jaw.jaw_at_ms > pre_clip.jaw_at_ms);
+    CHECK(jaw.belly_sample_seq == pre_clip.belly_sample_seq);
+    wire.ads_belly_raw = 0x0400U;
+    for (std::uint32_t ms = 948; ms <= 1116; ms += 12) sensors.poll(ms);
+    const auto recovered = sensors.readings().force;
+    CHECK(recovered.valid && recovered.valid_mask == 3U);
+    CHECK(recovered.belly_sample_seq > pre_clip.belly_sample_seq);
+    CHECK(recovered.belly_at_ms > pre_clip.belly_at_ms);
+    CHECK(recovered.jaw_sample_seq == jaw.jaw_sample_seq);
+    CHECK(recovered.jaw_at_ms == jaw.jaw_at_ms);
+    CHECK(!wire.unsafe_parallel_mux);
+  }
+}
 static void check_belly_adc_timeout_retires_jaw_evidence() {
   TwoWire wire;
   desk_robot::AccessorySensors sensors;
@@ -608,6 +649,7 @@ int main() {
     check_empty_accessory_mux();
     check_unverified_cap_keeps_gpio_touch_independent();
     check_jaw_adc_rail_isolation();
+    check_belly_adc_rail_isolation();
     check_ads_start_provenance();
     check_belly_adc_timeout_retires_jaw_evidence();
     check_pulse_pointer_budget();

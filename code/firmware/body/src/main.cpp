@@ -874,6 +874,11 @@ void loop() {
 #if DESK_ROBOT_ENABLE_HAPTIC
   // React only to a genuine fresh CAP1188 rising touch zone, not a boot
   // baseline, microphone/LLM request, or arbitrary remote motor command.
+  // Quiet-mode policy (lab builds only; DESK_ROBOT_ENABLE_HAPTIC=0 in prod):
+  // Mac quiet hours silence autonomous/network speech and motion, while
+  // deliberate physical CAP1188 touch haptics stay locally responsive whenever
+  // BodyControl::haptic_feedback_allowed() passes. WROOM safety checks and the
+  // external hardware HC123 one-shot cutoff remain strictly independent.
   static std::uint32_t last_haptic_cap_events = 0;
   const std::uint32_t cap_events = control.state().cap_events;
   if (cap_events != last_haptic_cap_events) {

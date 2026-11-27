@@ -93,6 +93,8 @@ struct SenseReferenceCodec : NoAudioCodecSimplexPdm {
     std::array<int16_t, kMaxReadFrames> microphone_frame_{}, reference_frame_{};
     uint32_t microphone_frames_read_ = 0;
     uint32_t short_input_reads_ = 0;
+    std::atomic<uint32_t> rx_queue_overflows_{0};
+    uint32_t observed_rx_queue_overflows_ = 0;
     bool reference_integrity_failed_ = false;
     uint32_t reference_overwrite_reads_ = 0;
     uint32_t consecutive_missing_reference_reads_ = 0;

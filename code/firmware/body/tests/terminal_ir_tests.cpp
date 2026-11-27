@@ -122,6 +122,20 @@ static void check_corrupt_complements_and_empty_batch() {
   const desk_robot::IrMarkSpace repeat[] = {{9000, 2250}, {560, 0}};
   code = expected;
   CHECK(!desk_robot::decode_nec(repeat, 2, code) && code == 0);
+  // Inverted mark/space polarity (active-high swap) must be rejected cleanly.
+  desk_robot::IrMarkSpace inverted[34]{};
+  make_frame(frame, 0x12, 0x34);
+  for (unsigned i = 0; i != 34; ++i)
+    inverted[i] = desk_robot::IrMarkSpace(frame[i].space_us, frame[i].mark_us);
+  code = expected;
+  CHECK(!desk_robot::decode_nec(inverted, 34, code) && code == 0);
+  // Shifted active-high capture (space -> mark slot) must be rejected cleanly.
+  inverted[0] = {4500, 9000};
+  for (unsigned i = 1; i != 33; ++i)
+    inverted[i] = desk_robot::IrMarkSpace(frame[i].space_us, 560);
+  inverted[33] = {1690, 560};
+  code = expected;
+  CHECK(!desk_robot::decode_nec(inverted, 34, code) && code == 0);
   make_frame(frame, 0x12, 0x34);
   code = expected;
   CHECK(!desk_robot::decode_nec(frame, static_cast<std::size_t>(-1), code) && code == 0);

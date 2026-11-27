@@ -1113,6 +1113,9 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         cJSON_AddNumberToObject(result.get(), "discarded_stale_writes", d.discarded_stale_writes);
         cJSON_AddNumberToObject(result.get(), "short_output_writes", d.short_output_writes);
         cJSON_AddNumberToObject(result.get(), "short_input_reads", d.short_input_reads);
+        cJSON_AddNumberToObject(result.get(), "rx_queue_overflows", d.rx_queue_overflows);
+        cJSON_AddNumberToObject(result.get(), "rx_queue_overflow_bytes",
+                                d.rx_queue_overflow_bytes);
         cJSON_AddNumberToObject(result.get(), "microphone_frames_read", d.microphone_frames_read);
         cJSON_AddNumberToObject(result.get(), "speaker_frames_accepted", d.speaker_frames_accepted);
         cJSON_AddBoolToObject(result.get(), "microphone_privacy_muted", d.microphone_privacy_muted);

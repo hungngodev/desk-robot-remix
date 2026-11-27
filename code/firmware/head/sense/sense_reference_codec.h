@@ -67,8 +67,13 @@ public:
         bool microphone_privacy_muted;
         uint32_t microphone_privacy_epoch;
         bool integrity_failed;
+        uint32_t rx_queue_overflows;
+        uint32_t rx_queue_overflow_bytes;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
+
+    // ISR-safe saturating I2S RX DMA queue overflow recorder (defined in .cc with IRAM_ATTR).
+    void RecordRxQueueOverflowFromIsr(size_t dropped_bytes) noexcept;
 
     // Optional cosmetic sampling never waits for the realtime reference owner.
     desk_robot::SpeechLevel ReadSpeechLevel(int64_t now_us) {
@@ -174,6 +179,9 @@ private:
     uint32_t short_output_writes_ = 0;
     // Actual PDM driver errors/short reads, distinct from reference overwrites.
     uint32_t short_input_reads_ = 0;
+    std::atomic<uint32_t> rx_queue_overflows_{0};
+    std::atomic<uint32_t> rx_queue_overflow_bytes_{0};
+    uint32_t observed_rx_queue_overflows_ = 0;
     // Driver read/write progress, not proof of microphone acoustic quality
     // or speaker playback. Persist across cancellation for a live bench.
     uint32_t microphone_frames_read_ = 0;
@@ -193,4 +201,6 @@ private:
     void PushLocked(int16_t sample);
     void PublishAcceptedLocked(const int32_t* source, int samples, int64_t now_us);
     bool ReadReferenceLocked(int16_t* dest, int frames, int64_t now_us);
+    static bool OnRxQueueOverflowIsr(
+        i2s_chan_handle_t handle, i2s_event_data_t* event, void* user_ctx);
 };

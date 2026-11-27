@@ -27,6 +27,13 @@
     "platform_packages": {
       "platformio/framework-arduino-avr": "5.2.0",
       "platformio/toolchain-atmelavr": "1.70300.191015"
+    },
+    "direct_libraries": {
+      "IRremote": {
+        "url": "https://github.com/Arduino-IRremote/Arduino-IRremote.git",
+        "version": "4.7.1",
+        "commit": "498dc591b255d8ba2e239c875804bdab2ab0fe91"
+      }
     }
   },
   "room_station": {

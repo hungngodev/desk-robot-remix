@@ -61,6 +61,12 @@ the selected IC's exact datasheet; review unused channel termination too.
 `esp32_full_haptic_lab` and `esp32_dc_integrated_lab`. The normal `esp32_full` and `esp32_dc_full` keep
 haptic power **OFF** by default until hardware acceptance.
 
+* **Quiet-mode policy:** Mac manual or scheduled quiet hours silence
+  autonomous speech and drivetrain/servo actuation, NOT deliberate local
+  physical CAP1188 petting feedback on the optional motor-disconnected lab
+  profile. WROOM safety interlocks, dock lockout (`BodyControl::haptic_feedback_allowed()`),
+  and the external CD74HC123 hardware one-shot cutoff remain completely independent.
+
 1. Boot writes zero to MCP23017 `OLATB` before configuring only GPB2 as an
    output and verifies the latch and direction by readback.
 2. One genuine, new CAP1188 touch zone transition queues a local request.

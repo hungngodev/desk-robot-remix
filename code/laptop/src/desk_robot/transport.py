@@ -401,12 +401,21 @@ class HttpHead:
             "discarded_stale_writes", "short_output_writes",
             "microphone_frames_read", "speaker_frames_accepted",
         )
+        optional_counters = (
+            "rx_queue_overflows", "rx_queue_overflow_bytes",
+        )
         if (data.get("robot_id") != self.config.id
                 or type(data.get("boot")) is not int
                 or not 0 <= data["boot"] <= 0xffffffff
                 or any(type(data.get(key)) is not int
                        or not 0 <= data[key] <= 0xffffffff
                        for key in counters)
+                or any(key in data and (
+                    type(data.get(key)) is not int
+                    or not 0 <= data[key] <= 0xffffffff
+                ) for key in optional_counters)
+                or (data.get("rx_queue_overflows", 0) > 0
+                    and data.get("reference_integrity_failed") is not True)
                 or type(data.get("reference_integrity_failed")) is not bool
                 or type(data.get("microphone_privacy_muted")) is not bool
                 or type(data.get("microphone_privacy_epoch")) is not int
