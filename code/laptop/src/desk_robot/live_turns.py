@@ -211,10 +211,11 @@ class LiveTurns:
         self, jpeg: bytes, *, captured_at: float, now: float, connection_epoch: int
     ) -> bool:
         """Keep the latest usable capture; timestamps share the owner's clock."""
-        captured_at = _seconds(captured_at)
-        now = _seconds(now)
+        # Retired producers cannot surface payload errors in the new session.
         if not self.is_connection_current(connection_epoch):
             return False
+        captured_at = _seconds(captured_at)
+        now = _seconds(now)
         if not 0 <= now - captured_at <= self.frame_max_age:
             return False
         if not isinstance(jpeg, bytes) or not jpeg:
