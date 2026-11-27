@@ -26,7 +26,7 @@ GridHeading = Annotated[int, Field(strict=True, ge=0, le=3)]
 
 
 class NavigateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     label: str | None = Field(default=None, min_length=1, max_length=64)
     goal: tuple[GridCoordinate, GridCoordinate] | None = None
     goal_heading: GridHeading | None = None

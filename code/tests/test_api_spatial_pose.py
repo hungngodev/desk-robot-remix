@@ -6,11 +6,12 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from desk_robot.api import create_app
-from desk_robot.api_spatial_pose import register_spatial_pose_route
+from desk_robot.api_spatial_pose import NavigateRequest, register_spatial_pose_route
 from desk_robot.transport import HttpHead
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 
 def _client(settings, handler):
@@ -308,3 +309,28 @@ def test_spatial_memory_read_fences_and_safe_errors(failure, status):
         assert response.json()["navigation_authorized"] is False
     else:
         assert "object_key" not in response.json()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("goal", [True, 0]), ("goal", [-1, 0]), ("goal", [64, 0]),
+    ("goal", [0.0, 1]), ("goal", ["1", 0]), ("goal", [0]),
+    ("goal", [0, 1, 2]), ("start", [0, float("nan")]),
+    ("start", [0, float("inf")]), ("heading", True),
+    ("heading", -1), ("goal_heading", 4), ("goal_heading", 1.0),
+])
+def test_invalid_navigation_input(field, value):
+    with pytest.raises(ValidationError):
+        NavigateRequest.model_validate({field: value})
+
+
+def test_navigation_request_is_an_immutable_snapshot():
+    source = [0, 63]
+    request = NavigateRequest.model_validate({"goal": source, "heading": 0, "goal_heading": 3})
+    source[0] = 17
+    assert request.goal == (0, 63)
+    for name, value in (("goal", (True, 0)), ("heading", 99), ("label", "changed")):
+        with pytest.raises(ValidationError, match="frozen"):
+            setattr(request, name, value)
+    assert request.goal == (0, 63)
+    assert request.heading == 0
+    assert request.label is None
