@@ -1,4 +1,9 @@
-"""Check measured live Xiaozhi interruptions, not synthetic audio success claims."""
+"""Score operator-declared live Xiaozhi interruption records.
+
+The proposed audible A2 gate requires both distance populations and controls.
+The 120 ms I2S cutoff is reported separately, not part of that gate.
+The checker does not attest physical measurements or actuator-only false VAD.
+"""
 from __future__ import annotations
 
 import argparse
@@ -256,7 +261,7 @@ def _score_human_trials(human: list[dict]) -> dict:
         raise ValueError("Each tested speaking distance requires exactly 20 human trials")
 
     # A single acceptance result must not mix different firmware builds,
-    # AEC settings or microphone/speaker geometry across its twenty trials.
+    # AEC settings or microphone/speaker geometry across either distance set.
     # Those require separate complete acoustic trial sets.
     if any(len(values) != 1 for values in (
             firmware_revisions, audio_configs, placements, robot_ids)):

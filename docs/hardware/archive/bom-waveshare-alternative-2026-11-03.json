@@ -142,9 +142,9 @@
       "fit": "Choose values/voltage rating after power measurements. Capacitors do not fix an undersized bank."
     }
   ],
-  "head_configuration": "Preferred candidate after user requires first-build voice interruption: Waveshare ESP32-S3-CAM-OV5640 physical-reference audio + camera + owned SSD1306; new board profile/build pending, no acoustic qualification. Sense target retained as earlier reference.",
+  "head_configuration": "Historical 2026-11-03 candidate, superseded by the active purchased XIAO ESP32S3 Sense head. Waveshare ESP32-S3-CAM-OV5640 physical-reference audio + camera + owned SSD1306 remains an unqualified alternative, not an active build or purchase recommendation.",
   "note": "Conditional FIRST prototype target 41.84 USD before shipping, tax and missing inventory. Selected Waveshare SKU 33699 observed 19.99 including camera and speaker; replaces earlier Sense/amp/speaker. Power/fastener allowances are not exact quotes. Fleet requires five additional stepper/driver pairs plus unknown reused quantities. No purchase, flashing or physical acceptance.",
-  "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
+  "readiness_scope": "Archived prototype comparison only: historical quotes, inventory and drawing/owned-part fit checks. Not the active Sense BOM, delivered-cost ledger, wiring contract or procurement release. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
     "stepper_chassis_lift_and_head_physical_fit_confirmed": false,
     "stepper_backend_and_cliff_interlock_verified": false,

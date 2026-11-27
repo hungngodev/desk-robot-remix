@@ -131,6 +131,14 @@ The final acceptance record must preserve waveform captures, device
 logs and real bench evidence outside the repository. A synthetic unit
 test passing this checker is never a physical A2 pass.
 
+The `robot_only` record currently scores audible playback exposure and TTS
+self-interruptions, not false VAD starts independent of TTS interruption.
+The `motors_servos_stand` human trials do not prove rejection of actuator noise
+when no person is speaking. Keep the actuator-only false VAD subgate open:
+separate real stand observations with actuators active during TTS and without
+TTS, and separate false VAD counts, are still needed. A true
+`meets_proposed_gate` is not evidence that these observations were made.
+
 ## Active hardware and software reuse
 
 Use the purchased **XIAO ESP32S3 Sense**, its onboard PDM microphone and included
