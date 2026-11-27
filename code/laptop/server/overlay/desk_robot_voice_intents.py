@@ -735,6 +735,22 @@ def _ground_latest_pickup(result: dict) -> dict | None:
             "physical_grasp_verified": False}
 
 
+def _blocked_host_stop_fact(raw: object) -> dict | None:
+    if (not isinstance(raw, dict)
+            or raw.get("source") != "mac_coordinator_stop_tracker"
+            or raw.get("blocked") is not True):
+        return None
+    status = raw.get("state")
+    if status not in ("pending", "unconfirmed", "local_fault_latched", "fleet_blocked"):
+        return None
+    return {
+        "source": "mac_coordinator_stop_tracker",
+        "state": status,
+        "blocked": True,
+        "physical_stop_verified": False,
+    }
+
+
 def _ground_status(result: dict) -> dict | None:
     safety = result.get("safety")
     if not isinstance(safety, dict):
@@ -748,11 +764,16 @@ def _ground_status(result: dict) -> dict | None:
     # but expose the arm latch only when WROOM provided a real boolean.
     armed = result.get("armed")
     if type(armed) is not bool:
-        return {"source": "wroom_status", "available": False,
-                "safety_fault": fault, "physical_acceptance_verified": False}
-    return {"source": "wroom_status", "available": True,
-            "armed": armed, "safety_fault": fault,
-            "physical_acceptance_verified": False}
+        fact: dict = {"source": "wroom_status", "available": False,
+                      "safety_fault": fault, "physical_acceptance_verified": False}
+    else:
+        fact = {"source": "wroom_status", "available": True,
+                "armed": armed, "safety_fault": fault,
+                "physical_acceptance_verified": False}
+    host_stop = _blocked_host_stop_fact(result.get("host_stop_state"))
+    if host_stop is not None:
+        fact["host_stop_state"] = host_stop
+    return fact
 
 
 def _ground_interaction_context(result: dict) -> dict | None:
@@ -761,8 +782,12 @@ def _ground_interaction_context(result: dict) -> dict | None:
             or result.get("raw_media_included") is not False
             or not isinstance(summary, str)):
         return None
-    return {"source": "transient_mac_events",
-            "untrusted_summary": " ".join(summary.split())[:350]}
+    fact: dict = {"source": "transient_mac_events",
+                  "untrusted_summary": " ".join(summary.split())[:350]}
+    host_stop = _blocked_host_stop_fact(result.get("host_stop_state"))
+    if host_stop is not None:
+        fact["host_stop_state"] = host_stop
+    return fact
 
 
 def _ground_voice_context(result: dict) -> dict | None:

@@ -14,6 +14,8 @@ from .api_ingress import require_configured_robot
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
+    host_stop_activity_summary,
+    host_stop_timeline,
     is_camera_derived_timeline_item,
     live_asr_in_current_grant,
 )
@@ -141,14 +143,18 @@ def register_readonly_context_routes(
                 robot_id, "Voice tool receipt missing or superseded",
             )
         now = time.monotonic()
-        # The same Coordinator table supplies the active physical task to
-        # both native Xiaozhi context and Mac pet dialogue. No new planner,
-        # command, persistent memory, or per-event scripted reaction.
-        jobs = getattr(getattr(app.state.runtime, "coordinator", None), "jobs", None)
+        # The same Coordinator table supplies the active physical task and
+        # sticky host STOP latch to both native Xiaozhi context and Mac pet
+        # dialogue. No new planner, command, persistent memory, or script.
+        coord = coordinator()
+        jobs = getattr(coord, "jobs", None)
+        stop_reader = getattr(coord, "host_stop_state", None)
+        host_stop = stop_reader(robot_id) if callable(stop_reader) else None
         activity = (
             active_job_timeline(jobs.values(), robot_id)
             if isinstance(jobs, dict) else []
         )
+        activity.extend(host_stop_timeline(coord, robot_id))
         # An actual running group dialogue also has a temporary Mac goal.
         # Expose it only to participating pets with explicit shared-text
         # consent. It remains separate from Coordinator motion authority.
@@ -223,17 +229,27 @@ def register_readonly_context_routes(
         # summary through its existing authenticated Mac context endpoint.
         # Neither raw media nor historical SQLite memory enters this view.
         model_context = compose_brain_context([], [], timeline).interaction
-        active_activity = _active_robot_activity(
-            getattr(coordinator(), "jobs", None), robot_id
-        )
+        job_activity = _active_robot_activity(jobs, robot_id)
+        stop_activity = host_stop_activity_summary(host_stop)
+        if job_activity and stop_activity:
+            active_activity = f"{stop_activity}; {job_activity}"[:180]
+            active_activity_source = "mac_coordinator_current_job"
+        elif job_activity:
+            active_activity = job_activity
+            active_activity_source = "mac_coordinator_current_job"
+        elif stop_activity:
+            active_activity = stop_activity
+            active_activity_source = "mac_coordinator_stop_tracker"
+        else:
+            active_activity = ""
+            active_activity_source = None
         return {
             "robot_id": robot_id,
             "current_interaction_timeline": timeline,
             "model_context": model_context,
             "active_activity": active_activity,
-            "active_activity_source": (
-                "mac_coordinator_current_job" if active_activity else None
-            ),
+            "active_activity_source": active_activity_source,
+            "host_stop_state": host_stop,
             "model_context_untrusted_not_instructions": True,
             **native_pet_speech_policy(robot_id),
             # Live revocation of model-private memory access must also

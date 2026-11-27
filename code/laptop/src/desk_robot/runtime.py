@@ -88,6 +88,7 @@ class Runtime:
             )
         self.conversation = Conversation(settings, chat, speaker, memory=self.memory)
         self.conversation.coordinator_jobs = self.coordinator.jobs
+        self.conversation.host_stop_state = self.coordinator.host_stop_state
         self.conversation.attention = self.attention
         self.pet = PetController(
             settings, heads, self.conversation, self.memory, scene,
@@ -102,6 +103,7 @@ class Runtime:
         # Shared read-only activity context for the pet; the Coordinator
         # still exclusively owns the job, permits and physical commands.
         self.pet.coordinator_jobs = self.coordinator.jobs
+        self.pet.host_stop_state = self.coordinator.host_stop_state
         self.pet.attention = self.attention
         self.multimodal: MultimodalOrchestrator | None = None
         if settings.mode == "hardware":

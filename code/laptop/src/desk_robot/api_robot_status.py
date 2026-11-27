@@ -6,6 +6,7 @@ receipt handoff. Robot telemetry is read only, never motion authority.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from time import monotonic_ns
 
 import httpx
@@ -65,16 +66,23 @@ def _room_status(settings: Settings, request: Request) -> str:
     return "unverified"
 
 
-def _status_health(settings: Settings, request: Request, head: str, body: str) -> dict:
+def _status_health(
+    settings: Settings, request: Request, head: str, body: str,
+    *, host_stop: Mapping[str, object] | None = None,
+) -> dict:
     room = _room_status(settings, request)
-    return {
+    blocked = isinstance(host_stop, Mapping) and host_stop.get("blocked") is True
+    health = {
         "head": head,
         "body": body,
         "room_station": room,
-        "state": ("degraded" if body not in ("status_received", "simulated")
+        "state": ("degraded" if blocked or body not in ("status_received", "simulated")
                   or room not in ("disabled", "unverified") else "reported"),
         "physical_acceptance_pass": False,
     }
+    if isinstance(host_stop, Mapping) and isinstance(host_stop.get("state"), str):
+        health["host_stop"] = host_stop["state"]
+    return health
 
 
 def _require_current_voice_tool(
@@ -92,14 +100,17 @@ def _require_telemetry_identity(data, robot_id: str, message: str) -> None:
         raise HeadError(message)
 
 
-def _status_summary(data: dict) -> str:
+def _status_summary(data: dict, *, host_stop: Mapping[str, object] | None = None) -> str:
     safety = data.get("safety")
     safety = safety if isinstance(safety, dict) else {}
-    return (
+    summary = (
         f"backend={str(data.get('backend', 'unknown'))[:24]}, "
         f"armed={data.get('armed')}, "
         f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
     )
+    if isinstance(host_stop, Mapping) and host_stop.get("blocked") is True:
+        summary += f", host_stop={str(host_stop.get('state', 'unknown'))[:32]}"
+    return summary
 
 
 def _climate_cue(reading, previous_seq, elapsed_ms):
@@ -213,31 +224,48 @@ def _register_status_route(
         context = requested_tool_context(request, robot_id)
         _require_current_voice_tool(request, robot_id, context, current_tool_context)
         head = owner.heads.get(robot_id)
+        stop_reader = getattr(owner, "host_stop_state", None)
+        host_stop = stop_reader(robot_id) if callable(stop_reader) else None
         getter = getattr(head, "status", None)
         if not callable(getter):
             detail = "Telemetry head unavailable" if head is None else "Status adapter unavailable"
-            health = _status_health(settings, request, "adapter_unavailable", "unconfirmed")
-            return JSONResponse(
-                {"robot_id": robot_id, "detail": detail, "health": health}, status_code=503,
+            health = _status_health(
+                settings, request, "adapter_unavailable", "unconfirmed",
+                host_stop=host_stop,
             )
+            payload = {"robot_id": robot_id, "detail": detail, "health": health}
+            if host_stop is not None:
+                payload["host_stop_state"] = host_stop
+            return JSONResponse(payload, status_code=503)
         try:
             data = await getter()
         except (HeadError, TimeoutError) as exc:
             _require_current_voice_tool(request, robot_id, context, current_tool_context)
             head_state, body_state = _failed_status_components(exc, robot_id)
-            return JSONResponse({
+            payload = {
                 "robot_id": robot_id, "error": "Robot status unavailable",
-                "health": _status_health(settings, request, head_state, body_state),
-            }, status_code=503)
+                "health": _status_health(
+                    settings, request, head_state, body_state, host_stop=host_stop,
+                ),
+            }
+            if host_stop is not None:
+                payload["host_stop_state"] = host_stop
+            return JSONResponse(payload, status_code=503)
         _require_current_voice_tool(request, robot_id, context, current_tool_context)
         _require_telemetry_identity(data, robot_id, "Head status robot identity mismatch")
-        remember_tool_context(context, robot_id, "robot_status", _status_summary(data))
+        remember_tool_context(
+            context, robot_id, "robot_status", _status_summary(data, host_stop=host_stop),
+        )
         simulated = settings.mode == "simulation"
         health = _status_health(
             settings, request, "simulated" if simulated else "responded",
             "simulated" if simulated else "status_received",
+            host_stop=host_stop,
         )
-        return {**data, "health": health}
+        result = {**data, "health": health}
+        if host_stop is not None:
+            result["host_stop_state"] = host_stop
+        return result
 
 
 def _register_aux_route(

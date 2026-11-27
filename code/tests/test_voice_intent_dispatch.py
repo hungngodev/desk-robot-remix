@@ -132,3 +132,64 @@ def test_stop_mentions_preserve_explicit_observation_and_memory(intents):
         ("power-status", {}),
     )
     assert intents.native_readonly_requests("Come here") == ()
+
+
+def test_native_grounded_fact_preserves_blocked_host_stop_state_only(intents):
+    blocked_stop = {
+        "source": "mac_coordinator_stop_tracker",
+        "state": "unconfirmed",
+        "blocked": True,
+        "robot_blocked": True,
+        "fleet_blocked": True,
+        "explicit_recovery_required": True,
+        "pending_robots": [],
+        "unconfirmed_robots": ["robot-01"],
+        "local_fault_robots": [],
+        "motor_authorized": False,
+        "physical_stop_verified": False,
+    }
+    idle_stop = {
+        **blocked_stop,
+        "state": "idle_or_confirmed",
+        "blocked": False,
+        "robot_blocked": False,
+        "fleet_blocked": False,
+        "explicit_recovery_required": False,
+        "unconfirmed_robots": [],
+    }
+    status_payload = {
+        "safety": {"fault": "none"},
+        "armed": False,
+        "host_stop_state": blocked_stop,
+    }
+    expected_fact = {
+        "source": "mac_coordinator_stop_tracker",
+        "state": "unconfirmed",
+        "blocked": True,
+        "physical_stop_verified": False,
+    }
+    status_fact = intents.native_grounded_fact("status", status_payload)
+    assert status_fact is not None
+    assert status_fact["host_stop_state"] == expected_fact
+
+    clean_status_fact = intents.native_grounded_fact(
+        "status", {**status_payload, "host_stop_state": idle_stop},
+    )
+    assert clean_status_fact is not None and "host_stop_state" not in clean_status_fact
+
+    context_payload = {
+        "robot_id": "robot-01",
+        "model_context": "WROOM STOP unconfirmed; explicit operator recovery required.",
+        "current_interaction_timeline": [],
+        "persistent_memory_included": False,
+        "raw_media_included": False,
+        "host_stop_state": blocked_stop,
+    }
+    ctx_fact = intents.native_grounded_fact("interaction-context", context_payload)
+    assert ctx_fact is not None
+    assert ctx_fact["host_stop_state"] == expected_fact
+
+    clean_ctx_fact = intents.native_grounded_fact(
+        "interaction-context", {**context_payload, "host_stop_state": idle_stop},
+    )
+    assert clean_ctx_fact is not None and "host_stop_state" not in clean_ctx_fact

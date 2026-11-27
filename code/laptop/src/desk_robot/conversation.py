@@ -13,7 +13,12 @@ from typing import Callable, Protocol
 
 import httpx
 
-from .brain_context import _memory_label, active_job_timeline, compose_brain_context
+from .brain_context import (
+    _memory_label,
+    active_job_timeline,
+    compose_brain_context,
+    host_stop_timeline,
+)
 from .config import RobotConfig, Settings, quiet_hours_active, secret
 from .conversation_consent import GroupContextConsent
 from .fleet_dialogue_budget import RollingGroupBudget, group_utterance_limit
@@ -480,6 +485,7 @@ class Conversation:
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
         self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
+        self.host_stop_state = None  # Existing Coordinator STOP confirmation reader.
         self.attention = None  # Runtime-owned voluntary context, not voice state.
         self.attention_failures = 0
         # The original speaker task owns this short lived dialogue state.
@@ -967,6 +973,7 @@ class Conversation:
         activity = (
             active_job_timeline(jobs.values(), robot_id) if isinstance(jobs, dict) else []
         )
+        activity.extend(host_stop_timeline(self, robot_id))
         timeline = self._group_media_timeline(robot_id, max(0, 10 - len(activity)), consent)
         timeline.extend(activity)
         # The group owner has no verified turn-bound receipt for orphaned recalls.

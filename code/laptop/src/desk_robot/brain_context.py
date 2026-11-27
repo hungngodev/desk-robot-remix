@@ -158,6 +158,64 @@ def memory_provenance_label(entry: Memory) -> str:
 _memory_label = memory_provenance_label
 
 
+_HOST_STOP_MESSAGES: dict[str, str] = {
+    "unconfirmed": (
+        "Mac WROOM STOP unconfirmed; motion recovery halted until explicit "
+        "acknowledged WROOM STOP"
+    ),
+    "local_fault_latched": (
+        "Mac WROOM local safety fault latched; motion halted until explicit "
+        "acknowledged WROOM STOP"
+    ),
+    "pending": (
+        "Mac WROOM STOP pending acknowledgement; motion halted pending WROOM reply"
+    ),
+    "fleet_blocked": (
+        "Mac fleet WROOM STOP unconfirmed or pending; fleet motion halted until "
+        "acknowledged WROOM STOP"
+    ),
+}
+
+
+def host_stop_activity_summary(host_stop: object) -> str:
+    """Return a concise host STOP warning string (<= 180 chars) when blocked."""
+    if not isinstance(host_stop, Mapping) or host_stop.get("blocked") is not True:
+        return ""
+    if host_stop.get("source") != "mac_coordinator_stop_tracker":
+        return ""
+    status = host_stop.get("state")
+    if type(status) is not str:
+        return ""
+    return _HOST_STOP_MESSAGES.get(status, "")[:180]
+
+
+def host_stop_timeline(source: object, robot_id: str) -> list[dict[str, object]]:
+    """Read one blocked Coordinator STOP state as bounded timeline context."""
+    reader = getattr(source, "host_stop_state", None)
+    if not callable(reader):
+        return []
+    try:
+        state = reader(robot_id)
+    except KeyError:
+        return []
+    if not isinstance(state, Mapping) or state.get("blocked") is not True:
+        return []
+    if state.get("source") != "mac_coordinator_stop_tracker":
+        return []
+    status = state.get("state")
+    if type(status) is not str or status not in _HOST_STOP_MESSAGES:
+        return []
+    return [{
+        "channel": "mac_activity",
+        "kind": "host_stop_state",
+        "state": status,
+        "robot_id": robot_id,
+        "source": "mac_coordinator_stop_tracker",
+        "physical_action_verified": False,
+        "motor_authorized": False,
+    }]
+
+
 def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict[str, object]]:
     """Read one live Coordinator job without copying its untrusted task text.
 
@@ -198,6 +256,21 @@ def _fresh_valid_safety_fault(item: object) -> bool:
         return False
     age = item.get("age_ms")
     return age is None or (type(age) is int and 0 <= age <= 8000)
+
+
+def _valid_host_stop_entry(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    status = item.get("state")
+    return (
+        item.get("channel") == "mac_activity"
+        and item.get("kind") == "host_stop_state"
+        and item.get("source") == "mac_coordinator_stop_tracker"
+        and item.get("physical_action_verified") is False
+        and item.get("motor_authorized") is False
+        and type(status) is str
+        and status in _HOST_STOP_MESSAGES
+    )
 
 
 def _plain_identifier(value: object) -> bool:
@@ -363,6 +436,11 @@ def _timeline_window(
             if _fresh_valid_safety_fault(item):
                 window = [item, *window]
                 break
+    if not any(_valid_host_stop_entry(item) for item in window):
+        for item in reversed(bounded_timeline[:-64]):
+            if _valid_host_stop_entry(item):
+                window = [item, *window]
+                break
     return bounded_timeline, window
 
 
@@ -410,6 +488,12 @@ def _coordinator_job_cue(item: dict) -> str:
             "completion unverified; WROOM owns motion safety"
         )
     return phrase
+
+
+def _host_stop_cue(item: dict) -> str:
+    if not _valid_host_stop_entry(item):
+        return ""
+    return _HOST_STOP_MESSAGES.get(str(item.get("state")), "")
 
 
 def _group_conversation_cue(item: dict) -> str:
@@ -546,6 +630,8 @@ def _format_timeline_cue(
         return _sensor_cue(item, kind)
     if channel == "mac_activity" and kind == "coordinator_job":
         return _coordinator_job_cue(item)
+    if channel == "mac_activity" and kind == "host_stop_state":
+        return _host_stop_cue(item)
     if channel == "mac_activity" and kind == "group_conversation":
         return _group_conversation_cue(item)
     if channel == "mac_attention":
@@ -590,7 +676,9 @@ def _cue_identity(channel: str, kind: str | None, heard_count: int) -> tuple[str
 
 
 def _cue_priority(channel: str, kind: str | None, heard_count: int) -> float:
-    if channel == "sensor" and kind == "safety_fault":
+    if (channel == "sensor" and kind == "safety_fault") or (
+        channel == "mac_activity" and kind == "host_stop_state"
+    ):
         return -1
     if channel == "mac_activity" and kind == "group_conversation":
         return 0.75

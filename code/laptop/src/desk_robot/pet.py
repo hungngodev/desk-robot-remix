@@ -39,6 +39,7 @@ from .aux import NoseDialGate, _aux_boot_epoch, _fresh_aux_acquisition, validate
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
+    host_stop_timeline,
     live_asr_in_current_grant,
     repeated_spontaneous_line,
 )
@@ -60,6 +61,7 @@ from .initiative_policy import (
     receipt_veto,
 )
 from .memory import CameraProvenance, MemoryStore
+from .motion_authority import HostStopState
 from .observation_policy import camera_receipt_is_current, prepare_camera_receipt
 from .operations import bounded_head_reply as _bounded_head_reply
 from .personality_policy import (
@@ -194,6 +196,7 @@ class PetStatus(TypedDict):
     voice_event_monitor_ready: bool
     source_capture_timestamp_verified: Literal[False]
     physical_audio_interruption_verified: Literal[False]
+    host_stop_state: HostStopState | None
 
 
 class PeerShareReceipt(TypedDict):
@@ -424,6 +427,7 @@ class PetController:
         # Read the EXISTING operator Coordinator job table, never a second
         # planner or motion controller. Runtime sets the shared dict.
         self.coordinator_jobs: Mapping[str, Any] | None = None
+        self.host_stop_state: Callable[[str], HostStopState] | None = None
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
         self.voice_monitor_ready = settings.mode != "hardware"
@@ -646,6 +650,10 @@ class PetController:
             "voice_event_monitor_ready": self.voice_monitor_ready,
             "source_capture_timestamp_verified": False,
             "physical_audio_interruption_verified": False,
+            "host_stop_state": (
+                self.host_stop_state(robot_id)
+                if callable(getattr(self, "host_stop_state", None)) else None
+            ),
         }
 
     def start(self, robot_id: str) -> PetStatus:
@@ -3772,6 +3780,7 @@ class PetController:
             active_job_timeline(jobs.values(), robot_id)
             if isinstance(jobs, dict) else []
         )
+        activity.extend(host_stop_timeline(self, robot_id))
         # Group text requires its own explicit sharing consent, not vision.
         if (self.settings.mode != "hardware"
                 or self.settings.fleet_text_sharing_enabled):

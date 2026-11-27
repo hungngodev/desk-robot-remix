@@ -2288,3 +2288,68 @@ async def test_p1_barge_in_drops_late_peer_reply(settings):
         if not group.done():
             group.cancel()
         await asyncio.gather(group, return_exceptions=True)
+
+
+async def test_idle_voice_stop_failure_keeps_coordinator_latched_after_audio_succeeds(
+    settings, monkeypatch,
+):
+    """An idle failed STOP stays visible and sticky across audio-only voice recovery."""
+    from desk_robot.brain_context import compose_brain_context, host_stop_timeline
+    from desk_robot.controller import Coordinator, OperationError
+    from desk_robot.simulator import SimulatedHead, SimulationVision
+    from desk_robot.transport import HeadError
+
+    robot = settings.robot("robot-01")
+    head = SimulatedHead(robot.id)
+    coordinator = Coordinator(settings, {robot.id: head}, SimulationVision())
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+    pet_calls = []
+
+    class Pet:
+        def is_quiet(self, robot_id):
+            return False
+
+        async def interrupt(self, robot_id):
+            pet_calls.append(robot_id)
+
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    runtime.coordinator = coordinator
+    coordinator._voice_state_reader = lambda: getattr(runtime, "_voice_stop_unconfirmed", False)
+    try:
+        async def fail_halt(cmd, **_kwargs):
+            if cmd == "halt":
+                raise HeadError("USB STOP failed")
+            return {"ok": True, "reply": f"OK {cmd}"}
+
+        with monkeypatch.context() as patcher:
+            patcher.setattr(head, "command", fail_halt)
+            with pytest.raises(HeadError, match="USB STOP failed"):
+                await coordinator.stop(robot.id)
+
+        # Idle coordinator has no active jobs, yet STOP uncertainty stays latched.
+        assert not any(not task.done() for task in coordinator.tasks.values())
+        state = coordinator.host_stop_state(robot.id)
+        assert state["state"] == "unconfirmed"
+        assert state["blocked"] is True
+        assert state["explicit_recovery_required"] is True
+        context = compose_brain_context([], [], host_stop_timeline(coordinator, robot.id))
+        assert "STOP unconfirmed" in context.interaction
+
+        # Subsequent audio interrupt succeeds, yet voice STOP must still refuse clearing.
+        with pytest.raises(OperationError, match="WROOM STOP unconfirmed"):
+            await runtime._on_voice_interrupt(robot.id, "speech_start")
+        assert pet_calls == [r.id for r in settings.robots]
+        assert runtime._voice_stop_unconfirmed is True
+        assert coordinator.host_stop_state(robot.id)["state"] == "unconfirmed"
+        assert coordinator.voice_blocks_motion() is not None
+
+        # Explicit operator-style Coordinator.stop() ACK clears the latch for voice & context.
+        await coordinator.stop(robot.id)
+        await runtime._on_voice_interrupt(robot.id, "speech_start")
+        await runtime._on_voice_interrupt(robot.id, "speech_end")
+        assert runtime._voice_stop_unconfirmed is False
+        assert coordinator.voice_blocks_motion() is None
+        assert coordinator.host_stop_state(robot.id)["state"] == "idle_or_confirmed"
+        assert host_stop_timeline(coordinator, robot.id) == []
+    finally:
+        await coordinator.close()

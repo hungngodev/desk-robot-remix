@@ -3184,3 +3184,163 @@ async def test_hardware_battery_preflight_and_active_soc_thresholds(settings):
                 await c._assert_armed_health("robot-01")
     finally:
         await c.close()
+
+
+async def test_idle_failed_stop_exposes_host_stop_state_until_explicit_operator_recovery(
+    settings, tokens, monkeypatch,
+):
+    """Unconfirmed idle STOP stays visible across API and context until ACK."""
+    from pathlib import Path
+
+    import httpx
+    from desk_robot.api import create_app
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.transport import HeadError
+    from desk_robot.vision import SceneChange
+
+    overlay_dir = str(Path(__file__).resolve().parents[1] / "laptop/server/overlay")
+    monkeypatch.syspath_prepend(overlay_dir)
+    import desk_robot_voice_intents as intents
+
+    app = create_app(settings)
+    operator_headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    tool_headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+
+    async with app.router.lifespan_context(app):
+        runtime = app.state.runtime
+        coord = runtime.coordinator
+        async def _noop_close():
+            return None
+
+        visual = SimpleNamespace(
+            hub=CameraFrameHub(["robot-01", "robot-02"]),
+            stream_owns_camera=lambda _robot_id: False,
+            prepare_human_turn=lambda *_a, **_kw: None,
+            start_speech_frames=lambda *_a, **_kw: None,
+            voice_started=lambda *_a, **_kw: None,
+            voice_ended=lambda *_a, **_kw: None,
+            voice_interrupted=lambda *_a, **_kw: None,
+            close=_noop_close,
+        )
+        runtime.multimodal = visual
+        runtime.pet.multimodal = visual
+        head = coord.heads["robot-01"]
+        orig_command = head.command
+        orig_status = head.status
+        fail_halt = {"active": True}
+        fail_status = {"active": True}
+
+        async def patched_command(cmd, **kwargs):
+            if fail_halt["active"] and cmd == "halt":
+                raise HeadError("WROOM STOP link lost")
+            return await orig_command(cmd, **kwargs)
+
+        async def patched_status():
+            if fail_status["active"]:
+                raise HeadError("WROOM status timeout")
+            return await orig_status()
+
+        monkeypatch.setattr(head, "command", patched_command)
+        monkeypatch.setattr(head, "status", patched_status)
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test",
+        ) as client:
+            # 1. Fail STOP while idle -> no running jobs, yet sticky STOP unconfirmed.
+            with pytest.raises(HeadError, match="WROOM STOP link lost"):
+                await coord.stop("robot-01")
+            assert not any(not t.done() for t in coord.tasks.values())
+
+            # Audio preempt succeeds, but voice interrupt & snapshot must still keep STOP latched.
+            with pytest.raises(OperationError, match="WROOM STOP unconfirmed"):
+                await runtime._on_voice_interrupt("robot-01", "speech_start")
+            with pytest.raises(OperationError, match="WROOM STOP unconfirmed"):
+                await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+            assert runtime._voice_stop_unconfirmed is True
+
+            # 2. 503 status while head unreachable still exposes host_stop_state & degraded health.
+            st_503 = await client.get("/v1/robots/robot-01/status", headers=tool_headers)
+            assert st_503.status_code == 503
+            body_503 = st_503.json()
+            assert body_503["health"]["state"] == "degraded"
+            assert body_503["health"]["host_stop"] == "unconfirmed"
+            assert body_503["host_stop_state"]["state"] == "unconfirmed"
+            assert body_503["host_stop_state"]["blocked"] is True
+            assert body_503["host_stop_state"]["explicit_recovery_required"] is True
+
+            # 3. Head telemetry recovers, yet unconfirmed STOP keeps health.state degraded (200).
+            fail_status["active"] = False
+            st_200 = await client.get("/v1/robots/robot-01/status", headers=tool_headers)
+            assert st_200.status_code == 200
+            body_200 = st_200.json()
+            assert body_200["health"]["state"] == "degraded"
+            assert body_200["health"]["host_stop"] == "unconfirmed"
+            assert body_200["host_stop_state"]["state"] == "unconfirmed"
+            assert body_200["host_stop_state"]["source"] == "mac_coordinator_stop_tracker"
+
+            grounded_status = intents.native_grounded_fact("status", body_200)
+            assert grounded_status is not None
+            assert grounded_status["host_stop_state"]["state"] == "unconfirmed"
+            assert grounded_status["host_stop_state"]["blocked"] is True
+
+            # 4. /v1/pet/robot-01, /interaction-context, and PetController context expose it.
+            pet_resp = await client.get("/v1/pet/robot-01", headers=operator_headers)
+            assert pet_resp.status_code == 200
+            assert pet_resp.json()["host_stop_state"]["state"] == "unconfirmed"
+
+            ctx_resp = await client.get(
+                "/v1/pet/robot-01/interaction-context", headers=tool_headers,
+            )
+            assert ctx_resp.status_code == 200
+            ctx_body = ctx_resp.json()
+            assert ctx_body["host_stop_state"]["state"] == "unconfirmed"
+            assert ctx_body["active_activity_source"] == "mac_coordinator_stop_tracker"
+            assert "STOP unconfirmed" in ctx_body["active_activity"]
+            assert any(
+                item.get("kind") == "host_stop_state"
+                for item in ctx_body["current_interaction_timeline"]
+            )
+            assert "STOP unconfirmed" in ctx_body["model_context"]
+
+            grounded_ctx = intents.native_grounded_fact("interaction-context", ctx_body)
+            assert grounded_ctx is not None
+            assert grounded_ctx["host_stop_state"]["state"] == "unconfirmed"
+
+            proactive = await runtime.pet._load_proactive_context(
+                "robot-01", SceneChange("touch_tap", "Synthetic tap", 0.99),
+            )
+            assert proactive is not None
+            assert "STOP unconfirmed" in proactive[1].interaction
+
+            # 5. Non-operator STOP with working halt link does NOT clear explicit_recovery_required.
+            fail_halt["active"] = False
+            tool_stop = await client.post("/v1/robots/robot-01/stop", headers=tool_headers)
+            assert tool_stop.status_code == 200
+            assert coord.host_stop_state("robot-01")["state"] == "unconfirmed"
+
+            # 6. Only explicit operator STOP ACK clears the sticky latch everywhere.
+            op_stop = await client.post("/v1/robots/robot-01/stop", headers=operator_headers)
+            assert op_stop.status_code == 200
+            assert coord.host_stop_state("robot-01")["state"] == "idle_or_confirmed"
+            await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+            await runtime._on_voice_interrupt("robot-01", "speech_end")
+            assert runtime._voice_stop_unconfirmed is False
+
+            clean_status = await client.get("/v1/robots/robot-01/status", headers=tool_headers)
+            assert clean_status.status_code == 200
+            clean_body = clean_status.json()
+            assert clean_body["health"]["state"] == "reported"
+            assert clean_body["health"]["host_stop"] == "idle_or_confirmed"
+            assert clean_body["host_stop_state"]["state"] == "idle_or_confirmed"
+            assert "host_stop_state" not in intents.native_grounded_fact("status", clean_body)
+
+            clean_ctx = await client.get(
+                "/v1/pet/robot-01/interaction-context", headers=tool_headers,
+            )
+            assert clean_ctx.status_code == 200
+            assert clean_ctx.json()["active_activity"] == ""
+            assert clean_ctx.json()["active_activity_source"] is None
+            assert clean_ctx.json()["host_stop_state"]["state"] == "idle_or_confirmed"
+            assert "host_stop_state" not in intents.native_grounded_fact(
+                "interaction-context", clean_ctx.json(),
+            )

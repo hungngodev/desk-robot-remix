@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .brain_context import (
     compose_brain_context,
+    host_stop_timeline,
     is_camera_derived_timeline_item,
     live_asr_in_current_grant,
 )
@@ -451,6 +452,8 @@ def _capture_context(app: FastAPI, settings: Settings, robot_id: str) -> _PlanCo
             consent_started_at=settings.camera_consent_started_at,
             room_enabled=settings.room_station_context_enabled,
         )
+    coord = getattr(getattr(app.state, "runtime", None), "coordinator", None)
+    timeline.extend(host_stop_timeline(coord, robot_id))
     camera_context_used = any(
         is_camera_derived_timeline_item(item)
         or item.get("channel") == "human_transcript"

@@ -124,3 +124,72 @@ async def test_revoked_authority_precedes_queued_drive_dispatch(monkeypatch, del
     with pytest.raises(operations.OperationError, match="P0 STOP pending"):
         await operations.dispatch_job_command(Head(), "drive 20 20 250", check, robot_id="robot-01")
     assert sent == []
+
+
+def test_host_stop_state_tracks_pending_unconfirmed_fault_and_fleet_blocks():
+    from desk_robot.motion_authority import StopConfirmationTracker
+
+    tracker = StopConfirmationTracker(("robot-01", "robot-02"))
+    idle = tracker.host_stop_state("robot-01")
+    assert idle["source"] == "mac_coordinator_stop_tracker"
+    assert idle["state"] == "idle_or_confirmed"
+    assert not idle["blocked"]
+    assert not idle["robot_blocked"]
+    assert not idle["fleet_blocked"]
+    assert not idle["explicit_recovery_required"]
+    assert idle["motor_authorized"] is False
+    assert idle["physical_stop_verified"] is False
+    assert tracker.host_stop_state()["state"] == "idle_or_confirmed"
+
+    pending_gen = tracker.begin("robot-01")
+    pending = tracker.host_stop_state("robot-01")
+    assert pending["state"] == "pending"
+    assert pending["blocked"] is True
+    assert pending["robot_blocked"] is True
+    assert pending["fleet_blocked"] is True
+    assert pending["stop_pending"] is True
+    assert pending["pending_robots"] == ["robot-01"]
+    assert pending["explicit_recovery_required"] is False
+
+    peer_during_pending = tracker.host_stop_state("robot-02")
+    assert peer_during_pending["state"] == "fleet_blocked"
+    assert peer_during_pending["blocked"] is True
+    assert peer_during_pending["robot_blocked"] is False
+    assert peer_during_pending["fleet_blocked"] is True
+
+    tracker.finish("robot-01", pending_gen, acknowledged=False)
+    unconfirmed = tracker.host_stop_state("robot-01")
+    assert unconfirmed["state"] == "unconfirmed"
+    assert unconfirmed["blocked"] is True
+    assert unconfirmed["robot_blocked"] is True
+    assert unconfirmed["fleet_blocked"] is True
+    assert unconfirmed["stop_unconfirmed"] is True
+    assert unconfirmed["unconfirmed_robots"] == ["robot-01"]
+    assert unconfirmed["explicit_recovery_required"] is True
+    assert tracker.host_stop_state("robot-02")["state"] == "fleet_blocked"
+
+    # Automatic HALT cannot clear an earlier failed STOP without explicit recovery.
+    auto_gen = tracker.begin("robot-01")
+    tracker.finish("robot-01", auto_gen, acknowledged=True, explicit_recovery=False)
+    assert tracker.host_stop_state("robot-01")["state"] == "unconfirmed"
+    assert tracker.host_stop_state("robot-01")["explicit_recovery_required"] is True
+
+    recovery_gen = tracker.begin("robot-01")
+    tracker.finish("robot-01", recovery_gen, acknowledged=True, explicit_recovery=True)
+    assert tracker.host_stop_state("robot-01")["state"] == "idle_or_confirmed"
+    assert tracker.host_stop_state("robot-02")["state"] == "idle_or_confirmed"
+
+    tracker.latch_fault("robot-02")
+    faulted = tracker.host_stop_state("robot-02")
+    assert faulted["state"] == "local_fault_latched"
+    assert faulted["blocked"] is True
+    assert faulted["robot_blocked"] is True
+    assert faulted["fleet_blocked"] is False
+    assert faulted["local_fault_latched"] is True
+    assert faulted["local_fault_robots"] == ["robot-02"]
+    assert faulted["explicit_recovery_required"] is True
+    assert tracker.host_stop_state("robot-01")["state"] == "idle_or_confirmed"
+
+    fault_recovery = tracker.begin("robot-02")
+    tracker.finish("robot-02", fault_recovery, acknowledged=True, explicit_recovery=True)
+    assert tracker.host_stop_state("robot-02")["state"] == "idle_or_confirmed"

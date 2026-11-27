@@ -27,7 +27,7 @@ from .dock_runtime import (
 from .dock_timing import dock_time_remaining
 from .dock_vision import assess_dock
 from .grasp_feedback import await_commanded_jaw_target, guarded_grasp, verify_grasp_hold
-from .motion_authority import StopConfirmationTracker
+from .motion_authority import HostStopState, StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
 from .operations import OperationError, dispatch_job_command, require_active_operation
@@ -422,6 +422,12 @@ class Coordinator:
         return await self._tracked_stop(
             robot_id, explicit_recovery=False, local_fault=True,
         )
+
+    def host_stop_state(self, robot_id: str | None = None) -> HostStopState:
+        """Expose the typed, source-labelled host WROOM STOP latch state."""
+        if robot_id is not None:
+            self.robot(robot_id)
+        return self._stop_confirmations.host_stop_state(robot_id)
 
     async def _tracked_stop(
         self, robot_id: str, *, explicit_recovery: bool, local_fault: bool = False,
