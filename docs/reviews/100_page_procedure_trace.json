@@ -322,7 +322,7 @@
       "title": "Guard charger, dock and backfeed",
       "phase": "03 Safety and electrical power",
       "source_owner": "code/tests/test_integrated_1s_power_stack_contract.py",
-      "verification_command": "cd code && python -m pytest -q tests/test_integrated_1s_power_stack_contract.py tests/test_power_preflight.py",
+      "verification_command": "cd code && python -m pytest -q tests/test_integrated_1s_power_stack_contract.py tests/test_power_preflight.py tests/test_dock_evidence.py",
       "gate": "OPEN",
       "last_verified_sha": null,
       "executed_test_receipt": null,
