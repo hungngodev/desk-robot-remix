@@ -77,7 +77,8 @@ class SideRangeEvents:
         present, valid = data.get("present_mask"), data.get("valid_mask")
         distances, ages = data.get("mm"), data.get("age_ms")
         sample_times, boot_id = data.get("sample_ms"), data.get("boot_id")
-        has_hardware_identity = sample_times is not None or boot_id is not None
+        # Only omitted fields denote legacy data; explicit null is malformed.
+        has_hardware_identity = "sample_ms" in data or "boot_id" in data
         if require_hardware_identity:
             imu = body.get("imu")
             if (not has_hardware_identity or not isinstance(imu, dict)
