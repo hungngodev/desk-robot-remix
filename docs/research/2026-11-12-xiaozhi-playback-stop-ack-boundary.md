@@ -1,5 +1,37 @@
 # 2026-11-12 Xiaozhi playback interruption ownership research
 
+## Current source status (2026-11-27, DRX-1733)
+
+The November 12 research below is historical; the proposed source work is
+no longer wholly unimplemented. The locked Xiaozhi revisions remain unchanged.
+In [the Sense overlay](../../code/firmware/head/install_overlay.py), urgent
+`tts stop` with `flush: true` schedules `ResetDecoder()` and disables
+codec output. Output admission and completion check `playback_generation_`.
+`DeskPlaybackPrefix` and `on_playback_committed` report cumulative digital
+I2S write progress through `desk_robot_i2s_progress` only for contiguous
+complete media frames in the current generation. This is not a STOP receipt,
+DMA drain proof or acoustic silence.
+
+The [Mac conversation owner](../../code/laptop/src/desk_robot/conversation.py)
+validates device identity, explicit flush acknowledgement, drained queue,
+zero integer queued samples and a non-stale integer flush generation when
+the speaker declares drain-receipt support. The
+[actual Xiaozhi bridge](../../code/laptop/server/overlay/desk_robot_bridge.py)
+still returns `head_flush_requested: true`,
+`head_flush_acknowledged: false` and `audible_stop_verified: false`.
+A transport response must not be promoted to confirmed head drain.
+
+Existing source regressions include
+[`test_sense_reuses_upstream_i2s_writer_with_finite_stop_bound`](../../code/firmware/head/tests/test_overlay.py)
+and [generation-bound drain fault tests](../../code/tests/test_audio_abort_confirmation.py)
+with a simulated head receipt, including missing, stale and wrong-head
+receipts. These are not a demonstrated physical STOP ACK. The remaining
+gate is a real same-device, generation-bound stop/drain receipt and the
+physical A2 acoustic trial with separate stage timings. This source review
+does not establish that any test or hardware trial ran.
+
+## Historical November 12 research
+
 Scope: source research only, canonical draft PR #17. No new audio owner, firmware patch, hardware claim or charger/motion authority.
 
 ## Upstream candidates and actual reuse
