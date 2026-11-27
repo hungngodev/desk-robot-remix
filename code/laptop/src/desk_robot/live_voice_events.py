@@ -479,7 +479,9 @@ class VoiceEventListener:
             except Exception as exc:
                 # Callback, parser and transport exceptions are equally
                 # unsafe: the realtime human speech monitor cannot stay ready.
-                self.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+                # Transport and callback messages may contain private URLs or
+                # voice content. Keep only the exception category in status.
+                self.last_error = type(exc).__name__
                 # Stop obsolete audio first. Monitor callbacks may themselves
                 # block during a head disconnect, and must never gate the
                 # emergency shared audio interruption attempt.

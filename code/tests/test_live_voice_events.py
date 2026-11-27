@@ -259,6 +259,7 @@ async def test_event_transport_failure_preempts_once_until_recovered():
 
     requests = 0
     cancelled = []
+    both_cancelled = asyncio.Event()
 
     def mock(request):
         nonlocal requests
@@ -272,6 +273,8 @@ async def test_event_transport_failure_preempts_once_until_recovered():
     async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
         async def cancel(robot, source):
             cancelled.append((robot, source))
+            if len(cancelled) == 2:
+                both_cancelled.set()
 
         watcher = VoiceEventListener(
             client, url="http://127.0.0.1:8766", token="s" * 32,
@@ -280,15 +283,12 @@ async def test_event_transport_failure_preempts_once_until_recovered():
         assert await watcher.poll() == 0
         task = asyncio.create_task(watcher.run())
         try:
-            for _ in range(100):
-                if cancelled:
-                    break
-                await asyncio.sleep(0.01)
+            await asyncio.wait_for(both_cancelled.wait(), timeout=1)
             assert cancelled == [
                 ("robot-01", "stream_unavailable"),
                 ("robot-02", "stream_unavailable"),
             ]
-            assert watcher.last_error is not None
+            assert watcher.last_error == "HTTPStatusError"
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -574,7 +574,7 @@ async def test_voice_callback_failure_silences_fleet_without_terminating_watcher
     async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
         async def broken_head(robot_id, kind):
             received.append((robot_id, kind))
-            raise OSError("Head interrupt transport disconnected")
+            raise OSError("Private voice content: synthetic transcript sentinel")
 
         async def global_abort(reason):
             assert reason == "stream_unavailable"
@@ -601,6 +601,7 @@ async def test_voice_callback_failure_silences_fleet_without_terminating_watcher
             await asyncio.wait_for(monitor_reported_failure(), timeout=1)
             assert not watcher.done()
             assert listener.monitor_ready is False
+            assert listener.last_error == "OSError"
             assert listener.cursor == 1  # failed callback never consumed seq 2
             assert received == [("robot-01", "normal")]
             assert health == [True, False]
