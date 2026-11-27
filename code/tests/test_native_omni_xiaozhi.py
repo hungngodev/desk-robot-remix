@@ -8831,6 +8831,76 @@ async def test_urgent_native_head_stop_times_out_while_opus_lock_is_stalled(nati
         assert module._output_owner_unverified == conn.device_id
 
 
+@pytest.mark.asyncio
+async def test_stalled_device_opus_releases_lock_for_120ms_digital_flush(native):
+    """Stalled Opus packet times out in 60 ms so urgent flush succeeds inside 120 ms."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    opus_entered = asyncio.Event()
+    sent_stops: list[str] = []
+
+    class Transport:
+        async def send(self, packet):
+            if isinstance(packet, bytes):
+                opus_entered.set()
+                await asyncio.Event().wait()
+            sent_stops.append(packet)
+
+    conn.websocket = Transport()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+
+    opus_task = asyncio.create_task(
+        session._send_device_opus(b"opus-frame", session._generation)
+    )
+    await asyncio.wait_for(opus_entered.wait(), timeout=0.5)
+    started = time.monotonic()
+    await asyncio.wait_for(module.flush_head(session, force=True), timeout=0.2)
+    elapsed = time.monotonic() - started
+    assert elapsed <= 0.12, f"flush_head exceeded 120 ms cutoff: {elapsed:.3f}s"
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(opus_task, timeout=0.2)
+    assert len(sent_stops) == 1
+    payload = json.loads(sent_stops[0])
+    assert payload["state"] == "stop" and payload["flush"] is True
+    assert module._output_owner is None
+    assert module._output_owner_unverified is None
+    assert conn.client_is_speaking is False
+
+
+@pytest.mark.asyncio
+async def test_wedged_flush_socket_fails_closed_within_120ms(native):
+    """Permanently wedged socket during flush_head fails closed in <=120 ms."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+
+    class Wedged:
+        async def send(self, _packet):
+            await asyncio.Event().wait()
+
+    conn.websocket = Wedged()
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(module.flush_head(session, force=True), timeout=0.2)
+    assert module._output_owner == conn.device_id
+    assert module._output_owner_unverified == conn.device_id
+    assert conn.client_is_speaking is True
+
+
 
 async def test_urgent_native_barge_cancellation_retains_uncertain_speaker(native):
     module, bridge = native

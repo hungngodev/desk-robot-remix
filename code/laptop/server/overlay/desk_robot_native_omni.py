@@ -83,6 +83,10 @@ MAX_OUTGOING_AUDIO_BYTES = 384_000
 # 16 kHz mono PCM16: 32 bytes per millisecond.
 _PCM16K_BYTES_PER_MS = 32
 _END_OF_TURN_SILENCE_MS = 300
+# Bound single Opus sends to one 60 ms frame so urgent flush_head() can reach
+# the head within the 120 ms digital barge-in cutoff (not physical acoustic proof).
+_OPUS_SEND_TIMEOUT_S = 0.06
+_URGENT_FLUSH_TIMEOUT_S = 0.12
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
@@ -2684,7 +2688,8 @@ class NativeOmniSession:
                     packet_started = time.monotonic()
                     try:
                         await asyncio.wait_for(
-                            self.conn.websocket.send(packet), timeout=0.4,
+                            self.conn.websocket.send(packet),
+                            timeout=_OPUS_SEND_TIMEOUT_S,
                         )
                         if bridge.connections.get(self.device) is not self.conn:
                             # A replaced socket cannot acknowledge its new head's
@@ -3087,9 +3092,9 @@ async def send_external_opus(conn, packet: bytes, generation: int) -> None:
                     or bridge.human_speech_active()):
                 raise RuntimeError("Mac speech interrupted before device Opus send")
             # This Mac voice shares the same physical decoder lock as native
-            # speech. Bound each packet so an urgent STOP never waits forever.
+            # speech. Bound each packet so an urgent STOP can meet 120 ms.
             await asyncio.wait_for(
-                conn.websocket.send(packet), timeout=0.4,
+                conn.websocket.send(packet), timeout=_OPUS_SEND_TIMEOUT_S,
             )
             if bridge.connections.get(conn.device_id) is not conn:
                 # A reconnect may replace the authenticated socket WHILE this
@@ -3311,9 +3316,10 @@ async def flush_head(session: NativeOmniSession, *, force: bool = False) -> None
                 session.conn.client_is_speaking = False
 
         # Bound BOTH waiting on a prior Opus packet's send lock and the STOP
-        # send itself. A hung packet must never stall the higher-priority
-        # human barge forever while the decoder lease looks recoverable.
-        await asyncio.wait_for(stop_under_device_lock(), timeout=0.4)
+        # send itself within the 120 ms digital barge-in target.
+        await asyncio.wait_for(
+            stop_under_device_lock(), timeout=_URGENT_FLUSH_TIMEOUT_S,
+        )
         async with _output_owner_lock:
             if _output_owner == session.device:
                 _output_owner = None
