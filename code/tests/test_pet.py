@@ -436,6 +436,67 @@ async def test_activity_skips_extra_personality_wait_without_blocking_peers(flee
         await pet.close()
 
 
+async def test_sustained_peer_speech_cannot_starve_calm_profile(fleet, tmp_path, monkeypatch):
+    """Repeated 120s peer speech cannot defer a calm 180s pet indefinitely."""
+    fleet.robots[0] = fleet.robots[0].model_copy(update={"personality_profile": "calm"})
+    fleet.robots[1] = fleet.robots[1].model_copy(update={"personality_profile": "curious"})
+    clock = [1000.0]
+    monkeypatch.setattr("desk_robot.pet.time.monotonic", lambda: clock[0])
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    for robot in fleet.robots[:2]:
+        pet.states[robot.id].enabled = True
+    offers: list[tuple[float, str]] = []
+
+    async def record_offer(robot_id, change, generation, **kwargs):
+        offers.append((clock[0], robot_id))
+        pet._group_last_spoken = clock[0]
+        pet.states[robot_id].personality_wait_anchor = clock[0]
+
+    pet._speak = record_offer
+    try:
+        pet._group_last_spoken = 1000.0
+        # t=1125 (125s elapsed): calm defers to curious; curious speaks and resets floor.
+        clock[0] = 1125.0
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        assert offers == [(1125.0, "robot-02")]
+        assert pet.states["robot-01"].last_activity_decision == "defer"
+        assert pet.states["robot-01"].personality_wait_anchor == 1000.0
+
+        # t=1250 (125s after curious spoke, 250s >= 180s since calm wait began):
+        # calm pet is admitted instead of being starved by curious's reset!
+        clock[0] = 1250.0
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        assert offers == [(1125.0, "robot-02"), (1250.0, "robot-01")]
+        assert pet.states["robot-01"].personality_wait_anchor == 1250.0
+
+        # Next cycle at t=1375 (125s after calm spoke): calm defers once again to curious,
+        # then is admitted again at t=1500.
+        clock[0] = 1375.0
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        clock[0] = 1500.0
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        assert offers == [
+            (1125.0, "robot-02"),
+            (1250.0, "robot-01"),
+            (1375.0, "robot-02"),
+            (1500.0, "robot-01"),
+        ]
+    finally:
+        await pet.close()
+
+
 def test_visual_change_gate_requires_persistent_difference():
     gate = VisualChangeGate(min_changed_fraction=0.008, confirmations=2)
     assert gate.observe(WHITE) is None

@@ -1010,6 +1010,12 @@ class Coordinator:
                     done, _ = await asyncio.wait(
                         {keeper, watchdog, operation}, return_when=asyncio.FIRST_COMPLETED
                     )
+                    if (
+                        operation in done
+                        and not operation.cancelled()
+                        and operation.exception() is not None
+                    ):
+                        await operation
                     if watchdog in done:
                         await watchdog
                         raise OperationError("Keepalive watchdog ended unexpectedly")

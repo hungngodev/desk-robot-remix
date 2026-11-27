@@ -113,3 +113,16 @@ def test_invalid_profile_rejected_consistently(profile):
         expression_guidance(profile)
     with pytest.raises(ValueError, match="Invalid personality profile"):
         profile_waits_beyond_fleet_floor(profile, elapsed=math.inf, base=120)
+
+
+def test_bounded_wait_elapsed_releases_calm_and_dramatic_after_peer_resets():
+    assert profile_waits_beyond_fleet_floor("calm", elapsed=125, base=120, wait_elapsed=125)
+    assert profile_waits_beyond_fleet_floor("calm", elapsed=125, base=120, wait_elapsed=179.9)
+    assert not profile_waits_beyond_fleet_floor("calm", elapsed=125, base=120, wait_elapsed=180.0)
+    assert not profile_waits_beyond_fleet_floor(
+        "dramatic", elapsed=125, base=120, wait_elapsed=150.0,
+    )
+    for bad_wait in (math.nan, math.inf, -math.inf, -1.0, True, "180"):
+        assert profile_waits_beyond_fleet_floor(
+            "calm", elapsed=125, base=120, wait_elapsed=bad_wait,
+        )

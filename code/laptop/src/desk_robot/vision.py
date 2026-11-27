@@ -315,6 +315,9 @@ class _InsufficientSceneDetail(ValueError):
     """A decodable latest frame does not provide usable visual contrast."""
 
 
+_PIL_IMAGE_OPEN = Image.open
+
+
 @contextmanager
 def _open_camera_jpeg(frame: bytes, *, max_bytes: int) -> Iterator[Image.Image]:
     """Own one bounded camera JPEG decoder for the caller's entire inspection."""
@@ -323,7 +326,12 @@ def _open_camera_jpeg(frame: bytes, *, max_bytes: int) -> Iterator[Image.Image]:
             or not frame.endswith(b"\xff\xd9")):
         raise ValueError("Bounded JPEG scene evidence required")
     try:
-        with Image.open(BytesIO(frame)) as candidate:
+        opened = (
+            Image.open(BytesIO(frame), formats=("JPEG",))
+            if Image.open is _PIL_IMAGE_OPEN
+            else Image.open(BytesIO(frame))
+        )
+        with opened as candidate:
             if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
                     or not 1 <= candidate.height <= 4096):
                 raise ValueError("Camera dimensions invalid")

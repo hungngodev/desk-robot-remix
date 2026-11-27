@@ -68,6 +68,7 @@ from .personality_policy import (
     expression_guidance,
     fleet_speech_elapsed,
     passive_interval,
+    proactive_battery_claim_violates_receipt,
     profile_waits_beyond_fleet_floor,
 )
 from .sensor_event_contract import (
@@ -244,6 +245,10 @@ class PetState:
     activity_reevaluations: int = 0
     activity_silences: int = 0
     last_activity_decision: str | None = None
+    personality_wait_anchor: float | None = None
+    _proactive_receipt_snapshot: tuple[ProactiveToolReceipt | None, float] = field(
+        default=(None, -math.inf), repr=False,
+    )
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
@@ -681,6 +686,7 @@ class PetController:
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_scene_frame_at = None
         state.last_hub_generation = None
+        state.personality_wait_anchor = None
         self._clear_deferred_speech(state)
         if self.multimodal is not None:
             self.multimodal.hub.discard_video(robot_id)
@@ -775,6 +781,7 @@ class PetController:
         state.camera_habituation.reset()
         state.last_scene_frame_at = None
         state.last_hub_generation = None
+        state.personality_wait_anchor = None
         self._clear_deferred_speech(state)
         tasks = [
             t for t in (state.task, state.touch_task, state.aux_task,
@@ -3183,16 +3190,41 @@ class PetController:
             self._reconsider_activity()
 
     def _activity_local_veto(self, robot_id: str, now: float) -> str | None:
+        state = self.states[robot_id]
         elapsed = fleet_speech_elapsed(now, self._group_last_spoken)
+        anchor = getattr(state, "personality_wait_anchor", None)
+        if (
+            anchor is not None
+            and math.isfinite(self._group_last_spoken)
+            and self._group_last_spoken < anchor
+        ):
+            anchor = self._group_last_spoken
+            state.personality_wait_anchor = anchor
+        wait_elapsed = (
+            fleet_speech_elapsed(now, anchor)
+            if anchor is not None else None
+        )
+
+        def _personality_wait() -> bool:
+            waits = profile_waits_beyond_fleet_floor(
+                self.settings.robot(robot_id).personality_profile,
+                elapsed=elapsed, base=self.speech_cooldown,
+                wait_elapsed=wait_elapsed,
+            )
+            if (
+                waits
+                and getattr(state, "personality_wait_anchor", None) is None
+                and math.isfinite(self._group_last_spoken)
+            ):
+                state.personality_wait_anchor = self._group_last_spoken
+            return waits
+
         return first_initiative_veto(
             ("quiet_mode", lambda: self.is_quiet(robot_id)),
             ("dock_charging_inhibited", lambda: self.is_dock_charging_inhibited(robot_id)),
-            ("battery_low", lambda: self.states[robot_id].last_battery_low),
+            ("battery_low", lambda: state.last_battery_low),
             ("invalid_fleet_speech_clock", lambda: elapsed is None),
-            ("personality_cooldown", lambda: profile_waits_beyond_fleet_floor(
-                self.settings.robot(robot_id).personality_profile,
-                elapsed=elapsed, base=self.speech_cooldown,
-            )),
+            ("personality_cooldown", _personality_wait),
         )
 
     def _reconsider_activity(self) -> None:
@@ -3233,6 +3265,7 @@ class PetController:
             return
         # Advance on an admitted consideration, including deliberate silence.
         # A busy floor must not consume rotation; a quiet choice should.
+        state.personality_wait_anchor = now
         self._activity_round = (index + 1) % len(robots)
         if (state.session_habituation.recent_repeats(now)
                 or state.camera_habituation.recent_repeats(now)):
@@ -4027,7 +4060,9 @@ class PetController:
         def count_sent_segment(sent_robot_id: str) -> None:
             if sent_robot_id not in {robot_id, social_peer_id}:
                 return
-            self._group_last_spoken = time.monotonic()
+            now_sent = time.monotonic()
+            self._group_last_spoken = now_sent
+            self.states[sent_robot_id].personality_wait_anchor = now_sent
             self._persist_fleet_cooldowns()
             if sent_robot_id not in sent_speakers:
                 sent_speakers.add(sent_robot_id)
@@ -4151,6 +4186,9 @@ class PetController:
             {"role": "system", "content": system_text},
             {"role": "user", "content": user_text},
         ]
+        inspected_receipt: ProactiveToolReceipt | None = None
+        state._proactive_receipt_snapshot = (None, -math.inf)
+
         async def timely_model(call: Callable[[], Awaitable[_T]]) -> _T | None:
             # httpx's read timeout may reset on every partial reply.
             # One stalled model decision cannot own the only proactive
@@ -4207,6 +4245,8 @@ class PetController:
                     state.suppressed += 1
                     state.last_initiative_suppression = "read_only_tool_unavailable"
                     return
+                inspected_receipt = receipt
+                state._proactive_receipt_snapshot = (receipt, time.monotonic())
                 if not model_context_permitted():
                     state.suppressed += 1
                     state.last_initiative_suppression = "tool_result_superseded"
@@ -4266,6 +4306,13 @@ class PetController:
             # natural speech decision is SILENCE. When speaking, dispatch display
             # I/O on the per-robot background task so it cannot delay TTS.
             mood = choice.get("mood", "none")
+            if choice["action"] == "speak" and proactive_battery_claim_violates_receipt(
+                choice.get("text", ""), inspected_receipt,
+            ):
+                state.suppress_initiative("unverified_or_contradictory_battery_claim")
+                if scheduled_activity:
+                    state.last_activity_decision = "defer"
+                return
             if choice["action"] == "speak":
                 schedule_face = getattr(self, "_schedule_face_cue", None)
                 if callable(schedule_face):
@@ -4316,6 +4363,11 @@ class PetController:
             if text is None:
                 state.suppressed += 1
                 state.last_initiative_suppression = "event_expired_during_reasoning"
+                return
+            if proactive_battery_claim_violates_receipt(text, None):
+                state.suppress_initiative("unverified_or_contradictory_battery_claim")
+                if scheduled_activity:
+                    state.last_activity_decision = "defer"
                 return
         return text
 
@@ -4508,6 +4560,20 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "model_reply_not_concise"
                 return
+            snap_receipt, snap_at = getattr(
+                state, "_proactive_receipt_snapshot", (None, -math.inf),
+            )
+            fresh_receipt = (
+                snap_receipt
+                if (
+                    snap_receipt is not None
+                    and 0 <= time.monotonic() - snap_at <= self.max_observation_age
+                )
+                else None
+            )
+            if proactive_battery_claim_violates_receipt(text, fresh_receipt):
+                state.suppress_initiative("unverified_or_contradictory_battery_claim")
+                return
             # Native MiniCPM and Mac TTS share one current-robot timeline.
             # Check it AGAIN after slow reasoning, since native speech may
             # have finished while the proactive model was considering a reply.
@@ -4590,6 +4656,7 @@ class PetController:
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()
                 self._group_last_spoken = now
+                state.personality_wait_anchor = now
                 self._persist_fleet_cooldowns()
                 state.spoken += 1
                 state.recent_optional_transmissions.append((text, now))
