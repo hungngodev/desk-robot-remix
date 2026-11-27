@@ -71,10 +71,12 @@ def _validate_match(data: dict, expected_code: int | None) -> None:
         raise ValueError("Foreign NEC dock beacon: expected assigned dock")
 
 
-def _validate_receiver_codes(data: dict, expected_code: int | None) -> None:
-    """Validate optional per-receiver identities after the common receipt gates."""
+def _validate_receiver_codes(
+    data: dict, expected_code: int | None, *, require_codes: bool = False,
+) -> None:
+    """Validate per-receiver identities after the common receipt gates."""
     side_keys = ("left_code", "right_code")
-    if any(key in data for key in side_keys):
+    if require_codes or any(key in data for key in side_keys):
         for side in ("left", "right"):
             value = data.get(f"{side}_code")
             if type(value) is not int or (
@@ -89,7 +91,8 @@ def _validate_receiver_codes(data: dict, expected_code: int | None) -> None:
 
 def validate_ir(data: dict, robot_id: str, *,
                 expected_dock_id: int | None = None,
-                elapsed_ms: float = 0.0) -> dict:
+                elapsed_ms: float = 0.0,
+                require_receiver_codes: bool = False) -> dict:
     if expected_dock_id is not None:
         expected_code = dock_beacon_code(expected_dock_id)
     else:
@@ -101,15 +104,17 @@ def validate_ir(data: dict, robot_id: str, *,
         raise ValueError("Invalid NEC elapsed request age")
     _validate_receipt_fields(data, robot_id, elapsed_ms)
     _validate_match(data, expected_code)
-    _validate_receiver_codes(data, expected_code)
+    _validate_receiver_codes(data, expected_code, require_codes=require_receiver_codes)
     return data
 
 
 def validate_motion_ir(data: dict, robot_id: str, *,
-                       expected_dock_id: int, elapsed_ms: float) -> dict:
+                       expected_dock_id: int, elapsed_ms: float,
+                       require_receiver_codes: bool = False) -> dict:
     """Require positive freshness budget for a new matched-beacon motor pulse."""
     reading = validate_ir(
         data, robot_id, expected_dock_id=expected_dock_id, elapsed_ms=elapsed_ms,
+        require_receiver_codes=require_receiver_codes,
     )
     if reading["match"] and (
         max(reading["left_age_ms"], reading["right_age_ms"]) + elapsed_ms

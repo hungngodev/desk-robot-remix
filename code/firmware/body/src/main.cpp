@@ -822,8 +822,8 @@ void loop() {
   poll_optional(millis());
   if (control.state().bumper_raw) apply_outputs();
   service_safety_checkpoint();
-  if (tof.clients_accessible() &&
-      !accessories.poll(millis(), publish_lane5_safety, nullptr))
+  accessories.set_lane5_safety_callback(publish_lane5_safety, nullptr);
+  if (tof.clients_accessible() && !accessories.poll(millis()))
     tof.note_shared_mux_fault(cliff_guard);
   invalidate_shared_bus_if_faulted();
   control.set_accessories(accessories.readings(), millis());

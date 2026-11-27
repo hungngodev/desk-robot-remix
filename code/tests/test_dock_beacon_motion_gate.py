@@ -58,6 +58,8 @@ class SensorHead:
             "left_age_ms": 10,
             "right_age_ms": 10,
             "code": self.station if self.matching else 0,
+            "left_code": self.station if self.matching else 0,
+            "right_code": self.station if self.matching else 0,
             "motor_authorized": False,
             "charging_authorized": False,
             "physical_qualified": False,
@@ -73,7 +75,7 @@ class SensorHead:
 def camera():
     return DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
 
 

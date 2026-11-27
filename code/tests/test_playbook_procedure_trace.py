@@ -566,3 +566,36 @@ def test_rows_65_to_80_bind_exact_required_tokens_and_manual_reviews():
             "verification_command": "cd code && pytest -q tests/test_unrelated_placeholder_target.py",
         }
         assert not _valid_release_evidence(mismatched), proc_id
+
+
+def test_rows_9_to_15_bind_requirement_specific_tests_without_placeholder_reuse():
+    rows = _load_ledger()["procedures"]
+    commands = {proc_id: rows[proc_id - 1]["verification_command"] for proc_id in range(9, 16)}
+    assert len(set(commands.values())) == len(commands)
+    for proc_id in range(9, 16):
+        row = rows[proc_id - 1].copy()
+        tokens = REQUIRED_PROCEDURE_COMMAND_TOKENS[proc_id]
+        assert all(tok in row["verification_command"] for tok in tokens), proc_id
+        bad_cmd = (
+            "cd code && python -m pytest -q tests/test_unrelated_placeholder_target.py"
+            if proc_id == 9
+            else "cd code && python -m pytest -q tests/test_complete_component_ownership.py"
+        )
+        mismatched = {**row, "verification_command": bad_cmd}
+        assert not _valid_release_evidence(mismatched), proc_id
+
+
+def test_rows_17_to_24_bind_requirement_specific_tests_without_placeholder_reuse():
+    rows = _load_ledger()["procedures"]
+    for proc_id in range(17, 25):
+        row = rows[proc_id - 1].copy()
+        tokens = REQUIRED_PROCEDURE_COMMAND_TOKENS.get(proc_id, ())
+        assert tokens, proc_id
+        assert all(tok in row["verification_command"] for tok in tokens), proc_id
+        mismatched = {
+            **row,
+            "verification_command": "cd code && python -m pytest -q tests/test_power_preflight.py tests/test_dc_motor_watchdog_contract.py"
+            if proc_id != 17
+            else "cd code && python -m pytest -q tests/test_unrelated_placeholder_target.py",
+        }
+        assert not _valid_release_evidence(mismatched), proc_id

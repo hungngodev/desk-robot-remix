@@ -377,11 +377,13 @@ def main():
     else:
         if args.samples != 10:
             p.error("--samples is for --inspect only")
-        op = validate_command(args.command)
-        if op not in {"drive", "lift", "grip", "stop", "disarm", "halt"}:
-            p.error("Choose bounded drive/lift/grip or stop/disarm/halt")
+        op = "rearm" if args.command == "rearm" else validate_command(args.command)
         if args.local_rearm and op in {"stop", "disarm", "halt"}:
             p.error("Stopping does not require and must not invoke rearm")
+        if op not in {"drive", "lift", "grip", "stop", "disarm", "halt", "rearm"}:
+            p.error("Choose bounded drive/lift/grip, stop/disarm/halt, or rearm")
+        if op == "rearm" and not args.local_rearm:
+            p.error("Standalone safety recovery requires explicit --local-rearm")
         # validate_command accepts an omitted drive duration (250ms). Compute
         # this before opening USB or issuing motion, never after actuation.
         if op == "drive":
@@ -471,6 +473,20 @@ def main():
                 "Refusing implicit safety recovery. Use --local-rearm only after "
                 "a real measured calibration and with tracks suspended over a catch tray."
             )
+        if op == "rearm":
+            # Local-only safety recovery: verify ACK and read-only status while
+            # remaining disarmed until an independent operator permit is granted.
+            transact("rearm")
+            post_status = inspect_status(transact("status"))
+            print(json.dumps({
+                "rearm_acknowledged": True,
+                "armed": post_status["armed"],
+                "local_guard_ready": post_status["local_guard_ready"],
+                "local_guard_fault": post_status["local_guard_fault"],
+                "requires_independent_permit_for_motion": True,
+                "physical_qualification_pass": False,
+            }, indent=2))
+            return
         try:
             transact("rearm")  # Direct body USB only; the guard can reject it.
             transact("arm")

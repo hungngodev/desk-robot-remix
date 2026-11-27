@@ -586,6 +586,25 @@ def test_low_but_usable_signal_retains_true_delay():
     assert not report["aec_physically_verified"]
 
 
+def test_clock_drift_shortest_four_second_capture_meets_drift_accuracy():
+    """Shortest supported 4-second (64,000-sample) capture stays within +-25 ppm."""
+    rng = np.random.default_rng(281)
+    speaker = rng.normal(0, 0.15, 64000)
+    positions = np.arange(len(speaker), dtype=np.float64)
+    for drift_ppm in (0, 200, -200):
+        mic = np.interp(
+            positions - 1120 - positions * drift_ppm / 1_000_000,
+            positions, speaker, left=0, right=0,
+        )
+        result = estimate_clock_drift(speaker, mic)
+        assert result["clock_drift_ppm_estimate"] == pytest.approx(
+            drift_ppm, abs=25
+        )
+        assert result["clock_drift_max_fit_residual_samples"] <= 3.0
+        assert not result["aec_physically_verified"]
+        assert not result["natural_barge_in_verified"]
+
+
 def test_clock_drift_rejects_near_silent_gap_between_primary_windows():
     rng = np.random.default_rng(1058)
     reference = rng.choice([-1.0, 1.0], size=160000) / 32768

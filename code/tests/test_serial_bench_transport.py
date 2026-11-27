@@ -294,3 +294,121 @@ def test_invalid_cli_port_never_opens_serial(monkeypatch, port):
     with pytest.raises(SystemExit) as exc:
         transact.__globals__["main"]()
     assert exc.value.code == 2
+
+
+def test_standalone_local_rearm_recovers_without_arm_or_motion(monkeypatch, capsys):
+    """Standalone `--command rearm --local-rearm` never calls arm/drive/lift/grip/keepalive."""
+    import json as _json
+
+    valid_status = {
+        "backend": "stepper_28byj48",
+        "armed": False,
+        "safety": {"ready": True, "fault": None},
+        "touch": {"active": False},
+        "ranges": {
+            "present_mask": 31,
+            "valid_mask": 31,
+            "mm": [100, 100, 100, 100, 400],
+            "age_ms": [10, 10, 10, 10, 10],
+        },
+        "extras": {
+            "mask": 0, "bumper": False, "reed": False, "pir": False,
+            "bumps": 0, "reed_count": 0, "pir_count": 0,
+        },
+    }
+    sent = []
+
+    class RecoveryPort:
+        def __init__(self, replies):
+            self._replies = iter(replies)
+            self.now = 0.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def reset_input_buffer(self):
+            pass
+
+        def write(self, data):
+            sent.append(data.decode("ascii").strip())
+            return len(data)
+
+        def readline(self, size):
+            self.now += 0.01
+            return next(self._replies, b"")
+
+        def read_until(self, expected=b"\n", size=None):
+            return self.readline(size or 1920)
+
+    fake_clock = SimpleNamespace(monotonic=lambda: port.now, sleep=lambda _s: None)
+    status_line = (_json.dumps(valid_status) + "\n").encode("ascii")
+
+    # 1. Requires explicit --local-rearm flag.
+    monkeypatch.setattr(sys, "argv", [
+        "serial_bench.py", "--port", "/dev/ttyUSB0", "--command", "rearm",
+    ])
+    with pytest.raises(SystemExit) as exc:
+        transact.__globals__["main"]()
+    assert exc.value.code == 2
+
+    # 2. Clean recovery: pre-status -> rearm -> post-status; zero actuation commands.
+    sent.clear()
+    port = RecoveryPort([status_line, b"OK rearm\n", status_line])
+    monkeypatch.setitem(transact.__globals__, "require_local_serial_device", lambda _p: None)
+    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    monkeypatch.setitem(transact.__globals__, "time", fake_clock)
+    monkeypatch.setattr(sys, "argv", [
+        "serial_bench.py", "--port", "/dev/ttyUSB0", "--command", "rearm", "--local-rearm",
+    ])
+    transact.__globals__["main"]()
+    assert sent == ["status", "rearm", "status"]
+    assert not any(
+        cmd.startswith(("arm", "drive", "lift", "grip", "keepalive"))
+        for cmd in sent
+    )
+    receipt = _json.loads(capsys.readouterr().out)
+    assert receipt["rearm_acknowledged"] is True
+    assert receipt["armed"] is False
+    assert receipt["requires_independent_permit_for_motion"] is True
+    assert receipt["physical_qualification_pass"] is False
+
+    # 3. ERR reply on rearm raises without any actuation.
+    sent.clear()
+    port = RecoveryPort([status_line, b"ERR rearm_blocked\n"])
+    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    with pytest.raises(RuntimeError, match="ERR rearm_blocked"):
+        transact.__globals__["main"]()
+    assert sent == ["status", "rearm"]
+
+    # 4. Timeout during rearm raises without any actuation.
+    sent.clear()
+
+    class SlowTimeoutPort(RecoveryPort):
+        def readline(self, size):
+            chunk = next(self._replies, b"")
+            self.now += 0.01 if chunk else 0.6
+            return chunk
+
+    slow_port = SlowTimeoutPort([status_line])
+    monkeypatch.setitem(
+        transact.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: slow_port.now, sleep=lambda _s: None),
+    )
+    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: slow_port))
+    with pytest.raises(TimeoutError, match="Uncertain USB response"):
+        transact.__globals__["main"]()
+    assert sent == ["status", "rearm"]
+
+    # 5. Unqualified pre-status (e.g. touch active) refuses rearm before sending rearm.
+    sent.clear()
+    active_touch_status = {**valid_status, "touch": {"active": True}}
+    active_touch_line = (_json.dumps(active_touch_status) + "\n").encode("ascii")
+    port = RecoveryPort([active_touch_line])
+    monkeypatch.setitem(transact.__globals__, "time", fake_clock)
+    monkeypatch.setitem(transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    with pytest.raises(RuntimeError, match="Unqualified touch/range state"):
+        transact.__globals__["main"]()
+    assert sent == ["status"]

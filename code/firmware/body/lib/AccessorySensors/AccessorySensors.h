@@ -26,6 +26,10 @@ class AccessorySensors {
   // When lane 5 finishes mandatory GPIOA/GPIOB safety acquisition, optional
   // on_lane5_safety runs synchronously BEFORE haptic output or NFC transactions.
   using Lane5SafetyCallback = void (*)(const AccessoryReadings&, std::uint32_t, void*);
+  void set_lane5_safety_callback(Lane5SafetyCallback cb, void* ctx = nullptr) {
+    lane5_cb_ = cb;
+    lane5_ctx_ = ctx;
+  }
   bool poll(std::uint32_t now_ms, Lane5SafetyCallback on_lane5_safety = nullptr,
             void* on_lane5_ctx = nullptr);
   const AccessoryReadings& readings() const { return data_; }
@@ -64,6 +68,8 @@ class AccessorySensors {
  private:
   TwoWire* wire_ = nullptr;
   bool (*bus_accessible_)() = nullptr;
+  Lane5SafetyCallback lane5_cb_ = nullptr;
+  void* lane5_ctx_ = nullptr;
   bool bus_blocked_ = false;
   bool bus_available();
   bool mux_present_ = false;

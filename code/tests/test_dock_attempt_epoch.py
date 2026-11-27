@@ -46,6 +46,8 @@ async def test_retired_dock_stops_at_next_await(settings, monkeypatch, stage):
                 "left_seq": 8, "right_seq": 9,
                 "left_age_ms": 0, "right_age_ms": 0,
                 "code": dock_beacon_code(1),
+                "left_code": dock_beacon_code(1),
+                "right_code": dock_beacon_code(1),
                 "motor_authorized": False, "charging_authorized": False,
                 "physical_qualified": False,
             }
@@ -73,7 +75,7 @@ async def test_retired_dock_stops_at_next_await(settings, monkeypatch, stage):
     coordinator._fleet_motion_owner = job.id
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1, camera_sensor_pid="OV5640",
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     task = asyncio.create_task(coordinator._dock_approach(job, camera, 200, 1, 1))
     try:

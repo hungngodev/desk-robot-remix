@@ -3,7 +3,8 @@
   "esp_idf": {
     "url": "https://github.com/espressif/esp-idf.git",
     "branch": "release/v6.1",
-    "commit": "9a97f6c54ec638111ce55cd36581b3c192f15207"
+    "commit": "9a97f6c54ec638111ce55cd36581b3c192f15207",
+    "docker_image": "espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c"
   },
   "body": {
     "platformio": "6.1.18",

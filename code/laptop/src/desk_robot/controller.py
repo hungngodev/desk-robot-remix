@@ -5,7 +5,8 @@ import logging
 import time
 import uuid
 from collections import deque
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field
+from types import MappingProxyType
 from typing import Awaitable, Callable
 
 from .calibration import Calibration
@@ -310,7 +311,7 @@ class Coordinator:
         _require_safe_fuel_sample(
             status.get("power"), min_cell_mv=3350, min_soc_centi=500,
             context="Hardware preflight",
-            depleted_message="Hardware preflight: battery voltage critical (<3350 mV)",
+            depleted_message="Hardware preflight: battery critical (<3350 mV or <5% SoC)",
         )
         return status
 
@@ -984,7 +985,7 @@ class Coordinator:
                 # stronger physical failure or claim the WROOM stopped.
                 if job.state != "failed":
                     job.state = "cancelled"
-                    job.error = "Operator cancelled"
+                    job.error = job.error or "Operator cancelled"
             except Exception as exc:
                 job.state = "failed"
                 job.error = str(exc) or type(exc).__name__
@@ -1053,6 +1054,11 @@ class Coordinator:
                                 )
 
     def manual(self, robot_id: str, command: str) -> Job:
+        """Start an operator-permitted manual drive, lift, or grip command.
+
+        Dock contact/charge inhibition refuses all manual drive, lift, and grip
+        commands at admission, dispatch, and active-task cancellation.
+        """
         robot = self.robot(robot_id)
         if self.dock_inhibited(robot_id):
             raise OperationError("Manual movement refused: robot is seated or powered on dock")
@@ -1147,8 +1153,24 @@ class Coordinator:
         """True while dock seat/power/CHG telemetry inhibits away-from-dock motion."""
         return bool(getattr(self, "_dock_charging_inhibited", {}).get(robot_id, False))
 
+    def has_motion_authority(self, robot_id: str) -> bool:
+        """True if host holds an active permit, queued/running job, or fleet owner."""
+        if robot_id in self.permits:
+            return True
+        if any(
+            job.robot_id == robot_id and job.state in {"queued", "running"}
+            for job in self.jobs.values()
+        ):
+            return True
+        owner = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
+        return owner is not None and owner.robot_id == robot_id
+
     def set_dock_charge_inhibition(self, robot_id: str, inhibited: bool) -> None:
-        """Sync read-only dock seat/charge-pin status into motion admission."""
+        """Sync read-only dock seat/charge-pin status into motion admission.
+
+        Dock inhibition refuses and cancels all away-from-dock motion, including
+        active manual drive, lift, and grip jobs so WROOM is immediately halted.
+        """
         table = getattr(self, "_dock_charging_inhibited", None)
         if table is None:
             table = {}
@@ -1167,7 +1189,7 @@ class Coordinator:
         if (
             active is not None
             and active.robot_id == robot_id
-            and active.kind in {"exploration", "pickup", "navigate", "dock_approach"}
+            and active.kind in {"manual", "exploration", "pickup", "navigate", "dock_approach"}
             and task is not None
             and not task.done()
             and not task.cancelling()
@@ -1446,6 +1468,7 @@ class Coordinator:
                 "Dock motion requires calibrated camera frame resolution"
             )
         if (camera.mount_lateral_offset_mm is None
+                or camera.mount_forward_offset_mm is None
                 or camera.mount_yaw_deg is None):
             raise OperationError(
                 "Dock motion requires measured camera to chassis mounting geometry"
@@ -1482,6 +1505,7 @@ class Coordinator:
                     validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                        require_receiver_codes=True,
                     )
                 except ValueError as exc:
                     raise _DockIrQueueExpired(str(exc)) from exc
@@ -1598,10 +1622,19 @@ class Coordinator:
             # centered on the wheel chassis. Apply measured camera yaw and
             # lateral lens offset before choosing a left/right/forward pulse.
             self._require_job_motion(job)
-            aligned = (
-                replace(pose, x_mm=camera.chassis_lateral_mm(pose))
-                if pose is not None else None
-            )
+            try:
+                aligned = camera.chassis_pose(pose) if pose is not None else None
+            except ValueError as exc:
+                if "not positive from stop origin" in str(exc):
+                    return {
+                        "phase": "hold",
+                        "reason": "Chassis forward distance within dock stop origin",
+                        "charging_authorized": False,
+                        "physical_acceptance_pass": False,
+                    }
+                raise OperationError(
+                    "Dock motion requires measured camera to chassis mounting geometry"
+                ) from exc
             decision = assess_dock(
                 aligned, now=time.monotonic(), target_distance_mm=target_mm
             )
@@ -1633,6 +1666,7 @@ class Coordinator:
                     beacon = validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                        require_receiver_codes=True,
                     )
                 except ValueError as exc:
                     raise OperationError(f"Assigned dock IR rejected: {exc}") from exc
@@ -1701,6 +1735,7 @@ class Coordinator:
                     validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                        require_receiver_codes=True,
                     )
                 except ValueError:
                     return {
@@ -1778,6 +1813,11 @@ class Coordinator:
         calibration.verify_ready(robot_id=robot_id)
         if calibration.simulation_only and self.settings.mode != "simulation":
             raise OperationError("Simulation calibration cannot be used on hardware")
+        if calibration.robot_id is not None and calibration.robot_id != robot.id:
+            raise OperationError("Pickup calibration robot identity mismatched")
+        if (calibration.head_device_id is not None
+                and calibration.head_device_id != robot.device_id):
+            raise OperationError("Pickup calibration head device identity mismatched")
         if self.settings.mode == "hardware" and calibration.hold_seconds < 3:
             raise OperationError("Real pickup requires at least three seconds of verified hold")
         if self.settings.mode == "hardware" and calibration.grip_force_delta_raw is None:
@@ -1785,6 +1825,12 @@ class Coordinator:
         if self.settings.mode == "hardware":
             if not calibration.has_pickup_floor_clearance():
                 raise OperationError("Real pickup requires measured positive floor clearance")
+            if (calibration.robot_id != robot.id
+                    or not robot.device_id
+                    or calibration.head_device_id != robot.device_id):
+                raise OperationError(
+                    "Real pickup requires measured calibration bound to this robot and head device"
+                )
             self._pickup_live_media(robot_id)
         camera_grant = self._camera_motion_grant()
         return self._submit(
@@ -1922,6 +1968,20 @@ class Coordinator:
 
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
+        if self._uses_guarded_body_profile(job.robot_id):
+            precheck, _ = await observe()
+            pre_point = c.ground(precheck.center)
+            if not c.within(pre_point):
+                raise OperationError("Target outside calibrated work area")
+            pre_dx = pre_point[0] - c.grip_ground_mm[0]
+            pre_dy = pre_point[1] - c.grip_ground_mm[1]
+            if (abs(pre_dx) > c.alignment_tolerance_mm
+                    or (pre_dy < -c.alignment_tolerance_mm and c.forward_sign == 1)
+                    or (pre_dy > c.alignment_tolerance_mm and c.forward_sign == -1)):
+                raise OperationError(
+                    "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
+                )
+        self._require_camera_motion_grant(camera_grant)
         await send_command(f"grip {c.grip_open}")
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
@@ -1941,10 +2001,18 @@ class Coordinator:
                 initial = detection
                 break
             if abs(dx) > c.alignment_tolerance_mm:
+                if self._uses_guarded_body_profile(job.robot_id):
+                    raise OperationError(
+                        "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
+                    )
                 direction = (1 if dx > 0 else -1) * c.turn_sign
                 command = f"drive {direction * 20} {-direction * 20} 100"
             else:
                 direction = (1 if dy > 0 else -1) * c.forward_sign
+                if self._uses_guarded_body_profile(job.robot_id) and direction < 0:
+                    raise OperationError(
+                        "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
+                    )
                 command = f"drive {direction * 20} {direction * 20} 100"
             # Vision and geometry may have taken seconds. Never re-use the
             # pre-camera WROOM fault/IMU/cliff/bumper verdict for a drive.
@@ -2116,6 +2184,35 @@ class Coordinator:
             ),
         }
 
+    _STEP_VECTORS = MappingProxyType({(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3})
+
+    def _uses_guarded_body_profile(self, robot_id: str) -> bool:
+        """All currently supported WROOM hardware profiles prohibit turns/reverse."""
+        if self.settings.mode != "hardware":
+            return False
+        backend = self.robot(robot_id).motor_backend
+        return backend in (None, "stepper_28byj48", "dc_pwm_guarded")
+
+    @classmethod
+    def _route_requires_turn(
+        cls,
+        cells: tuple[tuple[int, int], ...] | list[tuple[int, int]],
+        *,
+        initial_heading: int,
+        final_heading: int | None,
+    ) -> bool:
+        heading = initial_heading
+        if cells:
+            prev = cells[0]
+            for nxt in cells[1:]:
+                desired = cls._STEP_VECTORS.get((nxt[0] - prev[0], nxt[1] - prev[1]))
+                if desired is not None and desired != heading:
+                    return True
+                if desired is not None:
+                    heading = desired
+                prev = nxt
+        return final_heading is not None and final_heading != heading
+
     def _require_navigation_qualification(self, robot_id: str) -> None:
         robot = self.robot(robot_id)
         if robot.motion_enabled is not True or robot.spatial_navigation_qualified is not True:
@@ -2193,6 +2290,12 @@ class Coordinator:
         expected_epoch = route.epoch
         if spatial.state(robot_id).epoch != expected_epoch:
             raise OperationError("Navigation refused: spatial map invalidated")
+        if self._uses_guarded_body_profile(robot_id) and self._route_requires_turn(
+            route.cells, initial_heading=chosen_heading, final_heading=route.final_heading,
+        ):
+            raise OperationError(
+                "Navigation refused: guarded WROOM profile prohibits unqualified differential turn"
+            )
         return self._submit(
             robot_id,
             "navigate",
@@ -2237,7 +2340,7 @@ class Coordinator:
         robot = self.robot(job.robot_id)
         turn_sign = robot.dock_turn_sign if robot.dock_turn_sign in (-1, 1) else 1
         forward_sign = robot.dock_forward_sign if robot.dock_forward_sign in (-1, 1) else 1
-        step_vectors = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+        step_vectors = self._STEP_VECTORS
         cur_heading = initial_heading
 
         async def _observe_live_pose():
@@ -2323,6 +2426,12 @@ class Coordinator:
             if route.epoch != expected_epoch:
                 raise OperationError("Navigation halted: spatial map invalidated during planning")
             cur_heading = observed_heading
+            if self._uses_guarded_body_profile(job.robot_id) and self._route_requires_turn(
+                route.cells, initial_heading=cur_heading, final_heading=route.final_heading,
+            ):
+                raise OperationError(
+                    "Navigation halted: guarded WROOM profile prohibits unqualified differential turn"
+                )
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
             self._require_navigation_qualification(job.robot_id)
@@ -2400,6 +2509,10 @@ class Coordinator:
                 raise OperationError("Navigation halted: voice preempted motion")
 
         def _turn_once(target_heading: int) -> str:
+            if self._uses_guarded_body_profile(job.robot_id):
+                raise OperationError(
+                    "Navigation halted: guarded WROOM profile prohibits unqualified differential turn"
+                )
             delta = (target_heading - cur_heading) % 4
             if delta == 1:
                 direction = turn_sign

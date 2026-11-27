@@ -85,3 +85,36 @@ def test_invalid_receiver_zero_identity_must_be_integer(receipt, side, value):
     receipt[f"{side}_code"] = value
     with pytest.raises(ValueError, match=f"Invalid NEC {side} beacon identity"):
         validate_ir(receipt, "robot-01")
+
+
+def test_validate_ir_require_receiver_codes_rejects_missing_or_foreign(receipt):
+    """Hardware dock calls require both left_code and right_code; default stays legacy-compat."""
+    legacy = dict(receipt)
+    legacy.pop("left_code")
+    legacy.pop("right_code")
+    assert validate_ir(legacy, "robot-01", expected_dock_id=4)["match"] is True
+    with pytest.raises(ValueError, match="Invalid NEC left beacon identity"):
+        validate_ir(
+            legacy, "robot-01", expected_dock_id=4, require_receiver_codes=True,
+        )
+
+    for omitted in ("left_code", "right_code"):
+        partial = dict(receipt)
+        partial.pop(omitted)
+        with pytest.raises(ValueError):
+            validate_ir(
+                partial, "robot-01", expected_dock_id=4, require_receiver_codes=True,
+            )
+
+    for side in ("left_code", "right_code"):
+        foreign = dict(receipt)
+        foreign[side] = dock_beacon_code(5)
+        with pytest.raises(ValueError):
+            validate_ir(
+                foreign, "robot-01", expected_dock_id=4, require_receiver_codes=True,
+            )
+
+    validated = validate_ir(
+        receipt, "robot-01", expected_dock_id=4, require_receiver_codes=True,
+    )
+    assert validated["left_code"] == validated["right_code"] == receipt["code"]

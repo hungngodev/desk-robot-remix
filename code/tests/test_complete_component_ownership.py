@@ -183,6 +183,18 @@ def test_max30102_compiled_fifo_layout_is_disclosed_not_qualified():
     ).read_text()
 
 
+def test_architecture_locks_three_compute_owners():
+    """AGENTS.md and the hardware plan lock exactly Mac, XIAO Sense, and WROOM32."""
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert "Mac = one orchestration" in agents
+    assert "XIAO ESP32S3 Sense = selected head" in agents
+    assert "WROOM32 = selected deterministic body" in agents
+    plan, owners = _sources()
+    assert set(plan["bus"]["body_gpio"]) and set(plan["bus"]["sense_gpio"])
+    assert owners["pet_roles"]["xiao_sense"]["source"]
+    assert owners["pet_roles"]["wroom"]["source"]
+
+
 def test_imu_role_tracks_selected_mpu6050_without_physical_qualification():
     plan, owners = _sources()
     selected = next(part for part in plan["parts"] if part["id"] == "imu")

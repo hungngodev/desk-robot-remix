@@ -210,6 +210,48 @@ def test_excluded_zero_target_paid_item_is_not_marked_awaiting_arrival():
     assert allowed["awaiting_arrival_roles"] == ["robot:i2c_mux"]
 
 
+@pytest.mark.parametrize("scope", ["evaluation", "first_robot", "fleet"])
+@pytest.mark.parametrize("acquisition_kind", ["paid_order", "already_owned"])
+def test_excluded_zero_target_inventory_allocation_keeps_payable_unknown(
+    scope, acquisition_kind,
+):
+    """Inspected or already-owned stock for a zero-qty role must fail closed."""
+    ev = sample()
+    ev["scope"] = scope
+    ev["lines"].pop()
+    for line in ev["lines"]:
+        line["quoted_at"] = date.today().isoformat()
+        line["stock_checked_at"] = date.today().isoformat()
+    stock = {
+        "role_key": "room:amg8833",
+        "usable_allocated": 1,
+        "acquisition_kind": acquisition_kind,
+        "inspection_receipt_url": "https://github.com/org/amg-inspected",
+    }
+    if acquisition_kind == "paid_order":
+        ev["paid_orders"][0]["allocations"] = [
+            {"role_key": "room:amg8833", "quantity": 1},
+        ]
+        stock["order_reference"] = "already-paid"
+    ev["inventory"] = [stock]
+    categories_deferred = {"robot:cliff_obstacle": "robot", "room:amg8833": "room"}
+    required_deferred = {"robot:cliff_obstacle": 1, "room:amg8833": 0}
+    excluded = mod.account_landed_cost(
+        ev, required_deferred, categories_deferred, expected_scope=scope,
+    )
+    assert not excluded["calculation_complete_not_physical_approval"]
+    assert excluded["payable_now_cents"] is None
+    assert excluded["errors"]
+
+    required_selected = {"robot:cliff_obstacle": 1, "room:amg8833": 1}
+    selected = mod.account_landed_cost(
+        ev, required_selected, categories_deferred, expected_scope=scope,
+    )
+    assert selected["errors"] == []
+    assert selected["calculation_complete_not_physical_approval"]
+    assert selected["payable_now_cents"] == 608
+
+
 def test_paid_delivered_inventory_and_in_flight_share_one_order_allocation():
     """One paid mux cannot cover both received and in-transit requirements."""
     ev = sample()

@@ -76,6 +76,8 @@ def test_secondary_gpio_contract(tmp_path, variant, standard):
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_9", "GPIO collision"),
             ("RGB_HEART_GPIO GPIO_NUM_9", "RGB_HEART_GPIO GPIO_NUM_41", "GPIO collision"),
             ("SD_CARD_CS_GPIO GPIO_NUM_21", "SD_CARD_CS_GPIO GPIO_NUM_8", "GPIO collision"),
+            ("AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42", "AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_2", "GPIO collision"),
+            ("AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_4", "AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_5", "GPIO collision"),
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_22", "reserved GPIO"),
             ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_46", "reserved GPIO"),
             ("BOOT_BUTTON_GPIO GPIO_NUM_0", "BOOT_BUTTON_GPIO GPIO_NUM_9", "GPIO collision"),

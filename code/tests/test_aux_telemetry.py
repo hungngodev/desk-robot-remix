@@ -621,3 +621,21 @@ def test_angle_acquisition_accepts_legacy_and_invalid_channel_diagnostics():
     del data["angles"]["age_ms"]
     with pytest.raises(ValueError, match="AS5600"):
         validate_aux(data, "robot-01")
+
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["boot_id", "jaw_age_ms", "jaw_valid", "belly_seq", "belly_age_ms", "belly_valid"],
+)
+def test_aux_rejects_explicit_null_force_metadata_while_keeping_legacy_omission(field):
+    """Explicit null optional force metadata fields must fail instead of slipping past None checks."""
+    payload = sample()
+    payload["force"][field] = None
+    with pytest.raises(ValueError, match="Invalid uncalibrated FSR sample"):
+        validate_aux(payload, "robot-01")
+
+    legacy = sample()
+    for optional in ("boot_id", "jaw_age_ms", "jaw_valid", "belly_seq", "belly_age_ms", "belly_valid"):
+        legacy["force"].pop(optional, None)
+    assert validate_aux(legacy, "robot-01")["force"]["adc"] == [1024, -55]

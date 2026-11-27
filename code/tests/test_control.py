@@ -2417,14 +2417,17 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         simulation_only=False, hold_seconds=3, robot_id="robot-01",
         grip_force_delta_raw=100, grip_force_limit_raw=500,
         pickup_floor_clearance_mm=0.25,
+        head_device_id="xiaozhi-01",
     )
     measured = tmp_path / "synthetic-grasp-calibration.json"
     measured.write_text(json.dumps(calibration))
     settings.robots[0].calibration = measured
+    settings.robots[0].device_id = "xiaozhi-01"
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     c, _ = make(settings)
     head = HardwareStatusHead("robot-01")
+    head.position = [100.0, 120.0]
     peer = HardwareStatusHead("robot-02")
     c.heads.update({"robot-01": head, "robot-02": peer})
     contact_pending = asyncio.Event()
@@ -2938,3 +2941,204 @@ async def test_local_fault_halt_survives_healthy_telemetry_until_explicit_recove
         assert all(command == "halt" for command in head.commands)
     finally:
         await coordinator.close()
+
+
+async def test_pickup_calibration_identity_and_whitespace_validation(settings, tmp_path):
+    """Hardware pickup rejects wrong/missing robot/head identity before granting permits."""
+    import json
+
+    from desk_robot.calibration import Calibration
+    from pydantic import ValidationError
+
+    base = json.loads(settings.robots[0].calibration.read_text())
+    for bad_field in ("robot_id", "head_device_id"):
+        with pytest.raises(ValidationError):
+            Calibration.model_validate({**base, bad_field: "   "})
+
+    settings.robots[0].device_id = "xiaozhi-01"
+    settings.voice_vision_tools_enabled = True
+    settings.robots[0].motion_enabled = True
+
+    def make_cal(path, **overrides):
+        data = {
+            **base,
+            "simulation_only": False,
+            "hold_seconds": 3,
+            "grip_force_delta_raw": 100,
+            "grip_force_limit_raw": 500,
+            "pickup_floor_clearance_mm": 0.25,
+        }
+        data.update(overrides)
+        path.write_text(json.dumps(data))
+        return path
+
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    c = Coordinator(settings, {"robot-01": head, "robot-02": HardwareStatusHead("robot-02")},
+                    SimulationVision())
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": []}),
+    )
+    try:
+        cases = [
+            (None, "xiaozhi-01", ValueError, "Calibration has no robot_id"),
+            ("robot-01", None, OperationError, "bound to this robot and head device"),
+            ("robot-02", "xiaozhi-01", ValueError, "Calibration robot_id does not match"),
+            ("robot-01", "xiaozhi-99", OperationError, "head device identity mismatched"),
+        ]
+        for idx, (cal_rid, cal_hid, exc_type, pattern) in enumerate(cases):
+            cal_path = make_cal(
+                tmp_path / f"cal-{idx}.json",
+                robot_id=cal_rid,
+                head_device_id=cal_hid,
+            )
+            settings.robots[0].calibration = cal_path
+            with pytest.raises(exc_type, match=pattern):
+                c.pickup("robot-01", "key")
+            assert "robot-01" not in c.permits
+            assert head.commands == []
+
+        # Simulation mode keeps legacy compatibility when identity is omitted,
+        # while still rejecting explicit identity mismatches.
+        settings.mode = "simulation"
+        sim_c, sim_head = make(settings)
+        try:
+            legacy_cal = make_cal(
+                tmp_path / "sim-legacy.json", simulation_only=True,
+                robot_id=None, head_device_id=None,
+            )
+            settings.robots[0].calibration = legacy_cal
+            await sim_c.operator_arm("robot-01")
+            job = sim_c.pickup("robot-01", "key")
+            assert job.robot_id == "robot-01"
+            await sim_c.stop("robot-01")
+
+            wrong_cal = make_cal(
+                tmp_path / "sim-wrong.json", simulation_only=True,
+                robot_id="robot-02", head_device_id="xiaozhi-01",
+            )
+            settings.robots[0].calibration = wrong_cal
+            with pytest.raises(ValueError, match="Calibration robot_id does not match"):
+                sim_c.pickup("robot-01", "key")
+        finally:
+            await sim_c.close()
+    finally:
+        await c.close()
+
+
+@pytest.mark.parametrize("motor_backend, target_pos", [
+    ("stepper_28byj48", [130.0, 120.0]),
+    ("stepper_28byj48", [100.0, 91.0]),
+    ("dc_pwm_guarded", [130.0, 120.0]),
+])
+async def test_hardware_guarded_pickup_rejects_lateral_or_rear_target_before_grip_or_lift(
+    settings, tmp_path, motor_backend, target_pos,
+):
+    """Guarded WROOM hardware profiles refuse lateral/rear pickup before grip/lift/drive."""
+    import json
+    import time
+
+    calibration = json.loads(settings.robots[0].calibration.read_text())
+    calibration.update(
+        simulation_only=False, hold_seconds=3,
+        grip_force_delta_raw=100, grip_force_limit_raw=500,
+        pickup_floor_clearance_mm=0.25,
+        robot_id="robot-01", head_device_id="xiaozhi-01",
+    )
+    measured = tmp_path / "guarded-pickup-cal.json"
+    measured.write_text(json.dumps(calibration))
+    settings.robots[0].calibration = measured
+    settings.robots[0].device_id = "xiaozhi-01"
+    settings.robots[0].motor_backend = motor_backend
+    settings.robots[0].motion_enabled = True
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+
+    c, _ = make(settings)
+    head = HardwareStatusHead("robot-01")
+    head.body_status["backend"] = motor_backend
+    head.position = list(target_pos)
+    orig_cmd = head.command
+
+    async def cmd(value):
+        if value == "arm":
+            head.body_status["armed"] = True
+        elif value in {"halt", "disarm"}:
+            head.body_status["armed"] = False
+        return await orig_cmd(value)
+
+    head.command = cmd
+    c.heads.update({"robot-01": head, "robot-02": HardwareStatusHead("robot-02")})
+    frames = []
+
+    async def wait_for_frame(robot_id, after, *, timeout_s):
+        frames[:] = [SimpleNamespace(
+            source="proactive", jpeg=await head.snapshot(), received_at=time.monotonic(),
+        )]
+        return True
+
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": frames}),
+        wait_for_proactive_frame=wait_for_frame,
+    )
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await c.tasks[job.id]
+        assert job.state == "failed"
+        assert "differential turn or reverse" in job.error
+        assert not any(
+            cmd.startswith(("grip ", "lift ", "drive ")) for cmd in head.commands
+        )
+    finally:
+        await c.close()
+
+
+async def test_hardware_battery_preflight_and_active_soc_thresholds(settings):
+    """Preflight enforces 3350 mV / 5% SoC; active health enforces 3300 mV / 3% SoC."""
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        for power in (
+            {"fuel_valid": True, "cell_mv": 3349, "soc_centi": 500},
+            {"fuel_valid": True, "cell_mv": 3350, "soc_centi": 499},
+        ):
+            head.body_status["power"] = power
+            with pytest.raises(
+                OperationError,
+                match=r"Hardware preflight: battery critical \(<3350 mV or <5% SoC\)",
+            ):
+                await c._hardware_preflight("robot-01")
+
+        head.body_status["power"] = {"fuel_valid": "bad", "cell_mv": 3900, "soc_centi": 8000}
+        with pytest.raises(OperationError):
+            await c._hardware_preflight("robot-01")
+
+        # Explicit fuel_valid=False with clean WROOM status defers to WROOM cutoff,
+        # while malformed/active depletion is still caught cleanly.
+        head.body_status["power"] = {"fuel_valid": False, "cell_mv": 3900, "soc_centi": 8000}
+        await c._hardware_preflight("robot-01")
+
+        head.body_status["armed"] = True
+        head.body_status["power"] = {"fuel_valid": True, "cell_mv": 3350, "soc_centi": 499}
+        assert await c._assert_armed_health("robot-01")
+        head.body_status["power"] = {"fuel_valid": True, "cell_mv": 3300, "soc_centi": 300}
+        assert await c._assert_armed_health("robot-01")
+
+        for power in (
+            {"fuel_valid": True, "cell_mv": 3350, "soc_centi": 299},
+            {"fuel_valid": True, "cell_mv": 3299, "soc_centi": 300},
+            {"fuel_valid": "bad", "cell_mv": 3900, "soc_centi": 8000},
+        ):
+            head.body_status["power"] = power
+            with pytest.raises(OperationError):
+                await c._assert_armed_health("robot-01")
+    finally:
+        await c.close()

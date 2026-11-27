@@ -391,7 +391,7 @@ def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
     # successful chunk reaching 250 ms must not publish a completed frame.
     # A valid scan is dated from its oldest possible pixel read.
     src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
-    step = "void thermal_step(" + src.split("void thermal_step(", 1)[1].split(
+    step = "void revoke_thermal_scan(" + src.split("void revoke_thermal_scan(", 1)[1].split(
         "void thermal_observation(", 1
     )[0]
     harness = r"""
@@ -399,6 +399,7 @@ def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 constexpr uint32_t kReportMs = 1000, kThermalScanMaxMs = 250;
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
 constexpr uint8_t kAmgAddress = 0x69;
@@ -423,6 +424,12 @@ bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels,
 }
 }
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
+struct AmgRecoveryStub {
+  void reset() {}
+} amg_recovery;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
 """ + step + r"""
 void run(uint32_t start, uint32_t last_start, uint32_t last_duration, bool valid) {
   amg_started = true;
@@ -833,6 +840,12 @@ struct SensorRecoverySchedule {
 };
 }
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
+struct AmgRecoveryStub {
+  void reset() {}
+} amg_recovery;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
 """ + step + r"""
 void run(uint32_t start) {
   clock_ms = scd_started_ms = start;
@@ -1098,6 +1111,9 @@ def test_thermal_report_retires_expired_grid_until_new_scan(tmp_path):
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
 constexpr uint32_t kThermalStaleMs = 3000;
 bool thermal_valid = true;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
 uint32_t thermal_sample_ms = UINT32_MAX - 1000;
 float thermal[64]{};
 struct Telemetry {

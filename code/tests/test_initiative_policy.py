@@ -211,3 +211,19 @@ def test_expired_speech_budget_does_not_override_quiet(interval, quiet):
         local_quiet=quiet == "manual", scheduled_quiet=quiet == "scheduled",
         human_active=lambda: quiet == "human",
     )
+
+
+def test_camera_scene_signature_preserves_spatial_relations_and_paraphrases():
+    """Spatial prepositions stay distinct while lexical synonyms/fillers deduplicate."""
+    from desk_robot.initiative_policy import camera_scene_signature
+
+    assert camera_scene_signature("cup on desk") != camera_scene_signature("cup near desk")
+    assert camera_scene_signature("walk to door") != camera_scene_signature("walk from door")
+    assert camera_scene_signature("cup on book") != camera_scene_signature("book on cup")
+    assert (
+        camera_scene_signature("a red mug is beside the laptop")
+        == camera_scene_signature("the red mug next to a laptop")
+        == camera_scene_signature("red mug close to laptop")
+        == camera_scene_signature("red mug adjacent to laptop")
+        == camera_scene_signature("red mug near laptop")
+    )

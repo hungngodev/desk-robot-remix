@@ -1003,7 +1003,9 @@ async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, mon
 def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge):
     one, two = conn("mac-01"), conn("mac-02")
     one.client_listen_mode = "realtime"
+    one.device_aec_measured = True
     two.client_listen_mode = "realtime"
+    two.device_aec_measured = True
     bridge.register(one)
     bridge.register(two)
     bridge.lease_ids = frozenset(["mac-01", "mac-02"])
@@ -1012,9 +1014,13 @@ def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge)
     assert not bridge.suppress_message(one, b"live clean microphone PCM")
     retired = conn("mac-01")
     retired.client_listen_mode = "realtime"
+    retired.device_aec_measured = True
     assert bridge.suppress_message(retired, b"retired socket audio")
     assert bridge.suppress_message(two, b"the other robot heard robot 1")
     assert bridge.suppress_message(one, '{"type":"listen","state":"start"}')
+    one.device_aec_measured = False  # realtime string without measured AEC: fail closed
+    assert bridge.suppress_message(one, b"unverified realtime PCM")
+    one.device_aec_measured = True
     one.client_listen_mode = "auto"  # no confirmed head AEC: fail closed
     assert bridge.suppress_message(one, b"echo-only unclean PCM")
 
@@ -1483,6 +1489,7 @@ async def test_group_human_barge_failed_head_stop_keeps_voice_and_aborts_mac(
     second = conn("mac-02")
     first.session_id = "group-head"
     first.client_listen_mode = "realtime"
+    first.device_aec_measured = True
     first.clearSpeakStatus = lambda: None
     bridge.register(first)
     bridge.register(second)
@@ -1577,7 +1584,9 @@ async def test_real_time_user_double_talk_aborts_peer_speech_with_immediate_dma_
     first.session_id = "private-session"
     first.clearSpeakStatus = lambda: None
     first.client_listen_mode = "realtime"
+    first.device_aec_measured = True
     second.client_listen_mode = "realtime"
+    second.device_aec_measured = True
     bridge.register(first)
     bridge.register(second)
     bridge.lease_ids = frozenset(["mac-01", "mac-02"])
@@ -1928,6 +1937,7 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
     bridge.register(connection)
     connection.conn_from_mqtt_gateway = False
     connection.client_listen_mode = "realtime"
+    connection.device_aec_measured = True
     connection.session_id = "session"
     connection.last_activity_time = 0
     connection.clearSpeakStatus = lambda: cleared.append(True)
@@ -4038,6 +4048,7 @@ async def test_group_barge_orders_stop_after_inflight_opus(bridge, monkeypatch):
     current = conn("mac-01")
     current.session_id = "group-head"
     current.client_listen_mode = "realtime"
+    current.device_aec_measured = True
     bridge.register(current)
     bridge.lease_ids = frozenset({current.device_id})
     bridge.lease_until = time.monotonic() + 15
@@ -4514,7 +4525,9 @@ async def test_lease_isolates_nonparticipant_heads_and_holds_until_stop_cleanup(
     )
     one, two, three = conn("mac-01"), conn("mac-02"), conn("mac-03")
     one.client_listen_mode = "realtime"
+    one.device_aec_measured = True
     three.client_listen_mode = "realtime"
+    three.device_aec_measured = True
     bridge.register(one)
     bridge.register(two)
     bridge.register(three)
@@ -4529,10 +4542,12 @@ async def test_lease_isolates_nonparticipant_heads_and_holds_until_stop_cleanup(
     assert not bridge.observe_idle_human_voice(three, True)
     assert not await bridge.interrupt_for_user_voice(three, True)
     assert not await bridge.interrupt_for_normal_voice(three, True)
-    # Expired deadline must still keep suppression in force while lease_stopping cleanup runs.
+    # Expired deadline must still keep suppression in force across ALL heads
+    # (including the active speaker) while lease_stopping cleanup awaits speaker_lock.
     bridge.lease_until = time.monotonic() - 1
     bridge.lease_stopping = True
-    assert bridge.muted("mac-02")
+    assert bridge.muted("mac-01") and bridge.muted("mac-02")
+    assert bridge.suppress_message(one, b"active speaker audio during stop")
     assert bridge.suppress_message(two, b"late audio during stop")
     assert bridge.suppress_message(three, b"third robot during stop")
     bridge.lease_ids = frozenset()
@@ -4559,3 +4574,24 @@ async def test_speech_routes_reject_non_object_json(bridge, endpoint, body):
     assert bridge.lease_ids == frozenset()
     assert bridge.lease_token is None
     assert bridge.interrupt_generation == {}
+
+
+async def test_realtime_mode_without_measured_aec_keeps_duplex_suppressed(bridge):
+    """listen_mode='realtime' alone must fail closed without AEC proof (868PQvC)."""
+    speaker = conn("mac-01")
+    speaker.client_listen_mode = "realtime"
+    speaker.session_id = "realtime-no-aec"
+    peer = conn("mac-02")
+    bridge.register(speaker)
+    bridge.register(peer)
+    bridge.lease_ids = frozenset(["mac-01", "mac-02"])
+    bridge.lease_until = time.monotonic() + 20
+    bridge.active_device_id = "mac-01"
+    assert not bridge.duplex_available(speaker)
+    assert bridge.suppress_message(speaker, b"unqualified realtime audio")
+    assert not await bridge.interrupt_for_user_voice(speaker, True)
+    assert not await bridge.interrupt_for_user_voice(speaker, True)
+    assert not bridge.lease_stopping
+    speaker.device_aec_measured = True
+    assert bridge.duplex_available(speaker)
+    assert not bridge.suppress_message(speaker, b"qualified realtime audio")

@@ -630,7 +630,7 @@ def render(plan: dict, body: str, head: str) -> str:
         "0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH",
         "Verify actual board address straps before power-up")
     row("AT42QT1010 OUT", f"WROOM GPIO{bus['body_gpio']['head_touch']}",
-        "3.3V active-HIGH capacitive input; external bias required on GPIO34 through GPIO39")
+        "3.3V active-HIGH push-pull CMOS output to GPIO34 input (no external pull resistor required per AT42QT1010 datasheet)")
     row("3.3V external pullup node + two NC bumper switches in series -> GND",
         f"WROOM GPIO{bus['body_gpio']['bumper_nc_series']}",
         "3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39")

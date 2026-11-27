@@ -88,27 +88,33 @@ _CAMERA_SCENE_FILLER = frozenset({
     "a", "an", "the", "i", "we", "my", "our", "there", "is", "are", "was",
     "were", "have", "has", "see", "saw", "seen", "notice", "noticed",
     "show", "shows", "showed", "appeared", "appears", "just", "now", "new",
-    "near", "beside", "next", "to", "by", "on", "at",
 })
-# Reordering these clauses could reverse the event or erase a safety detail.
+# Reordering these clauses or erasing spatial prepositions can change the
+# scene or reverse motion direction, while adjacency synonyms still match.
 _CAMERA_SCENE_ORDER_SENSITIVE = frozenset({
     "not", "no", "left", "right", "behind", "front", "under", "over",
     "inside", "outside", "before", "after", "moved", "moving", "approached",
     "leaving", "turned", "rotated", "vanished", "disappeared", "removed",
-    "picked", "dropped", "fell",
+    "picked", "dropped", "fell", "on", "in", "at", "by", "near", "beside",
+    "to", "from", "into", "onto", "toward", "towards", "away",
 })
 
 
 def camera_scene_signature(description: str) -> str:
-    """Group cautious lexical paraphrases, never claim shared spatial identity."""
+    """Group cautious lexical paraphrases without erasing spatial relations."""
     normalized = " ".join(description.casefold().split())
     if not normalized.isascii():
         return normalized
-    words = re.findall(r"[a-z0-9]+", normalized)
-    if any(word in _CAMERA_SCENE_ORDER_SENSITIVE for word in words):
-        return normalized
+    canonical = re.sub(
+        r"\b(?:beside|next\s+to|close\s+to|adjacent\s+to)\b", "near", normalized,
+    )
+    words = re.findall(r"[a-z0-9]+", canonical)
     content = [word for word in words if word not in _CAMERA_SCENE_FILLER]
-    return " ".join(sorted(content)) if len(content) >= 2 else normalized
+    if len(content) < 2:
+        return normalized
+    if any(word in _CAMERA_SCENE_ORDER_SENSITIVE for word in words):
+        return " ".join(content)
+    return " ".join(sorted(content))
 
 
 def event_identity(

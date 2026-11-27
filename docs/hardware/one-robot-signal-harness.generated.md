@@ -49,7 +49,7 @@ contact rating or wire gauge is approved by this signal allocation.
 | WROOM GPIO21 SDA + GPIO22 SCL | MPU6050 (0x68) + 0x70 + 0x71 mux inputs | 3.3V I2C; actual breakout pullups need checking | Source allocated |
 | 3.3V logic via appropriate pullups | Both TCA9548A active-LOW RESET inputs | Passive HIGH; no WROOM GPIO4 or other MCU RESET drive | Exact breakout and startup levels HOLD |
 | TCA9548A address straps | 0x70 ranges and 0x71 accessories | 0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH | Verify actual board address straps before power-up |
-| AT42QT1010 OUT | WROOM GPIO34 | 3.3V active-HIGH capacitive input; external bias required on GPIO34 through GPIO39 | Source allocated |
+| AT42QT1010 OUT | WROOM GPIO34 | 3.3V active-HIGH push-pull CMOS output to GPIO34 input (no external pull resistor required per AT42QT1010 datasheet) | Source allocated |
 | 3.3V external pullup node + two NC bumper switches in series -> GND | WROOM GPIO35 | 3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39 | Source allocated |
 | Optional reed switch to GND (with external 3.3V pullup) | MCP23017 GPB0 | 3.3V input; closes LOW to GND | Source polled; physically unqualified |
 | Optional PIR output | MCP23017 GPB1 | 3.3V input; active HIGH | Source polled; physically unqualified |

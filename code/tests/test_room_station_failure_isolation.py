@@ -30,6 +30,7 @@ def test_scd_failure_does_not_hide_healthy_room_sensors(tmp_path, fault):
 #include "sensor_recovery.h"
 #include "radar_sample_clock.h"
 #include "radar_data_frame_gate.h"
+#include "thermal_consent_gate.h"
 using std::isfinite;
 #define F(value) value
 #define ROOM_SOIL_FITTED 0
@@ -54,6 +55,7 @@ desk_robot_room::BmeCompletedSample bme_completed;
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
 desk_robot_room::RadarSampleClock radar_sample_clock;
 desk_robot_room::RadarTargetSample radar_completed;
+desk_robot_room::ThermalConsentGate thermal_consent;
 struct Telemetry {
   std::ostringstream output;
   void reset() { output.str(""); output.clear(); }
@@ -94,6 +96,7 @@ struct Watchdog {
   void completed_pass(int&) { ++passes; }
 } room_watchdog;
 void recover_sensors(uint32_t) {}
+void revoke_thermal_scan() {}
 void thermal_step(uint32_t) {}
 void soil_step() {}
 // A healthy completed conversion is supplied by the simulated BME driver.

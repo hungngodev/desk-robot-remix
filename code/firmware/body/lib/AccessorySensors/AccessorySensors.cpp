@@ -827,7 +827,11 @@ bool AccessorySensors::poll(std::uint32_t now_ms,
         reset_nfc_protocol(now_ms); // no optional bus work or stale scan response on dock failure
       }
       // Publish dock/GPIOA/GPB3 safety state and coast motors before haptic/NFC.
-      if (on_lane5_safety) on_lane5_safety(data_, now_ms, on_lane5_ctx);
+      if (on_lane5_safety) {
+        on_lane5_safety(data_, now_ms, on_lane5_ctx);
+      } else if (lane5_cb_) {
+        lane5_cb_(data_, now_ms, lane5_ctx_);
+      }
       if (bus_available()) {
 #if DESK_ROBOT_ENABLE_HAPTIC
         // Short, one-shot, touch-driven feedback only; dock monitor stays first.

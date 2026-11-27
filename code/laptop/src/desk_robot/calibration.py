@@ -64,6 +64,9 @@ class Calibration(BaseModel):
     # Confirm motor polarity on stands before setting measured=true.
     turn_sign: int = Field(default=1)
     forward_sign: int = Field(default=1)
+    # Recorded physical owner metadata, never an implicit motion permit.
+    robot_id: str | None = Field(default=None, strict=True, min_length=1, max_length=160)
+    head_device_id: str | None = Field(default=None, strict=True, min_length=1, max_length=160)
 
     @model_validator(mode="after")
     def geometry(self) -> Self:
@@ -93,6 +96,10 @@ class Calibration(BaseModel):
             raise ValueError("Gripper open and close cannot be identical")
         if self.turn_sign not in {-1, 1} or self.forward_sign not in {-1, 1}:
             raise ValueError("Motor polarity signs must be -1 or 1")
+        for field_name in ("robot_id", "head_device_id"):
+            value = getattr(self, field_name)
+            if value is not None and value.strip() != value:
+                raise ValueError(f"Calibration {field_name} must not have leading or trailing whitespace")
         if not self.within(self.grip_ground_mm):
             raise ValueError("Gripping point outside work area")
         self.matrix()  # reject degenerate or inaccurate point pairs immediately

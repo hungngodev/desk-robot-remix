@@ -581,13 +581,18 @@ def muted(device_id):
 
 
 def duplex_available(conn) -> bool:
-    """Only a real device AEC/realtime session may stream double-talk audio.
+    """Only a realtime session with confirmed device AEC may stream double-talk audio.
 
-    If actual head AEC is disabled or misconfigured, retain the old safe
-    suppression rather than creating endless self-triggered conversations.
-    A successful physical A2 trial is still required.
+    A head ``listen_mode`` string alone does not prove ESP-SR device AEC is
+    enabled and physically working (for example, Sense builds report
+    ``device_aec_measured=False`` in ``/voice-readiness`` before A2 acoustic
+    trials). Fail closed unless the connection explicitly carries positive AEC
+    proof alongside ``realtime`` mode.
     """
-    return getattr(conn, "client_listen_mode", "") == "realtime"
+    return (
+        getattr(conn, "client_listen_mode", "") == "realtime"
+        and getattr(conn, "device_aec_measured", False) is True
+    )
 
 
 def observe_idle_human_voice(conn, have_voice: bool) -> bool:
@@ -671,7 +676,8 @@ def suppress_message(conn, message):
         return False
     if isinstance(message, bytes):
         return not (
-            connections.get(conn.device_id) is conn
+            not lease_stopping
+            and connections.get(conn.device_id) is conn
             and conn.device_id == active_device_id
             and duplex_available(conn)
         )

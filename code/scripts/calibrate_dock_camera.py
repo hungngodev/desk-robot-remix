@@ -186,6 +186,7 @@ def fit_corners(
         # after assembly; absent values prohibit dock motor qualification.
         "mount_lateral_offset_mm": None,
         "mount_yaw_deg": None,
+        "mount_forward_offset_mm": None,
         "checkerboard_square_mm": square_mm,
         "checkerboard_views": len(views),
         "reprojection_rms_px": round(float(rms), 4),

@@ -41,10 +41,26 @@ MIXED_PROCEDURE_IDS = frozenset({
     61, 64, 66, 73, 75, 76, 93, 95,
 })
 REQUIRED_PROCEDURE_COMMAND_TOKENS = {
+    9: ("tests/test_complete_component_ownership.py",),
+    10: (
+        "firmware/head/tests/test_sense.py",
+        "firmware/head/tests/test_secondary_gpio_contract.py",
+        "tests/test_complete_component_ownership.py",
+    ),
+    11: ("tests/test_assembly_harness.py", "tests/test_complete_component_ownership.py"),
+    12: (
+        "firmware/head/tests/test_uart_transaction.py",
+        "firmware/head/tests/test_pose_wire_nul.py",
+    ),
+    13: ("tests/test_i2c_electrical_preflight.py", "tests/test_assembly_harness.py"),
+    14: ("tests/test_full_feature_plan.py", "tests/test_first_unit_owned_station.py"),
+    15: ("tests/test_vision_admission.py", "tests/test_multimodal_api.py"),
+    17: ("tests/test_power_preflight.py", "tests/test_dc_motor_watchdog_contract.py"),
     18: ("guarded_body_integration",),
     19: ("guarded_body_integration",),
     20: ("cliff_fault_policy", "guarded_body_integration"),
     21: ("cliff_fault_policy", "guarded_body_integration"),
+    22: ("tests/test_power_preflight.py", "tests/test_power_package_cost.py"),
     23: ("tests/test_integrated_1s_power_stack_contract.py",),
     24: ("tests/test_aec_delay_estimation.py", "tests/test_power_preflight.py"),
     59: ("tests/test_xiaozhi_tool_resilience.py", "tests/test_voice_memory_reuse.py"),

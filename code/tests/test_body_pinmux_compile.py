@@ -17,8 +17,7 @@ def compile_header(source, flags):
     # Header-only translation units intentionally leave some pin constants unused.
     return subprocess.run(
         [COMPILER, "-std=c++11", "-Wall", "-Wextra", "-Werror",
-         "-Wno-unused-const-variable",
-         "-x", "c++", "-fsyntax-only", *flags, "-"],
+         "-x", "c++", "-fsyntax-only", *flags, "-Wno-unused-const-variable", "-"],
         input=source.replace("#pragma once", ""),
         text=True, capture_output=True, check=False, timeout=30,
     )

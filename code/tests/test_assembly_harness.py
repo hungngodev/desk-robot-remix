@@ -483,3 +483,20 @@ def test_verify_contract_accepts_alternative_straps_and_unordered_accessories():
     lanes[3]["devices"][1]["address"] = 0x77
     lanes.reverse()
     harness.verify(plan, body, sense)
+
+
+def test_at42qt1010_gpio34_omits_external_pull_while_bumper_gpio35_retains_bias():
+    harness_md = (
+        ROOT / "docs/hardware/one-robot-signal-harness.generated.md"
+    ).read_text(encoding="utf-8")
+    at42_row = next(
+        line for line in harness_md.splitlines()
+        if line.startswith("| AT42QT1010 OUT | WROOM GPIO34 |")
+    )
+    bumper_row = next(
+        line for line in harness_md.splitlines()
+        if "WROOM GPIO35" in line and "bumper" in line
+    )
+    assert "external bias required on GPIO34 through GPIO39" not in at42_row
+    assert "no external pull resistor required per AT42QT1010 datasheet" in at42_row
+    assert "external bias required on GPIO34 through GPIO39" in bumper_row

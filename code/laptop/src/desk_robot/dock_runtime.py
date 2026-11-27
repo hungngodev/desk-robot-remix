@@ -75,6 +75,7 @@ def load_real_dock_calibration(
         head_device_id=data.get("head_device_id"),
         mount_lateral_offset_mm=data.get("mount_lateral_offset_mm"),
         mount_yaw_deg=data.get("mount_yaw_deg"),
+        mount_forward_offset_mm=data.get("mount_forward_offset_mm"),
     )
     target = data.get("target_distance_mm")
     if type(target) not in (float, int) or not 50 <= target <= 500 or not math.isfinite(target):
@@ -340,13 +341,19 @@ async def observe_actual_dock(
     # a centered dock approach. Preserve raw camera coordinates separately.
     assessed_pose = pose
     chassis_lateral = None
+    chassis_forward = None
     if pose is not None and calib.mount_lateral_offset_mm is not None:
         try:
-            chassis_lateral = calib.chassis_lateral_mm(pose)
-            assessed_pose = DockPose(
-                chassis_lateral, pose.y_mm, pose.z_mm,
-                pose.reprojection_error_px, pose.captured_at,
-            )
+            if calib.mount_forward_offset_mm is not None:
+                assessed_pose = calib.chassis_pose(pose)
+                chassis_lateral = assessed_pose.x_mm
+                chassis_forward = assessed_pose.z_mm
+            else:
+                chassis_lateral = calib.chassis_lateral_mm(pose)
+                assessed_pose = DockPose(
+                    chassis_lateral, pose.y_mm, pose.z_mm,
+                    pose.reprojection_error_px, pose.captured_at,
+                )
         except ValueError:
             return _hold(
                 robot.id, reason="Invalid measured camera to chassis transform",
@@ -367,6 +374,8 @@ async def observe_actual_dock(
                 "x_mm": pose.x_mm, "y_mm": pose.y_mm, "z_mm": pose.z_mm,
                 "reprojection_error_px": pose.reprojection_error_px,
                 "chassis_lateral_mm": chassis_lateral,
+                **({"chassis_forward_mm": chassis_forward}
+                   if chassis_forward is not None else {}),
             } if pose is not None else None
         ),
         "motor_authorized": False,

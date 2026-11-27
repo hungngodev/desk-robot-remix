@@ -15,7 +15,8 @@ SPEC.loader.exec_module(RUNNER)
 
 def _assert_compiles_and_runs(calls, sources, build):
     assert sources
-    expected_calls = sum(12 if s.name == "soil_profile_tests.cpp" else 2 for s in sources)
+    multi = {"soil_profile_tests.cpp", "thermal_consent_tests.cpp"}
+    expected_calls = sum(12 if s.name in multi else 2 for s in sources)
     assert len(calls) == expected_calls
     required_flags = {
         "-Wall", "-Wextra", "-Wconversion", "-Werror",
@@ -33,6 +34,15 @@ def _assert_compiles_and_runs(calls, sources, build):
                 ("-std=c++17", "-DEXPECT_SOIL_ENABLED=0"),
                 ("-std=c++17", "-DEXPECT_SOIL_ENABLED=0", "-DROOM_SOIL_FITTED=0"),
                 ("-std=c++17", "-DEXPECT_SOIL_ENABLED=1", "-DROOM_SOIL_FITTED=1"),
+            ]
+        elif source.name == "thermal_consent_tests.cpp":
+            profiles = [
+                ("-std=c++11",),
+                ("-std=c++11", "-DROOM_AMG_FITTED=0"),
+                ("-std=c++11", "-DROOM_AMG_FITTED=1"),
+                ("-std=c++17",),
+                ("-std=c++17", "-DROOM_AMG_FITTED=0"),
+                ("-std=c++17", "-DROOM_AMG_FITTED=1"),
             ]
         executable = str(build / source.stem)
         for profile in profiles:

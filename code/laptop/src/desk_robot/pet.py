@@ -20,7 +20,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Awaitable, Callable, Literal, Mapping, Protocol, TypedDict
+from typing import Any, Awaitable, Callable, Coroutine, Literal, Mapping, Protocol, TypedDict
 
 from .aux import NoseDialGate, _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
@@ -70,6 +70,7 @@ from .vision import OllamaScene, SceneChange, VisualChangeGate
 _PET_SPEECH_ABORT_TIMEOUT_S = 2.5
 _PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
 _PROACTIVE_TOOL_TIMEOUT_S = 1.5
+_MAX_RETIRED_BOOT_IDS = 128
 # Cosmetic OLED delivery and retry budgets are distinct from speech cooldowns.
 _PERSON_FACE_CUE_COOLDOWN_S = 10.0
 _PERSON_FACE_ATTEMPT_INTERVAL_S = 2.0
@@ -192,6 +193,22 @@ class PeerShareReceipt(TypedDict):
     text_only: Literal[True]
 
 
+def _admit_boot_epoch(
+    boot_id: int, current_boot_id: int | None, retired_boot_ids: set[int],
+    *, limit: int = _MAX_RETIRED_BOOT_IDS,
+) -> tuple[bool, bool]:
+    """Fail closed against replayed or over-capacity retired WROOM boot IDs."""
+    if boot_id in retired_boot_ids:
+        return False, False
+    if current_boot_id == boot_id:
+        return True, False
+    if current_boot_id is not None:
+        if len(retired_boot_ids) >= limit:
+            return False, False
+        retired_boot_ids.add(current_boot_id)
+    return True, True
+
+
 @dataclass
 class PetState:
     enabled: bool = False
@@ -219,6 +236,7 @@ class PetState:
     last_person_face_attempt_at: float = -math.inf  # bounded offline retries
     last_model_face_cue_at: float = -math.inf  # successful model mood ACK cooldown
     last_model_face_attempt_at: float = -math.inf  # bounded offline retries
+    face_cue_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_hub_generation: int | None = None  # rejects cross-reconnect scene inference
     last_error: str | None = None
     last_touch_count: int | None = None
@@ -454,17 +472,26 @@ class PetController:
         cb = getattr(self, "on_dock_inhibit_changed", None)
         if not callable(cb):
             return
+
+        def record_error(exc: BaseException) -> None:
+            self.states[robot_id].last_error = (
+                f"Dock inhibit hook: {type(exc).__name__}: {str(exc)[:80]}"
+            )
+
+        def on_done(done: asyncio.Task[object]) -> None:
+            if done.cancelled():
+                return
+            exc = done.exception()
+            if exc is not None:
+                record_error(exc)
+
         try:
             outcome = cb(robot_id, inhibited)
             if inspect.isawaitable(outcome):
                 task = asyncio.create_task(outcome)
-                task.add_done_callback(
-                    lambda done: None if done.cancelled() else done.exception()
-                )
+                task.add_done_callback(on_done)
         except Exception as exc:
-            self.states[robot_id].last_error = (
-                f"Dock inhibit hook: {type(exc).__name__}: {str(exc)[:80]}"
-            )
+            record_error(exc)
 
     async def _trigger_low_battery_dock(
         self, robot_id: str, initial_low: bool, *, generation: int,
@@ -561,6 +588,7 @@ class PetController:
             or (state.touch_task is not None and not state.touch_task.done())
             or (state.aux_task is not None and not state.aux_task.done())
             or (state.aux_read_task is not None and not state.aux_read_task.done())
+            or (state.face_cue_task is not None and not state.face_cue_task.done())
         ):
             raise RuntimeError("Previous pet task still shutting down")
         state.generation += 1
@@ -664,7 +692,7 @@ class PetController:
         self._clear_deferred_speech(state)
         tasks = [
             t for t in (state.task, state.touch_task, state.aux_task,
-                        state.aux_read_task) if t is not None
+                        state.aux_read_task, state.face_cue_task) if t is not None
         ]
         for task in tasks:
             # Concurrent pause/close callers share the first cancellation.
@@ -684,7 +712,7 @@ class PetController:
                     # second observer before the old one actually exits.
                     raise TimeoutError("Pet observer cancellation unconfirmed")
         finally:
-            for attr in ("task", "touch_task", "aux_task", "aux_read_task"):
+            for attr in ("task", "touch_task", "aux_task", "aux_read_task", "face_cue_task"):
                 task = getattr(state, attr)
                 if task is not None and task.done():
                     setattr(state, attr, None)
@@ -706,6 +734,7 @@ class PetController:
         state.quiet = quiet
         if quiet:
             self._clear_deferred_speech(state)
+            self._cancel_face_cue(state)
             await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
@@ -718,6 +747,7 @@ class PetController:
         """
         state = self.states[robot_id]  # Unknown identity fails explicitly.
         self._clear_deferred_speech(state)
+        self._cancel_face_cue(state)
         self._group_last_spoken = time.monotonic()
         # Priority inversion would let an old 45-second background VLM call
         # block a human's direct look request. Abort the candidate analysis.
@@ -1212,6 +1242,58 @@ class PetController:
                 waiter.cancel()
             state.deferred_speech_task = None
 
+    def _cancel_face_cue(self, state: PetState) -> None:
+        """Cancel any owned cosmetic OLED cue task without touching speech."""
+        task = getattr(state, "face_cue_task", None)
+        if task is not None and task is not asyncio.current_task():
+            if not task.done() and not task.cancelling():
+                task.cancel()
+
+    def _schedule_face_cue(
+        self, robot_id: str, make_coro: Callable[[], Coroutine[Any, Any, None]],
+    ) -> asyncio.Task[None] | None:
+        """Run optional display I/O in an owned per-robot task off the speech path."""
+        state = self.states[robot_id]
+        if self._closed or not state.enabled:
+            return None
+        self._cancel_face_cue(state)
+        task = asyncio.create_task(make_coro())
+        state.face_cue_task = task
+
+        def cleanup(done: asyncio.Task[None]) -> None:
+            if state.face_cue_task is done:
+                state.face_cue_task = None
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(cleanup)
+        return task
+
+    async def _notify_touch_safety_stop(self, robot_id: str, generation: int) -> None:
+        """Revoke stale Mac motion permits/jobs after a between-polls WROOM touch."""
+        state = self.states[robot_id]
+        if not (state.enabled and state.generation == generation and self.on_local_fault is not None):
+            return
+        owner = getattr(self.on_local_fault, "__self__", None)
+        has_auth = getattr(owner, "has_motion_authority", None)
+        if callable(has_auth):
+            if not has_auth(robot_id):
+                return
+        else:
+            jobs = getattr(self, "coordinator_jobs", None)
+            if isinstance(jobs, Mapping) and not any(
+                getattr(job, "robot_id", None) == robot_id
+                and getattr(job, "state", None) in {"queued", "running"}
+                for job in jobs.values()
+            ):
+                return
+        try:
+            await self.on_local_fault(robot_id)
+        except Exception as exc:
+            state.last_error = (
+                f"Local touch safety stop: {type(exc).__name__}: {str(exc)[:80]}"
+            )
+
     def _notify_sensor(
         self, robot_id: str, kind: str, *, received_at: float | None = None,
         detail: str | None = None,
@@ -1368,13 +1450,14 @@ class PetController:
         # retired epoch.
         boot_id = data["force"].get("boot_id") or data["proximity"].get("boot_id")
         if boot_id is not None:
-            if boot_id in state.retired_aux_boot_ids:
+            admitted, boot_changed = _admit_boot_epoch(
+                boot_id, state.last_aux_boot_id, state.retired_aux_boot_ids,
+            )
+            if not admitted:
                 state.dock_guard.invalidate()
                 state.low_fuel_streak = state.recovered_fuel_streak = 0
                 return
-            if boot_id != state.last_aux_boot_id:
-                if state.last_aux_boot_id is not None:
-                    state.retired_aux_boot_ids.add(state.last_aux_boot_id)
+            if boot_changed:
                 state.last_aux_boot_id = boot_id
                 state.last_gesture_events = None
                 state.last_paw_seq = None
@@ -2126,10 +2209,12 @@ class PetController:
                     or len(set(reported_boot_ids)) != 1):
                 return  # contradictory or invalid WROOM source identity
             boot_id = reported_boot_ids[0]
-            if boot_id in state.retired_extra_boot_ids:
+            admitted, boot_changed = _admit_boot_epoch(
+                boot_id, state.last_extra_boot_id, state.retired_extra_boot_ids,
+            )
+            if not admitted:
                 return
-            if state.last_extra_boot_id not in (None, boot_id):
-                state.retired_extra_boot_ids.add(state.last_extra_boot_id)
+            if state.last_extra_boot_id is not None and boot_changed:
                 state.last_extra_events = None
                 state.last_extra_mask = None
                 state.last_cap_events = None
@@ -2314,10 +2399,12 @@ class PetController:
                     or len(set(reported_boot_ids)) != 1):
                 return  # contradictory or invalid WROOM source identity
             boot_id = reported_boot_ids[0]
-            if boot_id in state.retired_touch_boot_ids:
+            admitted, boot_changed = _admit_boot_epoch(
+                boot_id, state.last_touch_boot_id, state.retired_touch_boot_ids,
+            )
+            if not admitted:
                 return
-            if state.last_touch_boot_id not in (None, boot_id):
-                state.retired_touch_boot_ids.add(state.last_touch_boot_id)
+            if state.last_touch_boot_id is not None and boot_changed:
                 state.last_touch_count = None
                 state.last_touch_events = None
             state.last_touch_boot_id = boot_id
@@ -2364,6 +2451,8 @@ class PetController:
                     return  # an older same-count report must not rewind gestures
             state.last_touch_count = count
             state.last_touch_events = counters
+            if raw_delta > 0 or any(deltas[key] > 0 for key in keys):
+                await self._notify_touch_safety_stop(robot_id, generation)
             if raw_delta > 20 or any(
                 delta > 20 for delta in deltas.values()
             ):
@@ -2389,6 +2478,8 @@ class PetController:
             state.last_touch_events = None
             return
 
+        if raw_delta > 0:
+            await self._notify_touch_safety_stop(robot_id, generation)
         # Compatibility for a head flashed before typed touch counters existed.
         if 0 < raw_delta <= 20:
             await self._remember_touch(
@@ -2712,16 +2803,19 @@ class PetController:
                                 or not self._camera_generation_current(robot_id, hub_generation)):
                             state.stale_camera_events += 1
                             continue
-                        await self._cue_person_face(
-                            robot_id, change, generation, received,
-                            preemption_epoch,
-                            camera_consent_generation=camera_consent_generation,
-                            camera_generation=hub_generation,
+                        self._schedule_face_cue(
+                            robot_id,
+                            lambda rid=robot_id, ch=change, gen=generation, rec=received,
+                            pe=preemption_epoch, ccg=camera_consent_generation,
+                            cg=hub_generation: self._cue_person_face(
+                                rid, ch, gen, rec, pe,
+                                camera_consent_generation=ccg,
+                                camera_generation=cg,
+                            ),
                         )
-                        # The cosmetic HTTP request may take a full second.
                         # A newer human turn, disabled camera consent or a
-                        # replaced observation generation must win before
-                        # even a passive event reaches the speech scheduler.
+                        # replaced observation generation still blocks speech
+                        # scheduling without stalling on optional display IO.
                         if (not state.enabled or state.generation != generation
                                 or self._closed or not current_camera_grant()
                                 or self._vision_preemption_epoch != preemption_epoch
@@ -4037,12 +4131,25 @@ class PetController:
                     state.last_initiative_suppression = "event_expired_during_reasoning"
                     return
             # An explicit model-selected OLED cue is permitted even when the
-            # natural speech decision is SILENCE. No sensor deterministically
-            # maps to a mood, and stale/foreign turns cannot touch the head.
-            if choice["action"] in {"speak", "silence"}:
+            # natural speech decision is SILENCE. When speaking, dispatch display
+            # I/O on the per-robot background task so it cannot delay TTS.
+            mood = choice.get("mood", "none")
+            if choice["action"] == "speak":
+                schedule_face = getattr(self, "_schedule_face_cue", None)
+                if callable(schedule_face):
+                    schedule_face(
+                        robot_id,
+                        lambda rid=robot_id, m=mood, perm=model_context_permitted: (
+                            self._cue_decided_face(rid, m, perm)
+                        ),
+                    )
+                else:
+                    await self._cue_decided_face(
+                        robot_id, mood, model_context_permitted,
+                    )
+            elif choice["action"] == "silence":
                 await self._cue_decided_face(
-                    robot_id, choice.get("mood", "none"),
-                    model_context_permitted,
+                    robot_id, mood, model_context_permitted,
                 )
             # A silent decision is evidence of deliberate restraint only if
             # its context survived both model inference and optional OLED IO.
@@ -4195,26 +4302,8 @@ class PetController:
                     private_memory_failure_reason()
                 )
                 return
-            # A social turn is NOT five independent agents speaking at once.
-            # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
-            # each pet's own persona, two bounded turns and per-pet memory.
-            # The other pet only *hears* this firsthand source event.
-            if social_peer_id is not None:
-                await self._speak_social(
-                    robot_id, change, generation,
-                    offered_at=offered_at, social_peer_id=social_peer_id,
-                    social_peer_generation=social_peer_generation,
-                    camera_derived=camera_derived,
-                    camera_consent_generation=camera_grant,
-                    camera_generation=camera_generation,
-                    newer_human_turn=newer_human_turn,
-                )
-                return
-
-            def model_context_permitted() -> bool:
-                # The decision may outlive a live context or private memory
-                # opt in. Never submit its already composed private prompt to
-                # another model call after revocation, even for a touch event.
+            def speech_context_permitted() -> bool:
+                """Shared authorization gate across model inference and TTS."""
                 now = time.monotonic()
                 return (
                     not self._closed and self.voice_monitor_ready
@@ -4230,13 +4319,35 @@ class PetController:
                     and now - offered_at <= self.max_observation_age
                 )
 
-            if not model_context_permitted():
+            if not speech_context_permitted():
                 state.suppressed += 1
                 state.last_initiative_suppression = "model_context_superseded"
                 return
+            # A social turn is NOT five independent agents speaking at once.
+            # When the active chat supports explicit proactive initiative
+            # decisions, check whether to speak at all before inviting a peer.
+            if social_peer_id is not None:
+                if callable(getattr(self.conversation.chat, "proactive_decision", None)):
+                    social_choice = await self._generate_proactive_line(
+                        robot_id, change, context, offered_at=offered_at,
+                        model_context_permitted=speech_context_permitted,
+                    )
+                    if social_choice is None:
+                        return
+                await self._speak_social(
+                    robot_id, change, generation,
+                    offered_at=offered_at, social_peer_id=social_peer_id,
+                    social_peer_generation=social_peer_generation,
+                    camera_derived=camera_derived,
+                    camera_consent_generation=camera_grant,
+                    camera_generation=camera_generation,
+                    newer_human_turn=newer_human_turn,
+                )
+                return
+
             text = await self._generate_proactive_line(
                 robot_id, change, context, offered_at=offered_at,
-                model_context_permitted=model_context_permitted,
+                model_context_permitted=speech_context_permitted,
             )
             if text is None:
                 return
@@ -4331,28 +4442,8 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "room_context_consent_revoked"
                 return
-            def audio_still_permitted() -> bool:
-                # Kokoro synthesis can outlive the authenticated VAD monitor.
-                # A lost listener cannot certify that a human has not barged.
-                return (
-                    not self._closed and self.voice_monitor_ready
-                    and state.enabled and not self.is_quiet(robot_id)
-                    and offered_at >= state.quiet_changed_at
-                    and state.generation == generation
-                    and private_memory_current()
-                    and (not private_memory_allowed
-                         or self.settings.voice_memory_tools_enabled)
-                    and media_context_current()
-                    and not self._human_active_in_fleet(time.monotonic())
-                    and not newer_human_turn()
-                    # Every optional observation has a bounded lifetime,
-                    # including real touch/handling and camera evidence.
-                    # Slow TTS or decoder queues cannot revive old events.
-                    and time.monotonic() - offered_at <= self.max_observation_age
-                )
-
             transmitted = await self.conversation.say_proactive(
-                robot, text, permission_check=audio_still_permitted,
+                robot, text, permission_check=speech_context_permitted,
                 deliberate=(not camera_derived
                             and change.kind in _DIRECT_INTERACTION_KINDS),
             )

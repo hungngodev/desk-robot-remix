@@ -1739,3 +1739,116 @@ def test_a12_receipt_required_in_both_release_scopes(first_robot):
     assert ("system", gate, signed) in list(release.required_receipts(
         evidence, first_robot=first_robot,
     ))
+
+
+def test_three_commit_release_receipt_flow_a_to_b_to_c():
+    """Accept A->B->C when source unchanged A..C and record at B stays intact at C."""
+    commit_a = "1" * 40
+    commit_b = "2" * 40
+    commit_c = "3" * 40
+    tree_a = "a" * 40
+    tree_b = "b" * 40
+    tree_c = "c" * 40
+    evidence = {
+        "parts": {
+            role: {g: receipt("part:" + role, g) for g in release.PART_GATES}
+            for role in ("imu",)
+        },
+        "room_pod": {},
+        "system": {g: receipt("system", g) for g in release.SYSTEM_GATES},
+        "supplemental_decisions": {
+            ident: {
+                "disposition": "rejected_in_favor_of_qualified_alternative",
+                "decision_receipt": receipt("supplemental:" + ident, "decision_receipt"),
+                "alternative_or_parent_receipt": receipt(
+                    "supplemental:" + ident, "alternative_or_parent_receipt",
+                ),
+            }
+            for ident in release.SUPPLEMENTAL_DECISIONS
+        },
+    }
+    records = []
+    for _, _, row in release.required_receipts(evidence):
+        row["source_sha"] = commit_a
+        row["evidence_url"] = (
+            f"https://github.com/hungngodev/desk-robot-remix/blob/{commit_b}/"
+            "docs/records/release-evidence.json"
+        )
+        records.append({
+            "record_id": row["record_id"],
+            "scope": row["scope"],
+            "gate": row["gate"],
+            "source_sha": commit_a,
+            "result": "pass",
+            "reviewer": row["reviewer"],
+            "tested_on": row["tested_on"],
+            "device_revision": row["device_revision"],
+            "measurement": row["measurement"],
+            "evidence_url": row["evidence_url"],
+        })
+    raw = record_bytes(records)
+    digest = hashlib.sha256(raw).hexdigest()
+    blob_b = hashlib.sha1(f"blob {len(raw)}\0".encode("ascii") + raw, usedforsecurity=False).hexdigest()
+    for _, _, row in release.required_receipts(evidence):
+        row["artifact_sha256"] = digest
+
+    def make_lookup(*, blob_c=None, missing_in_c=False, source_changed=False):
+        eff_c = blob_b if blob_c is None else blob_c
+
+        def _lk(url):
+            if url.endswith(f"/git/commits/{commit_a}"):
+                return {"sha": commit_a, "tree": {"sha": tree_a}}
+            if url.endswith(f"/git/commits/{commit_b}"):
+                return {"sha": commit_b, "tree": {"sha": tree_b}}
+            if url.endswith(f"/git/commits/{commit_c}"):
+                return {"sha": commit_c, "tree": {"sha": tree_c}}
+            if url.endswith(f"/git/trees/{tree_b}?recursive=1"):
+                return {
+                    "sha": tree_b, "truncated": False,
+                    "tree": [{"path": "docs/records/release-evidence.json",
+                              "mode": "100644", "type": "blob", "sha": blob_b}],
+                }
+            if url.endswith(f"/git/trees/{tree_c}?recursive=1"):
+                entries = [] if missing_in_c else [{
+                    "path": "docs/records/release-evidence.json",
+                    "mode": "100644", "type": "blob", "sha": eff_c,
+                }]
+                return {"sha": tree_c, "truncated": False, "tree": entries}
+            if url.endswith(f"/compare/{commit_a}...{commit_c}"):
+                changed = "code/laptop/src/desk_robot/controller.py" if source_changed else "docs/records/release-evidence.json"
+                return {
+                    "status": "ahead", "ahead_by": 2, "total_commits": 2,
+                    "commits": [{"sha": commit_b}, {"sha": commit_c}],
+                    "merge_base_commit": {"sha": commit_a},
+                    "files": [{"status": "modified", "filename": changed}],
+                }
+            if url.endswith(f"/compare/{commit_b}...{commit_c}"):
+                return {
+                    "status": "ahead", "ahead_by": 1, "total_commits": 1,
+                    "commits": [{"sha": commit_c}],
+                    "merge_base_commit": {"sha": commit_b},
+                    "files": [{"status": "modified", "filename": "docs/reviews/100_page_procedure_trace.json"}],
+                }
+            if url.endswith("/issues/comments/42"):
+                return {
+                    "html_url": REVIEW_URL,
+                    "user": {"login": "real_review_account", "type": "User"},
+                    "author_association": "OWNER",
+                    "body": "\n".join(
+                        release.procurement_review_statement({
+                            **row, "artifact_sha256": digest,
+                        }) for row in records
+                    ),
+                }
+            assert url.endswith("/contents/docs/records/release-evidence.json?ref=" + commit_b)
+            return {
+                "type": "file", "size": len(raw), "encoding": "base64",
+                "content": base64.b64encode(raw).decode("ascii"),
+            }
+
+        return _lk
+
+    assert release.audit_release(evidence, commit_c, make_lookup()) == []
+    assert release.audit_release(evidence, commit_c, make_lookup(blob_c="0" * 40))
+    assert release.audit_release(evidence, commit_c, make_lookup(missing_in_c=True))
+    assert release.audit_release(evidence, commit_c, make_lookup(source_changed=True))

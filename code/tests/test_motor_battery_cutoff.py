@@ -58,3 +58,30 @@ def test_claimed_valid_fuel_rejects_malformed_measurements(field, value):
 @pytest.mark.parametrize("cell_mv,soc_centi", [(2500, 0), (4500, 10000), (3800, 1800)])
 def test_fuel_measurement_inclusive_bounds(cell_mv, soc_centi):
     assert is_valid_fuel_measurement(cell_mv, soc_centi)
+
+
+
+async def test_hardware_battery_preflight_and_running_boundary_cases(settings):
+    """Verify Mac battery preflight (<3350 mV or <5% SoC) and active-health cutoffs."""
+    from desk_robot.controller import Coordinator, OperationError
+    from desk_robot.simulator import SimulationVision
+    from test_control import HardwareStatusHead
+
+    settings.mode = "hardware"
+    settings.robots[0].motor_backend = "stepper_28byj48"
+    head = HardwareStatusHead("robot-01")
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        head.body_status["power"] = {"fuel_valid": True, "cell_mv": 3350, "soc_centi": 499}
+        with pytest.raises(OperationError, match=r"<3350 mV or <5% SoC"):
+            await c._hardware_preflight("robot-01")
+        head.body_status["armed"] = True
+        assert await c._assert_armed_health("robot-01")
+        head.body_status["power"] = {"fuel_valid": True, "cell_mv": 3350, "soc_centi": 299}
+        with pytest.raises(OperationError, match="battery depleted"):
+            await c._assert_armed_health("robot-01")
+        head.body_status["power"] = {"fuel_valid": "bad", "cell_mv": 3900, "soc_centi": 9000}
+        with pytest.raises(OperationError):
+            await c._assert_armed_health("robot-01")
+    finally:
+        await c.close()

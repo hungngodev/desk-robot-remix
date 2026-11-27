@@ -995,7 +995,7 @@ async def test_hardware_navigate_rejects_shifted_start_or_heading_before_any_dri
 async def test_hardware_navigate_halts_on_mid_route_odometry_divergence(
     settings, tmp_path, failure_mode,
 ):
-    """Missing turn or unachieved step halts before next pulse and invalidates spatial anchor."""
+    """Missing turn (simulation) or unachieved forward step (hardware) halts on divergence."""
     from desk_robot.spatial_frames import PlanarTransform
 
     if failure_mode == "failed_turn":
@@ -1006,6 +1006,11 @@ async def test_hardware_navigate_halts_on_mid_route_odometry_divergence(
         goal = (5, 2)  # Pulse 1 reaches (3,2), pulse 2 stalls at (3,2), pre-pulse 3 halts on (3,2) != (4,2).
     map_to_odom = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
     rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, map_to_odom)
+    if failure_mode == "failed_turn":
+        # Guarded WROOM hardware profiles refuse differential turns before motion;
+        # exercise mid-route turn divergence under localized simulation mode.
+        rt.settings.mode = "simulation"
+        rt.coordinator.settings.mode = "simulation"
     try:
         await rt.coordinator.operator_arm("robot-01")
         job = rt.coordinator.navigate("robot-01", goal=goal)
@@ -1623,4 +1628,51 @@ async def test_spatial_detector_distinguishes_child_and_owner_cancellation(
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("motor_backend", ["stepper_28byj48", "dc_pwm_guarded"])
+async def test_hardware_guarded_navigate_refuses_turn_route_pre_drive(
+    settings, tmp_path, motor_backend,
+):
+    """Guarded hardware profiles refuse routes requiring differential turns pre-drive."""
+    from desk_robot.controller import OperationError
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    orig_status = head.status
+
+    async def status_with_backend():
+        result = await orig_status()
+        result["backend"] = motor_backend
+        return result
+
+    head.status = status_with_backend
+    rt = await _setup_hardware_pose_runtime(
+        settings, tmp_path, head, PlanarTransform("map", "odom", 0.0, 0.0, 0.0),
+    )
+    settings.robots[0].motor_backend = motor_backend
+    try:
+        with pytest.raises(
+            OperationError, match="guarded WROOM profile prohibits unqualified differential turn",
+        ):
+            rt.coordinator.navigate(
+                "robot-01", start=(2, 2), heading=0, goal=(3, 3),
+            )
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+
+        with pytest.raises(
+            OperationError, match="guarded WROOM profile prohibits unqualified differential turn",
+        ):
+            rt.coordinator.navigate(
+                "robot-01", start=(2, 2), heading=0, goal=(3, 2), goal_heading=1,
+            )
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate(
+            "robot-01", start=(2, 2), heading=0, goal=(3, 2), goal_heading=0,
+        )
+        await rt.coordinator.tasks[job.id]
+        assert job.state == "succeeded", job.error
+    finally:
         await rt.close()

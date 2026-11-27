@@ -21,7 +21,6 @@ import subprocess
 from datetime import date
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
 
 import verify_playbook_receipts
 from procurement_release import (
@@ -599,8 +598,17 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
     if not _completed_trial_date(receipt.get("tested_on")) or type(url) is not str:
         return False
     try:
-        if not urlsplit(url).path.endswith(".json"):
+        record_path = verify_playbook_receipts._canonical_record_path(url)
+        match = (
+            re.fullmatch(
+                rf"/{REPO}/blob/([0-9a-f]{{40}})/docs/records/(.+)", record_path,
+            )
+            if record_path is not None else None
+        )
+        if (match is None or not match[2].lower().endswith(".json")
+                or any(part in ("", ".", "..") for part in match[2].split("/"))):
             return False
+        record_sha, suffix = match[1], match[2]
     except ValueError:
         return False
     response = {}
@@ -610,7 +618,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
         response["file"] = data
         return data
 
-    if not verified_raw_record(url, sha, capture):
+    if not verified_raw_record(url, record_sha, capture):
         return False
     file = response.get("file")
     if (not isinstance(file, dict)
@@ -622,16 +630,24 @@ def verified_scoped_record(receipt: dict, sha: str, lookup, *,
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
-        if require_git_blob:
-            # Git object identity binds the exact decoded bytes to the regular tree entry.
-            blob_header = f"blob {len(raw)}\0".encode("ascii")
-            blob_sha = hashlib.sha1(blob_header + raw, usedforsecurity=False).hexdigest()
-            if not verified_regular_record_path(url, sha, lookup, expected_blob_sha=blob_sha):
-                return False
         source_revision = receipt.get("source_sha")
         digest = receipt.get("artifact_sha256")
         if (require_git_blob or digest is not None) and not evidence_digest_matches(raw, digest):
             return False
+        if require_git_blob:
+            # Git object identity binds the exact decoded bytes to the regular tree entry.
+            blob_header = f"blob {len(raw)}\0".encode("ascii")
+            blob_sha = hashlib.sha1(blob_header + raw, usedforsecurity=False).hexdigest()
+            if not verified_regular_record_path(url, record_sha, lookup, expected_blob_sha=blob_sha):
+                return False
+            if record_sha != sha:
+                if (not evidence_digest_matches(raw, digest)
+                        or not source_unchanged_since_test(record_sha, sha, lookup)
+                        or not verified_regular_record_path(
+                            f"https://github.com/{REPO}/blob/{sha}/docs/records/{suffix}",
+                            sha, lookup, expected_blob_sha=blob_sha,
+                        )):
+                    return False
         if source_revision != sha and (
             not evidence_digest_matches(raw, digest)
             or not source_unchanged_since_test(source_revision, sha, lookup)

@@ -52,6 +52,9 @@ class DockCameraCalibration:
     # Recorded builder provenance, not cryptographic camera attestation.
     robot_id: str | None = None
     head_device_id: str | None = None
+    # Signed base_link +X position (mm) of camera optical center relative to the
+    # chassis dock-stop origin (+ ahead of origin, - recessed behind front edge).
+    mount_forward_offset_mm: float | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):
@@ -117,6 +120,11 @@ class DockCameraCalibration:
                     or not -100 <= self.mount_lateral_offset_mm <= 100
                     or not -20 <= self.mount_yaw_deg <= 20):
                 raise ValueError("Camera mount offset or yaw outside measured limits")
+        if self.mount_forward_offset_mm is not None:
+            if (type(self.mount_forward_offset_mm) not in (int, float)
+                    or not _finite_number(self.mount_forward_offset_mm)
+                    or not -250 <= self.mount_forward_offset_mm <= 250):
+                raise ValueError("Camera mount offset or yaw outside measured limits")
 
     def opencv_parameters(
         self,
@@ -152,6 +160,30 @@ class DockCameraCalibration:
         if not math.isfinite(lateral):
             raise ValueError("Dock chassis lateral transform is not finite")
         return lateral
+
+    def chassis_forward_mm(self, pose: DockPose) -> float:
+        """Transform AprilTag pose into chassis forward distance from stop origin."""
+        if (self.mount_lateral_offset_mm is None
+                or self.mount_forward_offset_mm is None
+                or self.mount_yaw_deg is None):
+            raise ValueError("Dock chassis camera mounting geometry unmeasured")
+        yaw = math.radians(self.mount_yaw_deg)
+        forward, _ = rotate_xy(pose.z_mm, -pose.x_mm, -yaw)
+        chassis_z = self.mount_forward_offset_mm + forward
+        if not math.isfinite(chassis_z):
+            raise ValueError("Dock chassis forward transform is not finite")
+        return chassis_z
+
+    def chassis_pose(self, pose: DockPose) -> DockPose:
+        """Transform both horizontal AprilTag coordinates into chassis frame."""
+        lateral = self.chassis_lateral_mm(pose)
+        forward = self.chassis_forward_mm(pose)
+        if forward <= 0:
+            raise ValueError("Dock marker forward distance is not positive from stop origin")
+        return DockPose(
+            lateral, pose.y_mm, forward,
+            pose.reprojection_error_px, pose.captured_at,
+        )
 
 
 @dataclass(frozen=True)

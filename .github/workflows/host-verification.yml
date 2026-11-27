@@ -26,7 +26,7 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Verify exact source commit under test
@@ -92,7 +92,7 @@ jobs:
               exit 1
             fi
           done < <(git -c safe.directory="$PWD" ls-files -z)
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Verify imports with locked runtime dependencies only
         working-directory: code
         run: |
@@ -205,7 +205,7 @@ jobs:
     name: Python and head host tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # PR CI must verify the reviewed branch source, not GitHub's
           # synthetic merge SHA. For push/manual jobs use the event SHA.
@@ -220,7 +220,7 @@ jobs:
             exit 1
           }
       - *repository_integrity
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           enable-cache: true
       - name: Compile head test Python before expensive toolchain setup
@@ -296,7 +296,7 @@ jobs:
     name: ESP32 WROOM firmware compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # PR CI must verify the reviewed branch source, not GitHub's
           # synthetic merge SHA. For push/manual jobs use the event SHA.
@@ -311,7 +311,7 @@ jobs:
             exit 1
           }
       - *repository_integrity
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
       - name: Compile guarded stepper firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
       - name: Compile full eight low-cost VL53L0X robot firmware
@@ -360,7 +360,7 @@ jobs:
       # UBSan otherwise reports recoverable errors but exits successfully.
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # PR CI must verify the reviewed branch source, not GitHub's
           # synthetic merge SHA. For push/manual jobs use the event SHA.
@@ -413,9 +413,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     container:
-      image: espressif/idf:v6.1
+      image: espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # PR CI must verify the reviewed branch source, not GitHub's
           # synthetic merge SHA. For push/manual jobs use the event SHA.

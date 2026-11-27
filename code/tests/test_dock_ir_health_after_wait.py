@@ -80,6 +80,8 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
                 "left_age_ms": 85 if self.changed in ("slow_ir_left", "slow_body") else 0,
                 "right_age_ms": 85 if self.changed == "slow_ir_right" else 0,
                 "code": dock_beacon_code(1),
+                "left_code": dock_beacon_code(1),
+                "right_code": dock_beacon_code(1),
                 "motor_authorized": False, "charging_authorized": False,
                 "physical_qualified": False,
             }
@@ -94,7 +96,7 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
     coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     observations = iter((500, 150))
     mock_dock_detector(
@@ -169,6 +171,8 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
                 "left_seq": 8, "right_seq": 9,
                 "left_age_ms": ir_age, "right_age_ms": ir_age,
                 "code": dock_beacon_code(1),
+                "left_code": dock_beacon_code(1),
+                "right_code": dock_beacon_code(1),
                 "motor_authorized": False, "charging_authorized": False,
                 "physical_qualified": False,
             })
@@ -211,6 +215,7 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
     coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1, mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_forward_offset_mm=0,
     )
     observations = iter((500, 150))
     mock_dock_detector(
@@ -278,6 +283,7 @@ def test_dock_dispatch_rechecks_each_receiver_at_exact_expiry(monkeypatch, side,
         "robot_id": "robot-01", "left_valid": True, "right_valid": True,
         "match": True, "left_seq": 8, "right_seq": 9,
         "left_age_ms": 0, "right_age_ms": 0, "code": dock_beacon_code(1),
+        "left_code": dock_beacon_code(1), "right_code": dock_beacon_code(1),
         "motor_authorized": False, "charging_authorized": False,
         "physical_qualified": False,
     }

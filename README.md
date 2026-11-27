@@ -7,7 +7,7 @@ python3 code/scripts/procurement_release.py --format first-robot-markdown
 python3 code/scripts/procurement_release.py --format pilot-cart-markdown
 ```
 
-**Atomic regeneration (maintainers only; preserves existing views on any failure):**
+**Atomic regeneration (maintainers only; preserves existing views if generator fails):**
 
 ```sh
 tmp_md="$(mktemp docs/hardware/.complete-shopping-checklist.md.XXXXXX)" && \

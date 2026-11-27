@@ -59,7 +59,9 @@ def test_all_five_ci_jobs_check_the_reviewed_pr_head_not_synthetic_merge():
     # The fifth lane runs fast Mac brain tests independently of the long
     # Sense firmware compile; it must bind to the reviewed PR head too.
     lanes = 5
-    assert workflow.count("      - uses: actions/checkout@v4") == lanes
+    assert workflow.count(
+        "      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4"
+    ) == lanes
     assert workflow.count(requested) == lanes
     assert workflow.count(expected) == lanes
     assert workflow.count('actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"') == lanes

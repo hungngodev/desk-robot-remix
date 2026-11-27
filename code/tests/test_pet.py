@@ -10916,3 +10916,285 @@ async def test_pet_defers_optional_admission_on_regressing_fleet_clock(fleet, tm
         assert not speaker.spoken
     finally:
         await pet.close()
+
+
+async def test_dock_inhibit_hook_async_failure_sets_last_error_without_masking(fleet, tmp_path):
+    """Async dock inhibit hook exceptions are captured into last_error; cancel is ignored."""
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker
+
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    heads = {r.id: SimulatedHead(r.id) for r in fleet.robots}
+    conv = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=mem)
+
+    fail_mode = "raise"
+
+    async def hook(_rid: str, _inhibited: bool):
+        if fail_mode == "raise":
+            raise RuntimeError("dock hook failed")
+        if fail_mode == "cancel":
+            await asyncio.sleep(10)
+
+    pet = PetController(
+        fleet, heads, conv, mem, SimulatedScene(),
+        on_dock_inhibit_changed=hook,
+    )
+    try:
+        pet._notify_dock_inhibit("robot-01", True)
+        await asyncio.sleep(0.05)
+        assert "RuntimeError: dock hook failed" in pet.states["robot-01"].last_error
+
+        pet.states["robot-01"].last_error = ""
+        fail_mode = "cancel"
+        pet._notify_dock_inhibit("robot-01", False)
+        await asyncio.sleep(0)
+        for task in asyncio.all_tasks():
+            if task is not asyncio.current_task() and "hook" in repr(task.get_coro()):
+                task.cancel()
+        await asyncio.sleep(0.02)
+        assert pet.states["robot-01"].last_error == ""
+
+        fail_mode = "ok"
+        pet._notify_dock_inhibit("robot-01", True)
+        await asyncio.sleep(0.02)
+        assert pet.states["robot-01"].last_error == ""
+    finally:
+        await pet.close()
+
+
+async def test_blocked_face_cue_does_not_delay_speech_and_cancels_on_interrupt(fleet, tmp_path):
+    """Blocked OLED /api/face calls run in a cancellable side task off the speech path."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker
+    from desk_robot.vision import SceneChange
+
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    release_face = asyncio.Event()
+    face_cancelled = False
+
+    class HangingFaceHead(SimulatedHead):
+        async def face_event(self, event: str):
+            nonlocal face_cancelled
+            try:
+                await release_face.wait()
+            except asyncio.CancelledError:
+                face_cancelled = True
+                raise
+
+    class ActivitySpeakChat(SimulatedChat):
+        async def proactive_decision(self, history):
+            return {"action": "speak", "text": "Hi there!", "mood": "happy", "tool": "none"}
+
+    fleet.mode = "hardware"
+    fleet.vision_model = "qwen2.5vl"
+    fleet.voice_vision_tools_enabled = True
+    heads = {r.id: HangingFaceHead(r.id) for r in fleet.robots}
+    conv = Conversation(fleet, ActivitySpeakChat(), SimulatedSpeaker(), memory=mem)
+    pet = PetController(fleet, heads, conv, mem, SimulatedScene())
+    for r in fleet.robots:
+        pet.start(r.id)
+    try:
+        state = pet.states["robot-01"]
+        decision = await asyncio.wait_for(
+            pet._generate_proactive_line(
+                "robot-01",
+                SceneChange("person", "someone nearby", 0.9),
+                SimpleNamespace(recent=[], core=[], interaction=[]),
+                offered_at=time.monotonic(),
+                model_context_permitted=lambda: True,
+            ),
+            timeout=1.0,
+        )
+        assert decision == "Hi there!"
+        assert state.face_cue_task is not None
+        await asyncio.sleep(0)
+        await asyncio.wait_for(pet.interrupt("robot-01"), timeout=1.0)
+        await asyncio.sleep(0.02)
+        assert face_cancelled is True
+        assert state.face_cue_task is None
+    finally:
+        release_face.set()
+        await pet.close()
+
+
+async def test_social_event_proactive_decision_silence_and_permission_revocation(fleet, tmp_path):
+    """Social events honor proactive_decision silence and abort cleanly on revocation."""
+    import time
+
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker
+    from desk_robot.vision import SceneChange
+
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    say_group_calls = []
+
+    class SilentSocialChat(SimulatedChat):
+        async def proactive_decision(self, history):
+            return {"action": "silence", "text": "", "tool": "none"}
+
+    heads = {r.id: SimulatedHead(r.id) for r in fleet.robots}
+    conv = Conversation(fleet, SilentSocialChat(), SimulatedSpeaker(), memory=mem)
+
+    async def forbid_social(*args, **kwargs):
+        say_group_calls.append((args, kwargs))
+        return []
+
+    conv.say_group = forbid_social  # type: ignore[method-assign]
+    pet = PetController(fleet, heads, conv, mem, SimulatedScene())
+    for r in fleet.robots:
+        pet.start(r.id)
+    try:
+        await pet._speak(
+            "robot-01",
+            SceneChange("key", "a key on the desk", 0.95),
+            pet.states["robot-01"].generation,
+            offered_at=time.monotonic(),
+            social_peer_id="robot-02",
+            social_peer_generation=pet.states["robot-02"].generation,
+        )
+        assert pet.states["robot-01"].last_initiative_suppression == "model_chose_silence"
+        assert say_group_calls == []
+
+        # Mid-decision quiet revocation aborts via speech_context_permitted().
+        async def revoking_decision(history):
+            await pet.set_quiet("robot-01", True)
+            return {"action": "speak", "text": "Should not speak", "tool": "none"}
+
+        conv.chat.proactive_decision = revoking_decision  # type: ignore[method-assign]
+        await pet._speak(
+            "robot-01",
+            SceneChange("key", "key moved", 0.95),
+            pet.states["robot-01"].generation,
+            offered_at=time.monotonic(),
+            social_peer_id="robot-02",
+            social_peer_generation=pet.states["robot-02"].generation,
+        )
+        assert say_group_calls == []
+    finally:
+        await pet.close()
+
+
+async def test_between_polls_touch_safety_stop_guards_motion_without_idle_halt_or_speech_abort(
+    fleet, tmp_path,
+):
+    """Between-polls WROOM touch revokes Mac motion authority without halting idle taps or speech."""
+    from desk_robot.controller import Coordinator
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import (
+        SimulatedChat,
+        SimulatedHead,
+        SimulatedScene,
+        SimulatedSpeaker,
+        SimulationVision,
+    )
+
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    heads = {r.id: SimulatedHead(r.id) for r in fleet.robots}
+    coord = Coordinator(fleet, heads, SimulationVision())
+    fault_calls: list[str] = []
+
+    async def on_fault(robot_id: str) -> None:
+        fault_calls.append(robot_id)
+        await coord.stop(robot_id)
+
+    on_fault.__self__ = coord  # type: ignore[attr-defined]
+    conv = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=mem)
+    pet = PetController(
+        fleet, heads, conv, mem, SimulatedScene(), on_local_fault=on_fault,
+    )
+    for r in fleet.robots:
+        pet.start(r.id)
+    try:
+        # 1) Idle tap (no permit, no job): no halt / no fault call, speech unaffected.
+        assert coord.has_motion_authority("robot-01") is False
+        await pet._notify_touch_safety_stop("robot-01", pet.states["robot-01"].generation)
+        assert fault_calls == []
+        assert heads["robot-01"].commands == []
+
+        # 2) Active motion job/permit: revokes permit and stops job.
+        await coord.operator_arm("robot-01")
+        assert coord.has_motion_authority("robot-01") is True
+        job = coord.manual("robot-01", "drive 20 20 200")
+        await asyncio.sleep(0.02)
+        await pet._notify_touch_safety_stop("robot-01", pet.states["robot-01"].generation)
+        await asyncio.sleep(0.02)
+        assert fault_calls == ["robot-01"]
+        assert "robot-01" not in coord.permits
+        assert job.state in {"canceled", "failed", "succeeded"} or "halt" in heads["robot-01"].commands
+    finally:
+        await pet.close()
+        await coord.close()
+
+
+async def test_cross_camera_distinct_spatial_relations_store_all_witnesses(fleet, tmp_path):
+    """Camera observations differing only by spatial relation store separate eyewitness records."""
+
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker
+    from desk_robot.vision import SceneChange
+
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    heads = {r.id: SimulatedHead(r.id) for r in fleet.robots}
+    conv = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=mem)
+    pet = PetController(fleet, heads, conv, mem, SimulatedScene())
+    for rid in ("robot-01", "robot-02"):
+        state = pet.states[rid]
+        state.enabled, state.generation, state.quiet = True, 9, True
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("object", "cup on the desk", 0.95), 9,
+            camera_derived=True,
+        )
+        pet._consider_speech(
+            "robot-02", SceneChange("object", "cup near the desk", 0.95), 9,
+            camera_derived=True,
+        )
+        assert len(pet._event_kinds) == 2
+        keys = {key for _, _, key in pet._event_kinds}
+        assert any("on" in key for key in keys) and any("near" in key for key in keys)
+    finally:
+        await pet.close()
+
+
+async def test_observe_aux_rejects_explicit_null_force_metadata(fleet, tmp_path):
+    """_observe_aux fails validation when optional force metadata is explicitly null."""
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedChat, SimulatedHead, SimulatedScene, SimulatedSpeaker
+    from test_aux_telemetry import sample
+
+    fleet.mode = "hardware"
+    fleet.vision_model = "qwen2.5vl"
+    fleet.memory_dir = tmp_path / "mem"
+    mem = MemoryStore(fleet.memory_dir, [r.id for r in fleet.robots])
+    heads = {r.id: SimulatedHead(r.id) for r in fleet.robots}
+    conv = Conversation(fleet, SimulatedChat(), SimulatedSpeaker(), memory=mem)
+    pet = PetController(fleet, heads, conv, mem, SimulatedScene())
+    pet.start("robot-01")
+    try:
+        bad = sample("robot-01")
+        bad["force"]["jaw_valid"] = None
+        with pytest.raises(ValueError, match="Invalid uncalibrated FSR sample"):
+            await pet._observe_aux("robot-01", pet.states["robot-01"].generation, bad)
+        assert pet.states["robot-01"].aux_reads == 0
+    finally:
+        await pet.close()

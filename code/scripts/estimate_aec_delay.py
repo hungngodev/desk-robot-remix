@@ -125,20 +125,11 @@ def _reject_saturated_pcm(samples: np.ndarray, channel: str) -> None:
         raise ValueError(f"{channel} contains clipped or out-of-range PCM16 samples")
 
 
-def estimate_delay(
-    reference: np.ndarray, microphone: np.ndarray,
-    *, sample_rate: int = 16000, max_delay_ms: float = 250,
-) -> dict:
-    """Positive lag is microphone capture after the supplied reference."""
-    if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
-            or not 10 <= max_delay_ms <= 400):
-        raise ValueError("Measure 16 kHz capture with finite delay search of 10 to 400 ms")
-    if (not isinstance(reference, np.ndarray)
-            or not isinstance(microphone, np.ndarray)
-            or reference.ndim != 1 or microphone.ndim != 1
-            or min(len(reference), len(microphone)) < 320
-            or max(len(reference), len(microphone)) > 160000):
-        raise ValueError("Expected bounded one-channel arrays")
+def _peak_lag_and_correlation(
+    reference: np.ndarray, microphone: np.ndarray, *,
+    sample_rate: int, max_delay_ms: float,
+) -> tuple[int, float, float]:
+    """Return integer lag, parabolic sub-sample lag, and overlap Pearson correlation."""
     # A 20 ms frame cannot establish a delay over a requested 250 ms
     # search window. Leave 100 ms of captured signal after the largest
     # candidate lag instead of silently clipping the search to array length.
@@ -217,6 +208,35 @@ def estimate_delay(
         raise ValueError("Ambiguous acoustic delay: periodic tone or competing echo")
     if lag < 0:
         raise ValueError("Misaligned capture: microphone leads speaker reference")
+    fractional_lag = float(lag)
+    if 0 < peak_index < len(strength) - 1:
+        denom = float(
+            strength[peak_index - 1] - 2.0 * strength[peak_index] + strength[peak_index + 1]
+        )
+        if denom < -1e-12:
+            delta = 0.5 * float(strength[peak_index - 1] - strength[peak_index + 1]) / denom
+            if abs(delta) <= 0.5 and fractional_lag + delta >= 0.0:
+                fractional_lag += delta
+    return lag, fractional_lag, confidence
+
+
+def estimate_delay(
+    reference: np.ndarray, microphone: np.ndarray,
+    *, sample_rate: int = 16000, max_delay_ms: float = 250,
+) -> dict:
+    """Positive lag is microphone capture after the supplied reference."""
+    if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
+            or not 10 <= max_delay_ms <= 400):
+        raise ValueError("Measure 16 kHz capture with finite delay search of 10 to 400 ms")
+    if (not isinstance(reference, np.ndarray)
+            or not isinstance(microphone, np.ndarray)
+            or reference.ndim != 1 or microphone.ndim != 1
+            or min(len(reference), len(microphone)) < 320
+            or max(len(reference), len(microphone)) > 160000):
+        raise ValueError("Expected bounded one-channel arrays")
+    lag, _, confidence = _peak_lag_and_correlation(
+        reference, microphone, sample_rate=sample_rate, max_delay_ms=max_delay_ms,
+    )
     samples_per_ms = sample_rate // 1000
     setting_applicable = lag <= 250 * samples_per_ms
     # Kconfig accepts integer milliseconds; round half up from exact samples.
@@ -259,19 +279,21 @@ def estimate_clock_drift(
         raise ValueError("Clock drift needs 4-10 seconds of aligned 16 kHz recordings")
     if not np.isfinite(reference).all() or not np.isfinite(microphone).all():
         raise ValueError("Nonfinite clock drift input")
-    window = sample_rate * 3 // 2
+    # Use 1.0 s windows on short 4-5 s captures to keep the time baseline wide
+    # enough for sub-25 ppm slip estimation, expanding up to 1.5 s on longer captures.
+    window = min(sample_rate * 3 // 2, max(sample_rate, len(reference) // 4))
     span = len(reference) - window
     starts = [0, span // 3, 2 * span // 3, span]
     lags = []
     correlations = []
     for start in starts:
-        result = estimate_delay(
+        _, frac_lag, confidence = _peak_lag_and_correlation(
             reference[start:start + window],
             microphone[start:start + window],
             sample_rate=sample_rate, max_delay_ms=max_delay_ms,
         )
-        lags.append(result["sample_lag"])
-        correlations.append(result["normalized_correlation"])
+        lags.append(frac_lag)
+        correlations.append(confidence)
     # Least-squares slope in samples of lag per sample of recording time.
     t = np.asarray(starts, dtype=np.float64)
     y = np.asarray(lags, dtype=np.float64)
@@ -289,21 +311,21 @@ def estimate_clock_drift(
             continue
         start = (left + right) // 2
         try:
-            result = estimate_delay(
+            _, frac_lag, confidence = _peak_lag_and_correlation(
                 reference[start:start + window], microphone[start:start + window],
                 sample_rate=sample_rate, max_delay_ms=max_delay_ms,
             )
         except ValueError as exc:
             raise ValueError("Changing acoustic delay is not a stable clock drift") from exc
         expected = y.mean() + slope * (start - t.mean())
-        residual = max(residual, abs(result["sample_lag"] - expected))
-        correlations.append(result["normalized_correlation"])
+        residual = max(residual, abs(frac_lag - expected))
+        correlations.append(confidence)
         if residual > 3.0:
             raise ValueError("Changing acoustic delay is not a stable clock drift")
     ppm = slope * 1_000_000.0
     return {
         "clock_drift_ppm_estimate": round(ppm, 1),
-        "clock_drift_window_lags_samples": lags,
+        "clock_drift_window_lags_samples": [round(lag, 3) for lag in lags],
         "clock_drift_min_correlation": round(min(correlations), 4),
         "clock_drift_max_fit_residual_samples": round(residual, 2),
         "clock_drift_needs_hardware_review": abs(ppm) > 100,

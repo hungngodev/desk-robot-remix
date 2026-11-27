@@ -24,16 +24,18 @@ def test_thermal_profile_gates_actual_firmware(tmp_path, profile, enabled, stand
     firmware = (STATION / "src/main.cpp").read_text()
     assert "#ifndef ROOM_AMG_FITTED\n#define ROOM_AMG_FITTED 0\n#endif" in firmware
     functions = []
-    for name in ("thermal_step", "thermal_observation", "recover_sensors"):
+    for name in ("revoke_thermal_scan", "thermal_step", "thermal_observation", "recover_sensors"):
         start = firmware.index(f"void {name}(")
         end = firmware.index("\n}", start) + 2
         functions.append(firmware[start:end])
     harness = r"""
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <string>
 #include "sensor_recovery.h"
+#include "thermal_consent_gate.h"
 #define F(value) value
 constexpr uint32_t kReportMs = 1000, kThermalScanMaxMs = 250, kThermalStaleMs = 3000;
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
@@ -58,6 +60,7 @@ struct Recovery {
   unsigned starts = 0, steps = 0;
   bool pending = false, ready = false;
   void begin() { ++starts; pending = true; }
+  void reset() { starts = steps = 0; pending = ready = false; }
   bool active() const { return pending; }
   bool step(Bus&, uint32_t) {
     ++steps;
@@ -67,6 +70,7 @@ struct Recovery {
   bool take_ready() { const bool result = ready; ready = false; return result; }
 } amg_recovery;
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
+desk_robot_room::ThermalConsentGate thermal_consent;
 bool amg_started, thermal_scan_active, thermal_ever_requested, thermal_valid;
 uint8_t thermal_next_chunk;
 uint32_t thermal_requested_ms, thermal_started_ms, thermal_sample_ms;
@@ -92,6 +96,15 @@ int main() {
   bme_started = false;
   recover_sensors(clock_ms);
   assert(bme_started && bme_probes == 1);
+  // Default-off thermal consent blocks AMG8833 recovery even when fitted.
+  recover_sensors(clock_ms);
+  assert(amg_recovery.starts == 0);
+  if (ROOM_AMG_FITTED) {
+    for (const char ch : std::string("AMG_CONSENT ON\n")) {
+      thermal_consent.consume(static_cast<uint8_t>(ch));
+    }
+    assert(thermal_consent.allowed());
+  }
   recover_sensors(clock_ms);
   assert(amg_recovery.starts == ROOM_AMG_FITTED);
   recover_sensors(clock_ms);

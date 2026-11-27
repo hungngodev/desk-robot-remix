@@ -1110,3 +1110,53 @@ def test_dock_tag_missing_id_or_mirror_cannot_reach_pnp(monkeypatch, invalid):
     assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
     assert assessment.phase == "hold"
     assert not assessment.motor_authorized and not assessment.charging_authorized
+
+
+def test_dock_camera_mount_forward_offset_and_chassis_pose_with_yaw():
+    """chassis_forward_mm and chassis_pose rotate/offset both (x, z) coordinates."""
+    import math
+
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    for yaw in (10.0, -10.0):
+        cal = DockCameraCalibration(
+            fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
+            mount_lateral_offset_mm=15.0,
+            mount_forward_offset_mm=-25.0,
+            mount_yaw_deg=yaw,
+        )
+        pose = DockPose(x_mm=12.0, y_mm=-3.0, z_mm=180.0, reprojection_error_px=0.5, captured_at=1.0)
+        rad = math.radians(yaw)
+        expected_forward = -25.0 + (
+            pose.z_mm * math.cos(-rad) - (-pose.x_mm) * math.sin(-rad)
+        )
+        expected_lateral = 15.0 + (
+            pose.x_mm * math.cos(rad) + pose.z_mm * math.sin(rad)
+        )
+        assert cal.chassis_forward_mm(pose) == pytest.approx(expected_forward, abs=1e-6)
+        chassis = cal.chassis_pose(pose)
+        assert chassis.x_mm == pytest.approx(expected_lateral, abs=1e-6)
+        assert chassis.z_mm == pytest.approx(expected_forward, abs=1e-6)
+        assert chassis.y_mm == pose.y_mm
+
+    incomplete = DockCameraCalibration(
+        fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
+        mount_lateral_offset_mm=0.0, mount_yaw_deg=0.0, mount_forward_offset_mm=None,
+    )
+    sample = DockPose(x_mm=0.0, y_mm=0.0, z_mm=150.0, reprojection_error_px=0.2, captured_at=1.0)
+    with pytest.raises(ValueError, match="unmeasured"):
+        incomplete.chassis_pose(sample)
+
+    behind_stop = DockCameraCalibration(
+        fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
+        mount_lateral_offset_mm=0.0, mount_yaw_deg=0.0, mount_forward_offset_mm=-160.0,
+    )
+    with pytest.raises(ValueError, match="not positive"):
+        behind_stop.chassis_pose(sample)
+
+    for bad in (True, float("nan"), -251.0, 251.0):
+        with pytest.raises(ValueError):
+            DockCameraCalibration(
+                fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
+                mount_forward_offset_mm=bad,
+            )

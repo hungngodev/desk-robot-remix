@@ -59,10 +59,14 @@ async def test_dock_camera_revoked_during_snapshot_never_drives(settings, regran
         await controller.close()
 
 
+@pytest.mark.parametrize("motor_backend", ["stepper_28byj48", "differential"])
 @pytest.mark.parametrize("regrant", [False, True])
-async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
+async def test_pickup_revocation_during_observe_never_grasps(
+    settings, motor_backend, regrant,
+):
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
+    settings.robots[0].motor_backend = motor_backend
     controller, head = make_controller(settings)
     grant = controller._camera_motion_grant()
     await head.command("arm")
@@ -95,7 +99,8 @@ async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
                 Job("pickup-consent", "robot-01", "pickup"),
                 "key", calibration, camera_grant=grant,
             )
-        assert head.commands == ["grip 70", "lift 80"]
+        expected = [] if motor_backend == "stepper_28byj48" else ["grip 70", "lift 80"]
+        assert head.commands == expected
     finally:
         await controller.close()
 

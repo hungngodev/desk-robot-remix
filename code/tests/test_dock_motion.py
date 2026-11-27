@@ -119,7 +119,7 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240,
         tag_side_mm=60, marker_id=1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     mock_dock_detector(
         monkeypatch,
@@ -198,7 +198,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     distances = iter(ranges)
     mock_dock_detector(
@@ -379,7 +379,7 @@ async def test_dock_refuses_chassis_turn_even_with_clear_side_ranges(
     )
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=lateral, mount_yaw_deg=yaw,
+        mount_lateral_offset_mm=lateral, mount_yaw_deg=yaw, mount_forward_offset_mm=0,
     )
     z_values = iter((500, 150))
     mock_dock_detector(
@@ -414,7 +414,7 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
-        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0, "mount_forward_offset_mm": 0.0,
         "camera_sensor_pid": "OV5640",
     }))
     robot.device_id = "xiaozhi-01"
@@ -484,7 +484,7 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     mock_dock_detector(
         monkeypatch,
@@ -549,7 +549,7 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     mock_dock_detector(
         monkeypatch,
@@ -618,7 +618,7 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     try:
         task = asyncio.create_task(controller._dock_approach(
@@ -684,7 +684,7 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     calibration = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     mock_dock_detector(
         monkeypatch,
@@ -742,7 +742,7 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "_active", object())
     try:
@@ -802,7 +802,7 @@ async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240,
         tag_side_mm=60, marker_id=1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     mock_dock_detector(
         monkeypatch,
@@ -942,7 +942,7 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
-        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0, mount_forward_offset_mm=0,
     )
     try:
         with pytest.raises(OperationError, match="Stale or invalid dock camera receipt"):
@@ -977,7 +977,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
-        "mount_lateral_offset_mm": 6.0, "mount_yaw_deg": 1.0,
+        "mount_lateral_offset_mm": 6.0, "mount_yaw_deg": 1.0, "mount_forward_offset_mm": 0.0,
     }))
     first.dock_calibration = second.dock_calibration = path
     coordinator, head = make(settings)
@@ -1031,7 +1031,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         "cx": 320, "cy": 240, "tag_side_mm": 60, "marker_id": 1,
         "target_distance_mm": 200, "distortion_coeffs": [0.0] * 5,
         "image_width_px": 640, "image_height_px": 480,
-        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0, "mount_forward_offset_mm": 0.0,
     }))
 
     clock = time
@@ -1107,6 +1107,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 "left_seq": seq, "right_seq": seq,
                 "left_age_ms": 5, "right_age_ms": 5,
                 "code": dock_beacon_code(1) if matching else 0,
+                "left_code": dock_beacon_code(1) if matching else 0,
+                "right_code": dock_beacon_code(1) if matching else 0,
                 "motor_authorized": False, "charging_authorized": False,
                 "physical_qualified": False,
             }
@@ -1314,6 +1316,7 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         "image_height_px": 480,
         "mount_lateral_offset_mm": 0.0,
         "mount_yaw_deg": 0.0,
+        "mount_forward_offset_mm": 0.0,
         "tag_side_mm": 60,
         "marker_id": 1,
         "target_distance_mm": 200,
@@ -1388,6 +1391,8 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
                 "left_age_ms": 5,
                 "right_age_ms": 5,
                 "code": dock_beacon_code(1),
+                "left_code": dock_beacon_code(1),
+                "right_code": dock_beacon_code(1),
                 "motor_authorized": False,
                 "charging_authorized": False,
                 "physical_qualified": False,
@@ -1742,3 +1747,135 @@ async def test_dock_internal_reverse_rejected_before_head_io(settings, forward_s
     finally:
         await controller.close()
 
+
+
+@pytest.mark.parametrize("command", ["drive 20 20 200", "lift 80", "grip 80"])
+async def test_dock_inhibition_cancels_active_manual_and_refuses_manual_commands(
+    settings, command,
+):
+    """Dock charge inhibition cancels active manual drive/lift/grip and refuses new ones."""
+    import asyncio
+
+    controller, head = make(settings)
+    try:
+        await controller.operator_arm("robot-01")
+        job = controller.manual("robot-01", command)
+        async with asyncio.timeout(2):
+            while command not in head.commands:
+                await asyncio.sleep(0.01)
+        controller.set_dock_charge_inhibition("robot-01", True)
+        await controller.tasks[job.id]
+        assert job.error == "Stopped: robot seated or powered on dock"
+        assert "robot-01" not in controller.permits
+        assert head.commands[-1] == "halt"
+        with pytest.raises(
+            OperationError, match="Manual movement refused: robot is seated or powered on dock",
+        ):
+            controller.manual("robot-01", command)
+    finally:
+        await controller.close()
+
+
+async def test_dock_rejects_missing_forward_offset_and_missing_ir_receiver_codes(
+    settings, monkeypatch, tmp_path,
+):
+    """dock() requires all 3 extrinsics and hardware _dock_approach enforces IR receiver codes."""
+    import json
+    import time
+
+    from desk_robot.controller import Job
+    from desk_robot.dock_ir import dock_beacon_code
+    from desk_robot.dock_vision import DockCameraCalibration, DockPose
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.robots[0].device_id = "xiaozhi-01"
+    settings.robots[0].motion_enabled = True
+    settings.robots[0].dock_motion_qualified = True
+    settings.robots[0].dock_beacon_id = 4
+    settings.robots[0].dock_turn_sign = 1
+    settings.robots[0].dock_forward_sign = 1
+
+    cal_path = tmp_path / "dock-missing-forward.json"
+    cal_path.write_text(json.dumps({
+        "schema_version": 1, "measured": True,
+        "fx": 410.0, "fy": 410.0, "cx": 320.0, "cy": 240.0,
+        "tag_side_mm": 60.0, "marker_id": 1, "target_distance_mm": 120.0,
+        "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "image_width_px": 640, "image_height_px": 480,
+        "camera_sensor_pid": "OV5640",
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+        "robot_id": "robot-01", "head_device_id": "xiaozhi-01",
+    }))
+    settings.robots[0].dock_calibration = cal_path
+
+    class LegacyIrHead(DockFrameFixture):
+        def __init__(self):
+            self.commands = []
+
+        async def status(self):
+            return {
+                "robot_id": "robot-01",
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 600],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+                "side_ranges": {"present_mask": 7, "valid_mask": 7,
+                                "age_ms": [10, 10, 10], "mm": [600, 600, 600]},
+            }
+
+        async def snapshot(self):
+            raise AssertionError("Dock motion used stale generic snapshot")
+
+        async def snapshot_for_dock(self):
+            return b"simulated marker image", time.monotonic(), (1234, 1, 1), 1
+
+        async def ir_status(self):
+            return {
+                "robot_id": "robot-01",
+                "left_valid": True, "right_valid": True, "match": True,
+                "left_seq": 2, "right_seq": 3, "left_age_ms": 10, "right_age_ms": 12,
+                "code": dock_beacon_code(4),
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "physical_qualified": False,
+            }
+
+        async def command(self, text):
+            from desk_robot.command_framing import expected_ack
+
+            self.commands.append(text)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(text)}
+
+    head = LegacyIrHead()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(
+            OperationError, match="measured camera to chassis mounting geometry",
+        ):
+            controller.dock("robot-01")
+        assert head.commands == []
+
+        camera = DockCameraCalibration(
+            fx=410, fy=410, cx=320, cy=240,
+            tag_side_mm=60, marker_id=1,
+            mount_lateral_offset_mm=0.0, mount_yaw_deg=0.0,
+            mount_forward_offset_mm=30.0,
+        )
+        mock_dock_detector(
+            monkeypatch,
+            lambda jpeg, cal, *, captured_at: DockPose(
+                0.0, 0.0, 220.0, 0.4, captured_at,
+            ),
+        )
+        with pytest.raises(OperationError, match="NEC"):
+            await controller._dock_approach(
+                Job("dock-ir", "robot-01", "dock_approach"),
+                camera, 120.0, 1, 1,
+            )
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await controller.close()

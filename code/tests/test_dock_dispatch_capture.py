@@ -14,7 +14,10 @@ def test_dock_dispatch_checks_keep_attempt_evidence(monkeypatch):
         if observation in expired:
             raise ValueError("expired")
 
-    def validate(reading, robot_id, *, expected_dock_id, elapsed_ms):
+    def validate(
+        reading, robot_id, *, expected_dock_id, elapsed_ms,
+        require_receiver_codes=False,
+    ):
         checked.append(("ir", reading, robot_id, expected_dock_id, elapsed_ms))
 
     monkeypatch.setattr(controller, "unpack_dock_frame", unpack)

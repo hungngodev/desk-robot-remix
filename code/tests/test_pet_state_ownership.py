@@ -251,3 +251,93 @@ async def test_native_pet_speech_policy_reads_immutable_pet_states_mapping(
         assert body["pet_quiet"] is False
     finally:
         await pet.close()
+
+
+async def test_boot_epoch_cap_fails_closed_at_128_and_resets_on_pause(tmp_path):
+    """Retired WROOM boot epochs fail closed at 128 per pet/channel and reset cleanly on pause."""
+    from desk_robot.pet import _admit_boot_epoch
+    from desk_robot.simulator import SimulatedHead
+
+    retired: set[int] = set()
+    current: int | None = None
+    for boot in range(1, 130):
+        admitted, changed = _admit_boot_epoch(boot, current, retired, limit=128)
+        assert admitted is True
+        assert changed is True
+        current = boot
+    assert len(retired) == 128
+    assert _admit_boot_epoch(1, current, retired, limit=128) == (False, False)
+    assert _admit_boot_epoch(130, current, retired, limit=128) == (False, False)
+    assert len(retired) == 128
+
+    settings = fleet_settings_for_cap(tmp_path)
+    settings.vision_model = "qwen2.5vl"
+    memory = MemoryStore(tmp_path / "mem", [r.id for r in settings.robots])
+    conv = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    heads = {r.id: SimulatedHead(r.id) for r in settings.robots}
+    pet = PetController(settings, heads, conv, memory, SimulatedScene())
+    for robot in settings.robots:
+        pet.start(robot.id)
+    try:
+        s1 = pet.states["robot-01"]
+        s2 = pet.states["robot-02"]
+        for boot in range(1, 130):
+            s1_pkt = _cap_aux_packet("robot-01", boot)
+            await pet._observe_aux("robot-01", s1.generation, s1_pkt)
+        assert len(s1.retired_aux_boot_ids) == 128
+        assert s1.last_aux_boot_id == 129
+        reads_before = s1.aux_reads
+        await pet._observe_aux("robot-01", s1.generation, _cap_aux_packet("robot-01", 1))
+        await pet._observe_aux("robot-01", s1.generation, _cap_aux_packet("robot-01", 130))
+        assert s1.aux_reads == reads_before
+
+        # Peer robot stays completely isolated.
+        await pet._observe_aux("robot-02", s2.generation, _cap_aux_packet("robot-02", 200))
+        assert s2.last_aux_boot_id == 200
+
+        # Touch and extra boot retirement sets share the 128-entry fail-closed cap.
+        for boot in range(1, 130):
+            assert _admit_boot_epoch(
+                boot, s1.last_touch_boot_id, s1.retired_touch_boot_ids, limit=128,
+            ) == (True, True)
+            s1.last_touch_boot_id = boot
+            assert _admit_boot_epoch(
+                boot, s1.last_extra_boot_id, s1.retired_extra_boot_ids, limit=128,
+            ) == (True, True)
+            s1.last_extra_boot_id = boot
+        assert _admit_boot_epoch(130, s1.last_touch_boot_id, s1.retired_touch_boot_ids) == (
+            False, False,
+        )
+        assert _admit_boot_epoch(130, s1.last_extra_boot_id, s1.retired_extra_boot_ids) == (
+            False, False,
+        )
+
+        # pause()/start() clears retired boot sets for a fresh runtime lease.
+        await pet.pause("robot-01")
+        pet.start("robot-01")
+        assert s1.retired_aux_boot_ids == set()
+        assert s1.retired_touch_boot_ids == set()
+        assert s1.retired_extra_boot_ids == set()
+        await pet._observe_aux("robot-01", s1.generation, _cap_aux_packet("robot-01", 1))
+        assert s1.last_aux_boot_id == 1
+    finally:
+        await pet.close()
+
+
+def fleet_settings_for_cap(tmp_path):
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    settings = load_settings(root / "config/fleet.simulation.toml")
+    settings.mode = "hardware"
+    settings.memory_dir = tmp_path / "mem"
+    return settings
+
+
+def _cap_aux_packet(robot_id: str, boot_id: int) -> dict:
+    from test_aux_telemetry import sample as make_aux_sample
+
+    pkt = make_aux_sample(robot_id)
+    pkt["force"]["boot_id"] = boot_id
+    pkt["proximity"]["boot_id"] = boot_id
+    return pkt
