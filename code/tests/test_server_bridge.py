@@ -4540,3 +4540,22 @@ async def test_lease_isolates_nonparticipant_heads_and_holds_until_stop_cleanup(
     bridge.active_device_id = None
     assert not bridge.muted("mac-02")
     assert not bridge.suppress_message(three, b"normal unleased speech")
+
+
+@pytest.mark.parametrize("endpoint", ["/session", "/speak"])
+@pytest.mark.parametrize(
+    "body",
+    ["null", "[]", '["mac-01"]', "true", "1", '"text"', "NaN", "Infinity", "-Infinity"],
+)
+async def test_speech_routes_reject_non_object_json(bridge, endpoint, body):
+    headers = {
+        "Authorization": "Bearer " + "s" * 40,
+        "Content-Type": "application/json",
+    }
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        response = await client.post(endpoint, headers=headers, data=body)
+        assert response.status == 400
+        assert await response.text() == "Request body must be a JSON object"
+    assert bridge.lease_ids == frozenset()
+    assert bridge.lease_token is None
+    assert bridge.interrupt_generation == {}

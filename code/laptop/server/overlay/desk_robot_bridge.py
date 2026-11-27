@@ -1057,6 +1057,8 @@ def create_app():
         global lease_ids, lease_until, lease_stopping, lease_cleanup_task
         global lease_passive, lease_token, lease_human_generation
         body = await request.json()
+        if type(body) is not dict:
+            raise ValueError("Request body must be a JSON object")
         ids = body.get("device_ids")
         passive = body.get("passive", False)
         if type(passive) is not bool:
@@ -1163,6 +1165,8 @@ def create_app():
 
     async def speak(request):
         body = await request.json()
+        if type(body) is not dict:
+            raise ValueError("Request body must be a JSON object")
         device, text = body.get("device_id"), body.get("text")
         request_token = body.get("lease_id")
         connection = connections.get(device) if isinstance(device, str) else None

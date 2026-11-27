@@ -124,3 +124,17 @@ def test_incomplete_or_non_text_commands_are_rejected(command):
         validate_command(command)
     with pytest.raises(ValueError):
         expected_ack(command)
+
+
+@pytest.mark.parametrize(
+    ("robot_id", "expected"),
+    [
+        (_TextAdapter("r1"), "OK halt"),
+        ("r1", _TextAdapter("OK halt")),
+        (True, "OK halt"),
+        ("r1", None),
+    ],
+)
+def test_ack_requires_plain_expected_wire_strings(robot_id, expected):
+    receipt = {"ok": True, "robot_id": "r1", "reply": "OK halt"}
+    assert not command_ack_matches(receipt, robot_id, expected)

@@ -64,7 +64,9 @@ def expected_ack(command: str) -> str:
 def command_ack_matches(data: object, robot_id: str, expected: str) -> bool:
     """Match a decoded receipt exactly; an ACK is not physical stop evidence."""
     return (
-        type(data) is dict
+        type(robot_id) is str
+        and type(expected) is str
+        and type(data) is dict
         and data.get("ok") is True
         and type(data.get("robot_id")) is str
         and data.get("robot_id") == robot_id
