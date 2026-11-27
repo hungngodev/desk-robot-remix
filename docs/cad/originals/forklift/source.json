@@ -70,7 +70,8 @@
       "source_url": "https://www.thingiverse.com/download:5188210",
       "bytes": 135051,
       "sha256": "ad7e2a33ee149dbb9f2c9973698ee32ac072f7b24317d9b6dd6396183b0ccbfe",
-      "changes": "None; downloaded STL filename normalized to original underscore spelling.",
+      "changes": "None; original assembly PDF, contents not reviewed.",
+      "format": "PDF",
       "content_reviewed": false
     }
   ],
