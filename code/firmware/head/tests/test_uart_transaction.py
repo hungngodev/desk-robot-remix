@@ -44,8 +44,9 @@ int flush_result = 0, read_error = 0, writes = 0, reads = 0;
 std::atomic<std::int64_t> tick{0};
 std::string rx, tx;
 std::size_t pos = 0;
-bool interrupt_poll = false;
+bool interrupt_poll = false, interrupt_flush = false;
 std::atomic<bool> poll_entered{false}, release_poll{false};
+std::atomic<bool> flush_entered{false}, release_flush{false};
 
 // Synchronize the fake UART read with urgent admission, not wall-clock sleeps.
 // A broken gate must fail rather than hang the native test binary.
@@ -59,11 +60,16 @@ void wait_until(Predicate ready) {
 }
 
 std::int64_t esp_timer_get_time() { return tick.fetch_add(10) + 10; }
-int uart_flush_input(int) { return flush_result; }
+int uart_flush_input(int) {
+    if (interrupt_flush && !flush_entered.exchange(true)) {
+        wait_until([] { return release_flush.load(std::memory_order_acquire); });
+    }
+    return flush_result;
+}
 int uart_write_bytes(int, const char* s, std::size_t n) {
     ++writes;
     tx.assign(s, n);
-    if (interrupt_poll && (tx == "stop\r\n" || tx == "halt\r\n")) {
+    if ((interrupt_poll || interrupt_flush) && (tx == "stop\r\n" || tx == "halt\r\n")) {
         rx = "OK " + tx;
         pos = 0;
     }
@@ -106,9 +112,9 @@ void reset() {
     pos = 0;
     rx.clear();
     tx.clear();
-    interrupt_poll = false;
-    poll_entered = false;
-    release_poll = false;
+    interrupt_poll = interrupt_flush = false;
+    poll_entered = release_poll = false;
+    flush_entered = release_flush = false;
 }
 
 void check_urgent_poll_preemption(const std::string& poll, const std::string& verb) {
@@ -129,6 +135,26 @@ void check_urgent_poll_preemption(const std::string& poll, const std::string& ve
     assert(writes == 2 && tx == verb + "\r\n");
     // The first empty read may finish, but no second polling read is allowed.
     assert(reads == 1 + static_cast<int>(stopped.text.size()) + 2);
+}
+
+// An urgent request admitted during RX cleanup must prevent the old write,
+// not merely reject its eventual reply.
+void check_urgent_flush_preemption(const std::string& command, const std::string& verb) {
+    reset();
+    Bridge b;
+    interrupt_flush = true;
+    Reply canceled{}, stopped{};
+    std::thread reader([&] { canceled = b.Transact(command, true); });
+    wait_until([] { return flush_entered.load(std::memory_order_acquire); });
+    std::thread stopper([&] { stopped = b.Transact(verb, true); });
+    wait_until([&] { return b.urgent_stop_gate_.preempts(false); });
+    release_flush.store(true, std::memory_order_release);
+    reader.join();
+    stopper.join();
+    assert(canceled.status == 503 && !canceled.ok);
+    assert(stopped.ok && stopped.text == "OK " + verb);
+    assert(writes == 1 && tx == verb + "\r\n");
+    assert(canceled.text == "body command superseded before UART write");
 }
 
 void check_json_telemetry() {
@@ -207,6 +233,11 @@ void check_json_telemetry() {
 
 int main() {
     check_json_telemetry();
+    for (const std::string command : {"arm", "drive 20 20 250", "keepalive", "lift 90", "grip 90", "status"}) {
+        for (const std::string verb : {"stop", "halt"}) {
+            check_urgent_flush_preemption(command, verb);
+        }
+    }
     Bridge b;
     reset();
     flush_result = -1;

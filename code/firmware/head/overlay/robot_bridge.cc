@@ -493,6 +493,9 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     // body watchdog with an aged keepalive. Never expire STOP or HALT.
     if (!ControlQueueFresh(command.verb, admitted_us, esp_timer_get_time()))
         return {503, false, "body control expired before UART write"};
+    // STOP may arrive while RX cleanup or queue validation owns the UART.
+    if (urgency.preempted())
+        return {503, false, "body command superseded before UART write"};
     if (uart_write_bytes(kUart, wire.data(), wire.size()) != static_cast<int>(wire.size()) ||
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     if (!rx_clean) return {503, false, "body stop sent; ACK uncertain after receive cleanup failure"};
