@@ -6,8 +6,11 @@
 namespace desk_robot {
 // Cosmetic digital I2S acceptance only, not a playback acknowledgement.
 struct SpeechLevel {
-    uint16_t mean_abs = 0;
-    bool fresh = false;
+    constexpr SpeechLevel(uint16_t mean = 0, bool is_fresh = false) noexcept
+        : mean_abs(mean), fresh(is_fresh) {}
+
+    uint16_t mean_abs;
+    bool fresh;
 };
 
 // All methods are called under the codec's existing reference mutex.
@@ -15,7 +18,7 @@ class SpeechLevelWindow {
 public:
     void Publish(uint64_t sum, int samples, int64_t now_us) noexcept {
         if (samples <= 0 || now_us < 0) return;
-        level_ = static_cast<uint16_t>(std::min<uint64_t>(32768, sum / samples));
+        level_ = static_cast<uint16_t>(std::min<uint64_t>(32768, sum / static_cast<uint64_t>(samples)));
         at_us_ = now_us;
     }
 
@@ -44,9 +47,9 @@ public:
         }
         constexpr int floor = 256;
         constexpr int full = 8192;
-        const int amplitude = std::clamp<int>(level.mean_abs, floor, full);
+        const int amplitude = std::min(full, std::max(floor, static_cast<int>(level.mean_abs)));
         const int target = 1 + (amplitude - floor) * (kMaxHeight - 1) / (full - floor);
-        height_ += std::clamp(target - height_, -2, 2);
+        height_ += std::min(2, std::max(-2, target - height_));
         return static_cast<uint8_t>(height_);
     }
 

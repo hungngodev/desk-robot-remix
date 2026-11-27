@@ -11,7 +11,8 @@ import pytest
 SENSE = Path(__file__).resolve().parents[1] / "sense"
 
 
-def test_speech_envelope_noise_peak_slew_and_reset(tmp_path):
+@pytest.mark.parametrize("standard", ["c++11", "c++17"])
+def test_speech_envelope_noise_peak_slew_and_reset(tmp_path, standard):
     compiler = shutil.which("g++") or shutil.which("clang++")
     if not compiler:
         pytest.skip("Native C++ compiler unavailable")
@@ -20,6 +21,7 @@ def test_speech_envelope_noise_peak_slew_and_reset(tmp_path):
     source.write_text(r'''
 #include "face_speech_envelope.hpp"
 #include <cassert>
+#include <limits>
 using namespace desk_robot;
 int main() {
     SpeechLevelWindow level;
@@ -61,12 +63,34 @@ int main() {
     assert(mouth.Step(level.Read(700002), true) == 1);
     level.Publish(8192, 0, 800000);
     assert(!level.Read(800000).fresh);
+    assert(!level.Read(-1).fresh);
+    assert(level.Read(800000).mean_abs == 0);
+    // Extreme timestamps must never overflow the age calculation.
+    const auto max_time = std::numeric_limits<int64_t>::max();
+    level.Publish(1, 1, 0);
+    assert(!level.Read(max_time).fresh);
+    level.Publish(std::numeric_limits<uint64_t>::max(), 1, max_time - 200000);
+    assert(level.Read(max_time).fresh);
+    assert(level.Read(max_time).mean_abs == 32768);
+    assert(!level.Read(std::numeric_limits<int64_t>::min()).fresh);
+    level.Publish(0, -1, max_time);
+    level.Publish(0, 1, -1);
+    assert(level.Read(max_time).mean_abs == 32768);
+    assert(mouth.Step(level.Read(max_time), true) == 3);
+    assert(mouth.Step(level.Read(max_time), true) == 5);
+    assert(mouth.Step(level.Read(max_time), true) == 7);
+    assert(mouth.Step(level.Read(max_time), false) == 0);
+    assert(mouth.Step({std::numeric_limits<uint16_t>::max(), true}, true) == 3);
+    assert(mouth.Step({}, true) == 1);
+    level.Reset();
+    assert(!level.Read(max_time).fresh);
+    assert(level.Read(max_time).mean_abs == 0);
 }
 ''')
     flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
     env = dict(os.environ, ASAN_OPTIONS="halt_on_error=1", UBSAN_OPTIONS="halt_on_error=1")
     subprocess.run(
-        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+        [compiler, f"-std={standard}", "-Wall", "-Wextra", "-Werror",
          "-fsanitize=address,undefined", *flags, "-I", str(SENSE), str(source),
          "-o", str(binary)], check=True, timeout=60, env=env,
     )
