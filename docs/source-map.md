@@ -107,6 +107,7 @@ API and policy helpers are part of the same runtime, not additional services.
 | [simulator.py](../code/laptop/src/desk_robot/simulator.py) | Synthetic mock head and images, never physical evidence |
 | [soil_calibration.py](../code/laptop/src/desk_robot/soil_calibration.py) | Relative soil moisture from measured ADC references |
 | [spatial_bracket.py](../code/laptop/src/desk_robot/spatial_bracket.py) | Stationary JPEG and odometry receipt validation |
+| [sleep_clock.py](../code/laptop/src/desk_robot/sleep_clock.py) | Monotonic+wall sleep-aware cadence clock |
 | [spatial_frames.py](../code/laptop/src/desk_robot/spatial_frames.py) | Planar rigid frame transforms |
 | [spatial_grid.py](../code/laptop/src/desk_robot/spatial_grid.py) | Read-only projected range occupancy evidence |
 | [spatial_memory.py](../code/laptop/src/desk_robot/spatial_memory.py) | Per-pet SQLite spatial provenance sidecar |
@@ -446,7 +447,7 @@ is a separate historical objective, not a robot dependency.
 | `S014` | SW-18010P vibration switch | VERIFY STOCK | HTML claims 2, repo has no confident model count; digital contact and debounce |
 | `S015` | BerryIMU older multi-sensor | OPTIONAL ALTERNATIVE | Photographed likely V1, actual chip/addresses/rails unverified; retain driver for spare only |
 | `S016` | MPU6050 IMU | ACTIVE REQUIRED SENSOR | User says MPU6050 is in use; firmware uses official 0x75 ID and 0x3B 14-byte six-axis read, no proven physical handling calibration |
-| `S017` | LSM6DS3TR-C six-axis IMU | CONDITIONAL | Replacement only after owned BerryIMU test fails |
+| `S017` | LSM6DS3TR-C six-axis IMU | CONDITIONAL | Fallback replacement only after selected active MPU6050 (`S016`) and unqualified spare BerryIMU (`S015`) fail qualification |
 | `S018` | GY-61 accelerometer | OPTIONAL STOCK | Cannot replace gyro-assisted handling fusion by itself |
 | `S019` | QMC5883L magnetometer | EXPANSION | Yaw/reference demo, not track odometry |
 | `S020` | AS5600 magnetic angle | EXPANSION | Magnetic knob/pose feedback; mount/magnet and bus conflict check |

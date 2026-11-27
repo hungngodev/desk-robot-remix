@@ -1197,6 +1197,16 @@
       "title": "Execute the first unit acceptance route",
       "phase": "12 Acceptance, release and ongoing governance",
       "source_owner": "docs/hardware/full-feature-plan.json",
+      "guide_links": [
+        "docs/product-definition.md",
+        "docs/guides/one-complete-robot.md"
+      ],
+      "acceptance_targets": {
+        "reanchors_within_20mm": ">=9/10",
+        "stationary_key_and_candy_returns_from_moved_starts": ">=8/10",
+        "false_arrivals_or_unsafe_commands": 0,
+        "physical_trial_gate": "OPEN pending real moved-start, false-detection, lost-pose, and STOP receipts"
+      },
       "verification_command": "cd code && python scripts/verify_system.py --suite all",
       "gate": "OPEN",
       "last_verified_sha": null,

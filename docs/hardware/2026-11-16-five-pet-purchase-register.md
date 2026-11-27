@@ -171,3 +171,8 @@ No competitor PCB is an approved substitute solely from a chip family, claimed p
 **Honest purchasing status:** exactly **63 documented role/decision rows**, comprising **42 primary pet/dock + 7 primary shared station + 14 linked subassembly or alternative rows**. Linked rows are NOT 14 more automatic products. All 49 primary IDs have verified existing source links; **25 of 42 main purchasing rows remain unquoted** and motor/power substitutions are NOT selected. Exact pack, carrier revisions and printed fixture sizes still missing, so full fleet release is NOT confirmed. Vendor price snippets are time-sensitive and quotes exclude tax, shipping and stock validation. A vendor page link gives exact listing photos where available, not proof that the delivered carrier matches.
 
 Supersedes scattered partial one-robot shopping proposals as the intended five-pet candidate comparison. Must not mark `complete` or merge PR #17 without device measurements.
+
+## Pre-order engineering notes (HOLD)
+
+* **`logic_level` (`SN74AHCT1G125`):** Engineering guide identifies `SN74AHCT1G125DBVR` as the candidate package to qualify; exact orderable MPN, supplier SKU, unit pricing, and stock availability remain **Unquoted / HOLD**.
+* **`sensor_3v3` (`Pololu #2873`):** Selected VIN source (protected `1S`/BQ24075 path vs regulated `5V` rail), 3 V low-voltage cutoff margin under ~700 mA startup surge, and restart behavior require explicit selection and bench load budgeting prior to order release.

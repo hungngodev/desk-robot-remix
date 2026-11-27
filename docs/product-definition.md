@@ -157,9 +157,12 @@ Explicit conversation turns use their own bounded session.
 
 The [interaction-sensor specification](hardware/interaction-sensors.md) gives
 the touch/IMU/optional-light hardware, behavior, source reuse and acceptance.
-The [photo audit](hardware/photo-inventory-2026-11-04.md) makes the owned
-BerryIMU the prototype motion-sensor candidate; a new LSM6 purchase is conditional
-on that board being unsuitable. Additional photographed modules remain optional.
+Per the current source and feature plan, the selected per-pet IMU is the
+**MPU6050 (GY-521)** on its documented WROOM path (`docs/hardware/full-feature-plan.json`,
+[source map](source-map.md#L448)); the photographed owned BerryIMU from the
+[photo audit](hardware/photo-inventory-2026-11-04.md) remains an unqualified spare,
+and an LSM6DS3TR-C purchase is conditional only if MPU6050/spare evaluation fails.
+Additional photographed modules remain optional.
 
 Local Mac is the default compute route; cloud is optional. Camera capture starts
 around one fresh JPEG per second during observation, subject to measured audio/
