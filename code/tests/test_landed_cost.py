@@ -1006,3 +1006,28 @@ def test_landed_total_exact_discount_boundary(discount, expected):
     ) == expected
     with pytest.raises(ValueError, match="discount exceeds seller total"):
         mod.landed_total_cents(150, shipping=20, tax=3, duties=2, discount=176)
+
+
+@pytest.mark.parametrize("bad", [None, True, 12, "bad", []])
+def test_nonobject_paid_order_rows_keep_prior_spending_unknown(bad):
+    evidence = {
+        "paid_orders_complete": True,
+        "paid_orders": [
+            bad,
+            {"order_reference": "already-paid", "total_paid_usd": "12.50",
+             "allocations": [{"role_key": "robot:i2c_mux", "quantity": 1}]},
+        ],
+    }
+    errors = []
+    paid, allocations = mod._collect_paid_orders(evidence, errors)
+    assert errors == ["paid order 0: invalid record"]
+    assert paid == {"already-paid": 1250}
+    assert allocations == {"already-paid": {"robot:i2c_mux": 1}}
+    assert mod._prior_paid_total(evidence, paid, errors) is None
+
+    evidence["paid_orders"].pop(0)
+    errors = []
+    paid, allocations = mod._collect_paid_orders(evidence, errors)
+    assert errors == []
+    assert paid == {"already-paid": 1250}
+    assert mod._prior_paid_total(evidence, paid, errors) == 1250

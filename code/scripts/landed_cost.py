@@ -270,6 +270,9 @@ def _collect_paid_orders(
         errors.append("Prior paid orders must be a list")
         orders = []
     for index, order in enumerate(orders):
+        if not isinstance(order, dict):
+            errors.append(f"paid order {index}: invalid record")
+            continue
         try:
             reference = _nonempty(order.get("order_reference"), "paid reference")
             amount = cents(order.get("total_paid_usd"), "paid total")
@@ -293,7 +296,7 @@ def _collect_paid_orders(
                 raise ValueError("conflicting duplicate paid reference")
             paid_orders[reference] = amount
             paid_order_allocations[reference] = allocations
-        except (AttributeError, ValueError) as exc:
+        except ValueError as exc:
             errors.append(f"paid order {index}: {exc}")
     return paid_orders, paid_order_allocations
 
