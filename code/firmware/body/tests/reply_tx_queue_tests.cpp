@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -10,9 +11,13 @@ struct FakeSerial {
   int free = 0;
   std::size_t per_write = 1024;
   std::string sent;
+  std::size_t writes = 0;
   int availableForWrite() const { return free; }
   std::size_t write(const std::uint8_t* data, std::size_t count) {
-    const auto accepted = std::min({count, static_cast<std::size_t>(free), per_write});
+    assert(free > 0);
+    assert(count > 0 && count <= 32 && count <= static_cast<std::size_t>(free));
+    ++writes;
+    const auto accepted = std::min(count, per_write);
     sent.append(reinterpret_cast<const char*>(data), accepted);
     free -= static_cast<int>(accepted);
     return accepted;
@@ -140,7 +145,43 @@ void test_urgent_under_sustained_ring_pressure() {
   }
 }
 
+// Exercise signed FIFO availability and unsigned budgets on both lanes.
+void test_drain_integer_boundaries() {
+  for (const bool urgent : {false, true}) {
+    Queue queue;
+    FakeSerial serial;
+    const std::string line(urgent ? 62 : 126, 'x');
+    assert(urgent ? queue.enqueue_priority_line(line.c_str()) :
+                    queue.enqueue_line(line.c_str()));
+    const auto initial = queue.pending();
+    const auto unlimited = std::numeric_limits<std::size_t>::max();
+    for (const int free : {std::numeric_limits<int>::min(), -1, 0}) {
+      serial.free = free;
+      assert(queue.drain(serial, unlimited) == 0);
+      assert(queue.pending() == initial && queue.dropped() == 0);
+      assert(serial.writes == 0 && serial.sent.empty() && serial.free == free);
+    }
+    serial.free = std::numeric_limits<int>::max();
+    assert(queue.drain(serial, 0) == 0);
+    assert(serial.writes == 0 && queue.pending() == initial);
+    serial.per_write = 0;
+    assert(queue.drain(serial, unlimited) == 0);
+    assert(serial.writes == 1 && serial.sent.empty() && queue.pending() == initial);
+    serial.per_write = unlimited;
+    for (std::size_t remaining = initial; remaining > 0; remaining -= 32) {
+      assert(queue.drain(serial, unlimited) == 32);
+      assert(queue.pending() == remaining - 32);
+    }
+    assert(queue.pending() == 0 && queue.dropped() == 0);
+    assert(serial.sent == line + "\r\n");
+    assert(serial.free == std::numeric_limits<int>::max() - static_cast<int>(initial));
+    const auto writes = serial.writes;
+    assert(queue.drain(serial, unlimited) == 0 && serial.writes == writes);
+  }
+}
+
 int main() {
+  test_drain_integer_boundaries();
   test_urgent_under_sustained_ring_pressure();
   test_distinct_urgent_receipt_survives_duplicate_burst();
   desk_robot::ReplyTxQueue<128> head, usb;
@@ -160,7 +201,8 @@ int main() {
   assert(head_serial.sent.size() == 32); // ports have separate queues
   while (head.pending() != 0) {
     head_serial.free = 128;
-    assert(head.drain(head_serial) <= 32);
+    const auto written = head.drain(head_serial);
+    assert(written > 0 && written <= 32);
   }
   assert(head_serial.sent == status + "\r\n");
 
