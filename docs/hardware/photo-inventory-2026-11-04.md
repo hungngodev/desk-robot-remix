@@ -19,7 +19,7 @@ remain unknown. The images establish appearance/ownership, not electrical tests.
 |3883 | **Likely mechanical tilt/vibration switch module**, medium; photo too soft for exact model | Spare binary movement/tilt input. Cannot provide gyro readings or replace the full IMU |
 |3882 /3881 | **Separate camera module**, high in category; board text appears CMY-1118 V1.0, exact sensor/interface unknown | Keep spare. Do not assume USB/UVC, UART, or compatibility with Sense's camera connector. Use the camera already included with Sense |
 |3880 | **Magnetic reed-switch comparator module**, high in function, KY-025-style | Optional magnet-equipped accessory/feeding game. A reed switch is not a Hall IC; detection alone cannot identify which accessory is present |
-|3879 /3878 | **GY-61 analog accelerometer**, consistent with ADXL335; high in category, chip marking not read | Spare for tilt/shake experiments, **no gyro**. Three analog outputs cost three ADC inputs; BerryIMU's I2C is the simpler prototype route |
+|3879 /3878 | **GY-61 analog accelerometer**, consistent with ADXL335; high in category, chip marking not read | Spare for tilt/shake experiments, **no gyro**. Three analog outputs cost three ADC inputs; The selected MPU6050 I2C route avoids these three ADC inputs |
 |3877 /3876 | **Adafruit MAX9814 AGC electret microphone amplifier**, high; model and analog-output specifications visible | Spare audio input. Sense already includes its digital microphone. **This does not replace MAX98357A speaker output** or qualify voice interruption |
 
 The large camera is not a Sharp distance sensor. No touch module, ToF breakout,
@@ -36,21 +36,29 @@ See the follow-up below for its photo identification.
 
 ## Prototype change and fleet boundary
 
-The prototype BOM now reserves the **owned BerryIMU at zero additional purchase
-cost**, with inventory/compatibility checks still open. LSM6DS3TR-C moves to a
-conditional fallback, not an additional required sensor. One photographed IMU
-does not cover five robots: four further working equivalents remain unconfirmed
-if only this one is available. All cores retain the same sensing/behavior
-contract; no requirement is removed.
+The original prototype BOM reserved the photographed BerryIMU at zero additional
+purchase cost. That selection is superseded by the user-reported MPU6050,
+the current [full feature plan](full-feature-plan.json)'s one IMU per robot.
+BerryIMU remains a photographed spare, not confirmed MPU6050 stock. The exact
+MPU6050 carrier, quantity and working condition remain unverified; five robots
+need five qualified IMUs. LSM6DS3TR-C is a conditional fallback only. All cores
+retain the same sensing/behavior contract.
 
 The original audit left TTP223 touch and MAX98357A plus speaker on the shopping list.
-The follow-up below supersedes the touch purchase. Keep speaker output, four
-downward VL6180X, one forward VL53L0X, TCA9548A, a matched 1S power system and
-rated assembly and power parts on the
-unconfirmed/missing list. Reflective IR and PIR are not automatic replacements
-for local edge protection. No new camera, microphone, Uno, Pico or Pi is needed.
+The follow-up below records the photographed touch module. The historical
+VL6180X recommendation is withdrawn. The current plan specifies eight VL53L0X
+per robot at 7-bit address 0x29, isolated by a TCA9548A at 0x70: four downward
+cliff lanes (0–3), one forward guarded lane (4), and three read-only left/right/rear
+lanes (5–7). A separate accessory TCA9548A at 0x71 makes two muxes per robot.
+The read-only lanes confer no movement authority. The exact GY-530 carrier,
+3.3 V bus compatibility, optics and loaded stopping remain unqualified; one
+bench sample is not approval to order the remaining sensors or move the robot.
+Speaker output, matched 1S power and rated assembly parts also remain subject
+to the [current inventory and build gaps](parts.md). Reflective IR and PIR are
+not replacements for local edge protection. No new camera, microphone, Uno,
+Pico or Pi is needed.
 
-## Before wiring the owned IMU
+## Historical BerryIMU spare checks (not the selected MPU6050 wiring plan)
 
 1. Identify the exact PCB revision, header orientation and supply pins from
    matching OzzMaker documentation. The current shop page mainly describes V3;
