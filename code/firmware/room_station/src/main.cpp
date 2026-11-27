@@ -258,7 +258,10 @@ AmgRecovery amg_recovery;
 class RadarObservedUart final : public Stream {
  public:
   explicit RadarObservedUart(Stream& source) : source_(source) {}
-  void begin_poll() { remaining_ = kReadBudget; }
+  void begin_poll() {
+    gate_.expire_partial(millis(), kRadarStaleMs);
+    remaining_ = kReadBudget;
+  }
   int available() override {
     if (remaining_ == 0) return 0;
     const int count = source_.available();
@@ -274,7 +277,7 @@ class RadarObservedUart final : public Stream {
       remaining_ = 0;
       return value;
     }
-    if (gate_.consume(static_cast<uint8_t>(value)))
+    if (gate_.consume_at(static_cast<uint8_t>(value), millis(), kRadarStaleMs))
       data_frame_complete_ = true;
     return value;
   }

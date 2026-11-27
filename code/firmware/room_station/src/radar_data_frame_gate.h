@@ -20,6 +20,19 @@ struct RadarTargetSample {
 
 class RadarDataFrameGate {
  public:
+  // Retire partial packets even when the UART is silent. Use the existing
+  // radar freshness budget; a late suffix must not renew an old observation.
+  void expire_partial(uint32_t now_ms, uint32_t max_age_ms) {
+    if (position_ != 0 && now_ms - partial_started_ms_ > max_age_ms)
+      position_ = 0;
+  }
+
+  bool consume_at(uint8_t byte, uint32_t now_ms, uint32_t max_age_ms) {
+    expire_partial(now_ms, max_age_ms);
+    if (position_ == 0) partial_started_ms_ = now_ms;
+    return consume(byte);
+  }
+
   bool consume(uint8_t byte) {
     static constexpr uint8_t kHeader[4] = {0xF4, 0xF3, 0xF2, 0xF1};
     // Retain candidate bytes until validated; on rejection slide by one
@@ -108,6 +121,7 @@ class RadarDataFrameGate {
   }
   uint8_t frame_[64] = {};
   uint8_t position_ = 0;
+  uint32_t partial_started_ms_ = 0;
 };
 
 }  // namespace desk_robot_room
