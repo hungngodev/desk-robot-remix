@@ -116,8 +116,9 @@ def stl(path, name, mat):
             tuple(map(float, v))
             for v in re.findall(rb"vertex\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)", data)
         ]
-        assert verts and len(verts) % 3 == 0
         faces = [(n, n + 1, n + 2) for n in range(0, len(verts), 3)]
+    if not verts or len(verts) % 3 != 0:
+        raise ValueError(f"STL must contain complete triangles: {path}")
     lo = [min(v[a] for v in verts) for a in range(3)]
     hi = [max(v[a] for v in verts) for a in range(3)]
     verts = [(v[0] - (lo[0] + hi[0]) / 2, v[1] - (lo[1] + hi[1]) / 2, v[2] - lo[2]) for v in verts]
@@ -143,7 +144,8 @@ else:
     with zipfile.ZipFile(headpath) as z:
         root = ET.fromstring(z.read("3D/3dmodel.model"))
     ns = {"m": root.tag.split("}")[0][1:]}
-    assert root.attrib["unit"] == "millimeter"
+    if root.attrib.get("unit") != "millimeter":
+        raise ValueError(f"3MF must declare millimeter units: {headpath}")
     head_vertices = []
     for item in root.findall("./m:resources/m:object", ns):
         vertices = item.findall("./m:mesh/m:vertices/m:vertex", ns)
