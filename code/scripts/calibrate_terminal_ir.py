@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
+from desk_robot.dock_timing import DOCK_OBSERVATION_MAX_AGE_MS, dock_age_is_fresh
 
 POSITION_LABELS = ("left", "center", "right")
 REFLECTION_LABEL = "reflection_only"
@@ -416,7 +417,10 @@ async def capture(base_url: str, token: str, robot_id: str,
             if (not math.isfinite(roundtrip_ms) or roundtrip_ms < 0
                     or any(
                         reading[f"{side}_valid"]
-                        and reading[f"{side}_age_ms"] + roundtrip_ms > 200
+                        and not dock_age_is_fresh(
+                            reading[f"{side}_age_ms"] + roundtrip_ms,
+                            DOCK_OBSERVATION_MAX_AGE_MS,
+                        )
                         for side in ("left", "right")
                     )):
                 raise ValueError(

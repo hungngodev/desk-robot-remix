@@ -133,6 +133,7 @@ async def fast_sleep(_seconds):
 
 @pytest.mark.parametrize(("optical_age_ms", "roundtrip_s"), [
     (185, .020),  # Head age plus transport delay exceeds 200 ms.
+    (76, .125),  # Exactly one millisecond beyond the inclusive boundary.
     (20, .210),  # Even a young frame expires during a long HTTP response.
 ])
 async def test_capture_rejects_http_delay_that_expires_optical_evidence(
@@ -167,7 +168,10 @@ async def test_capture_rejects_http_delay_that_expires_optical_evidence(
     assert len(calls) == 1
 
 
-async def test_capture_accepts_fast_delivery_inside_optical_age_budget(monkeypatch):
+@pytest.mark.parametrize(("optical_age_ms", "roundtrip_s"), [(180, .019), (75, .125)])
+async def test_capture_accepts_fast_delivery_inside_optical_age_budget(
+    monkeypatch, optical_age_ms, roundtrip_s,
+):
     monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
     calls = []
 
@@ -175,7 +179,7 @@ async def test_capture_accepts_fast_delivery_inside_optical_age_budget(monkeypat
         calls.append(request)
         sample = position_records()[0]["ir"].copy()
         sample["left_seq"] = len(calls)
-        sample["left_age_ms"] = 180
+        sample["left_age_ms"] = optical_age_ms
         return httpx.Response(200, json=sample)
 
     original_client = httpx.AsyncClient
@@ -191,14 +195,14 @@ async def test_capture_accepts_fast_delivery_inside_optical_age_budget(monkeypat
     def clock():
         index, phase = divmod(ticks[0], 2)
         ticks[0] += 1
-        return 1000.0 + index + (.019 if phase else 0.0)
+        return 1000.0 + index + (roundtrip_s if phase else 0.0)
 
     monkeypatch.setattr(cal, "time", SimpleNamespace(monotonic=clock))
     rows = await cal.capture(
         "http://localhost:8765", "S" * 40, "robot-01", "left", 20, .05,
     )
     assert len(calls) == len(rows) == 20
-    assert rows[0]["received_monotonic"] == pytest.approx(1000.019)
+    assert rows[0]["received_monotonic"] == pytest.approx(1000.0 + roundtrip_s)
     assert rows[-1]["ir"]["left_seq"] == 20
 
 
