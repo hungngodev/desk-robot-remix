@@ -197,10 +197,15 @@ def test_nominal_mg90s_four_cups_preserve_printable_bounds(tmp_path):
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
 @pytest.mark.parametrize("override,reason", [
     ("clearances_mm=[1.2]", "insufficient printable wall"),
-    ("clearances_mm=[0.15,-0.30,0.45,0.6]", "positive"),
-    ("clearances_mm=[0.15,0.30,0.45,1.6]", "positive"),
+    ("clearances_mm=[0.15,-0.30,0.45,0.6]", "must be measured and positive"),
+    ("clearances_mm=[0.15,0.30,0.45,1.6]", "must be measured and positive"),
+    ("clearances_mm=[0.15,0.30,0.45,1.2]", "insufficient printable wall"),
+    ("clearances_mm=[0.15,0.30,0.30,0.60]", "must be strictly increasing"),
+    ("clearances_mm=[0.30,0.15]", "must be strictly increasing"),
+    ("clearances_mm=[]", "coupon count must be bounded"),
+    ('part="unknown"', "Unknown MG90S fit coupon"),
     ("spacing_mm=0", "printable separation"),
-    ("total_height_mm=2.1", "Assertion"),
+    ("total_height_mm=2.1", "total_height_mm >= (floor_mm + 3)"),
     ("wall_mm=2", "insufficient printable wall"),
 ])
 def test_mg90s_invalid_overrides_cannot_print_misleading_coupons(
@@ -211,8 +216,12 @@ def test_mg90s_invalid_overrides_cannot_print_misleading_coupons(
         "openscad", "--export-format", "binstl", "-o", str(output),
         "-D", override, str(SCAD),
     ], capture_output=True, text=True, timeout=120)
-    assert result.returncode != 0
-    assert reason in result.stderr + result.stdout
+    assert result.returncode != 0, result.stderr
+    assert not output.exists(), "Invalid override left an STL artifact"
+    assert any(
+        line.startswith("ERROR: Assertion") and reason in line
+        for line in result.stderr.splitlines()
+    ), result.stderr
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
