@@ -16,7 +16,10 @@ _MIN_SIGNAL_97 = 32
 
 
 def validate_optics(data: object, robot_id: str) -> dict:
-    if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+    if (type(robot_id) is not str or not robot_id.strip()
+            or robot_id.strip() != robot_id or not isinstance(data, dict)
+            or type(data.get("robot_id")) is not str
+            or data["robot_id"] != robot_id):
         raise ValueError("Optical diagnostics robot identity mismatch")
     optics = data.get("optics")
     if not isinstance(optics, dict):

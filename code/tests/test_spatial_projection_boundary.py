@@ -71,3 +71,21 @@ def test_valid_off_center_distortion_still_projects():
     point = project(calibration())
     assert point.x_mm > 0
     assert point.y_mm < 0
+
+
+@pytest.mark.parametrize('pid', [np.array(['OV5640']), np.str_('OV5640')])
+def test_nested_lens_pid_must_be_plain_string(pid):
+    cal = calibration((0.,) * 5)
+    lens = replace(cal.lens, camera_sensor_pid=pid)
+    with pytest.raises(ProjectionError, match='Lens and measured mount geometry'):
+        replace(cal, lens=lens)
+
+
+def test_nested_distortion_must_be_plain_immutable_tuple():
+    class MutableCoefficients(tuple):
+        pass
+
+    cal = calibration()
+    lens = replace(cal.lens, distortion_coeffs=MutableCoefficients(cal.lens.distortion_coeffs))
+    with pytest.raises(ProjectionError, match='Lens and measured mount geometry'):
+        replace(cal, lens=lens)

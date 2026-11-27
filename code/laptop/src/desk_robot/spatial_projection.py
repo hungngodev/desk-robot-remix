@@ -64,8 +64,9 @@ class FloorProjectionCalibration:
                 or any(type(x) is not int for x in self.valid_pixel_roi)):
             raise ProjectionError("Invalid calibrated visible image ROI")
         if (self.lens.image_width_px is None or self.lens.image_height_px is None
+                or type(self.lens.camera_sensor_pid) is not str
                 or self.lens.camera_sensor_pid not in ("OV3660", "OV5640")
-                or self.lens.distortion_coeffs is None
+                or type(self.lens.distortion_coeffs) is not tuple
                 or self.lens.mount_lateral_offset_mm is None
                 or self.lens.mount_yaw_deg is None):
             raise ProjectionError("Lens and measured mount geometry incomplete")
