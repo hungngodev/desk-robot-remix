@@ -273,7 +273,12 @@ def _eligible_for_manual_local_rearm(status: dict, touch: dict, ranges: dict,
 
 
 def inspect_status(status: dict) -> dict:
-    """Summarize the actual five-channel WROOM JSON without granting movement."""
+    """Summarize five guarded ranges and optional read-only side/rear diagnostics.
+
+    Manual rearm eligibility is a host precheck for the stepper profile only;
+    the WROOM still decides whether rearm and arm are allowed. No status
+    summary establishes physical qualification or grants movement authority.
+    """
     touch, safety, ranges = _inspect_primary_status(status)
     imu, family, imu_data = _inspect_imu(status, safety.get("fault"))
     extras = status.get("extras")

@@ -32,7 +32,8 @@
     "actual_exit": 1,
     "purchase_ready": false,
     "whole_robot_total": null,
-    "shipping_tax_zero": "Gate demonstration only, not a quote"
+    "shipping_tax_zero": "Gate demonstration only, not a quote",
+    "reproduction_note": "Historical command and exit code only. Current check_budget.py requires an explicit --bom for --shipping/--tax and exits 2 on --require-ready; neither historical math nor zero fees authorize purchase. Use code/scripts/procurement_release.py with verified first-unit receipts for release."
   },
   "project_memory": {
     "dataset": "desk-robot-remix",
