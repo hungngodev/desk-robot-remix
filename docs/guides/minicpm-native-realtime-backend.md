@@ -6,7 +6,7 @@ Status November 11, 2026: opt-in real Xiaozhi head PCM/Opus server routing, loca
 
 This section supersedes the old statements below saying the exclusive audio route and head output are completely unimplemented. **The source adapters are now implemented, but have NOT passed full end-to-end physical tests, and native vLLM model operation on the user's M1 Max is not established.**
 
-The pinned xinnan Xiaozhi server now receives an isolated `desk_robot_native_omni.py` overlay and copies the single shared `realtime_omni_protocol.py` protocol implementation. In an explicitly opted-in robot session, the actual decoded XIAO 16kHz mono PCM (from the same server Opus decoder and VAD) is diverted from legacy ASR into the upstream vLLM-Omni WebSocket. Real native 24kHz PCM16 deltas are converted to 16kHz and encoded in the *same pinned Xiaozhi 60ms Opus framing* for the actual head device websocket. It does not fake WAV/TTS or run another microphone or speaker stack. Device route and model model route are fenced by the real device ID, native response ID and cancellation generation. The existing urgent `tts stop flush:true` signal remains highest priority.
+The pinned xinnan Xiaozhi server now receives an isolated `desk_robot_native_omni.py` overlay and copies the single shared `realtime_omni_protocol.py` protocol implementation. In an explicitly opted-in robot session, the actual decoded XIAO 16kHz mono PCM (from the same server Opus decoder and VAD) is diverted from legacy ASR into the upstream vLLM-Omni WebSocket. Real native 24kHz PCM16 deltas are converted to 16kHz and encoded in the *same pinned Xiaozhi 60ms Opus framing* for the actual head device websocket. It does not fake WAV/TTS or run another microphone or speaker stack. Device and model routes are fenced by the real device ID, native response ID and cancellation generation. The existing urgent `tts stop flush:true` signal preempts native speech; independent WROOM physical faults retain P0 priority.
 
 ### Explicit opt-in for ONE first pet, keep the complete fleet
 
@@ -33,7 +33,7 @@ If the model is running on a different machine, the adapter **requires authentic
 
 * Default off. Both a mapped current Xiaozhi websocket and explicit per-robot native selection are required. Group/peer speech lease and native model speech ownership cannot overlap.
 * Mic input uses the pinned server's real Opus decoded PCM and already existing AEC/VAD decisions. A bounded 50-frame queue prevents unbounded input latency and fails closed on overload.
-* The 9B model is upstream native inference. Audio and VLM software are not reimplemented. Per 1s model unit, a recent actual JPEG can accompany PCM in the documented `video_frames` wire field. An independent background camera task cannot delay microphone packet delivery; if no timely image arrives, send audio without making up a visual observation.
+* The 9B model is upstream native inference. Audio and VLM software are not reimplemented. Per 1s model unit, a recent actual JPEG can accompany PCM in the documented `video_frames` wire field. The native session subscribes to the Mac's authenticated `/v1/pet/{robot_id}/omni-stream` continuous JPEG feed during quiet and speech. Independent camera I/O must not delay microphone packet delivery; if no timely image arrives, send audio without making up a visual observation.
 * Native audio output gets a bounded 40-chunk queue, incremental 24kHz to 16kHz conversion using stateful `audioop.ratecv`, 960-sample Opus frames, paced at 60ms and sent through the original physical device websocket.
 * `response.cancel` plus `output_audio_buffer.clear` invalidate the model's old response, and the existing head `tts stop flush:true` requests immediate decoder reset. Stale older response IDs and `response.done` messages cannot stop the newer turn.
 * Native replies from different pets share one logical audio floor. One genuine human VAD speech start can request silence from the other native model pets without executing body or battery commands.
@@ -41,7 +41,7 @@ If the model is running on a different machine, the adapter **requires authentic
 
 ### Important caveats not solved by code alone
 
-The model's `playback.ack` contract must be based on **actual I2S played samples**, not transmitted Opus, so the adapter deliberately sends **no playback ACK**. Until the XIAO firmware provides generation-scoped played-frame counters, the backend may have imperfect listening/speaking state and cannot be called production ready. A physically confirmed 500ms audible barge-in target, proper echo reference, microphone and speaker clocks, long-running 5-robot session recovery and native model low latency remain **unmeasured**.
+The adapter accepts generation-scoped digital I2S committed-prefix telemetry and exposes `head_audio_i2s_progress_observed` and `head_audio_i2s_committed_ms`. Neither committed samples nor transmitted Opus proves audible speaker playback, so the adapter deliberately sends **no playback ACK**. The backend may have imperfect listening/speaking state and cannot be called production ready. A physically confirmed 500ms audible barge-in target, proper echo reference, microphone and speaker clocks, long-running 5-robot session recovery and native model low latency remain **unmeasured**.
 
 The host loopback tests in `code/tests/test_native_omni_xiaozhi.py` exercise a real WebSocket handshake, actual PCM-shaped input, native model event responses, Opus-shaped head output, explicit model selection, identity, TLS rules, fleet speaker priority and the fact that no playback ACK is invented. They replace neither the real MiniCPM 9B model nor the ESP32 board. The `test_multimodal_api.py` tests verify the Mac source-authenticated JPEG route requires explicit hardware privacy consent.
 
@@ -111,7 +111,7 @@ XIAO Sense PDM mic + hardware AEC (existing)
   -> pinned server decoder: actual mono 16k PCM (existing)
   -> exclusive audio route (implemented, per-robot opt-in)
        -> MiniCPM omni backend realtime WebSocket
-          + camera snapshot from Mac's authenticated per-robot hub
+          + selected JPEG from Mac's authenticated continuous per-robot feed
           + one frame on the matching 1s PCM unit
        <- generated PCM16 at 24k and transcript
   -> single XIAO output owner, resample to 16k, Opus 60ms
