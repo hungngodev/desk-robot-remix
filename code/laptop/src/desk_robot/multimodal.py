@@ -34,7 +34,11 @@ from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fre
 from .scene_motion import _scene_change_mask as _scene_change_mask
 from .scene_motion import change_fraction
 from .scene_motion import scene_change_mask as scene_change_mask
-from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
+from .sensor_event_contract import (  # public names
+    DIRECT_INTERACTION_KINDS,
+    TRIGGERS,
+    is_finite_number,
+)
 from .sleep_clock import continuous_monotonic
 from .vision import OllamaScene, valid_visual_text
 from .vision_admission import (
@@ -57,13 +61,8 @@ TEMPORAL_WORDS = re.compile(
 )
 
 
-def _finite(value: float) -> bool:
-    if type(value) not in (int, float):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False  # Huge Python integers cannot represent host timestamps.
+# Shared finite-number admission contract across sensor and host timestamps.
+_finite = is_finite_number
 
 
 def _frame_is_fresh(received_at: float, now: float, max_age: float) -> bool:
@@ -1191,9 +1190,8 @@ class MultimodalOrchestrator:
         for robot_id in self.hub.robots:
             self._camera_grant_valid(robot_id, self._camera_grants[robot_id])
         self._frame_admission.notify()
-        active_tasks = set(self._model_admission.active())
-        active_tasks.update(self._look_tasks.values())
-        for task in active_tasks:
+        self._model_admission.revoke()
+        for task in set(self._look_tasks.values()):
             if not task.done() and not task.cancelling():
                 task.cancel()
 

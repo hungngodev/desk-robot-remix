@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from io import BytesIO
 
@@ -1674,5 +1675,63 @@ async def test_hardware_guarded_navigate_refuses_turn_route_pre_drive(
         )
         await rt.coordinator.tasks[job.id]
         assert job.state == "succeeded", job.error
+    finally:
+        await rt.close()
+
+
+@pytest.mark.parametrize(
+    "bad_tol",
+    [
+        float("nan"),
+        float("inf"),
+        -float("inf"),
+        -0.01,
+        math.nextafter(0.0, -math.inf),
+        math.pi / 4,
+        math.pi / 2,
+        True,
+        False,
+        "0.2",
+        None,
+        10**400,
+    ],
+)
+async def test_localized_pose_cell_heading_rejects_invalid_yaw_tolerance(
+    settings, tmp_path, bad_tol,
+):
+    from desk_robot.spatial_frames import PlanarTransform
+    from desk_robot.spatial_pose import PoseError
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=600)
+    rt = await _setup_hardware_pose_runtime(
+        settings, tmp_path, head, PlanarTransform("map", "odom", 0.0, 0.0, 0.0),
+    )
+    try:
+        receipt = await head.pose_status()
+        with pytest.raises(PoseError, match="Invalid lattice yaw tolerance"):
+            rt.spatial.localized_pose_cell_heading(
+                "robot-01", receipt, yaw_tolerance_rad=bad_tol,
+            )
+    finally:
+        await rt.close()
+
+
+async def test_localized_pose_cell_heading_accepts_valid_yaw_tolerance_boundaries(
+    settings, tmp_path,
+):
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    rt = await _setup_hardware_pose_runtime(
+        settings, tmp_path, head, PlanarTransform("map", "odom", 0.0, 0.0, 0.0),
+    )
+    try:
+        receipt = await head.pose_status()
+        assert rt.spatial.localized_pose_cell_heading(
+            "robot-01", receipt, yaw_tolerance_rad=0.0,
+        ) == ((2, 2), 0)
+        assert rt.spatial.localized_pose_cell_heading(
+            "robot-01", receipt, yaw_tolerance_rad=math.nextafter(math.pi / 4, 0.0),
+        ) == ((2, 2), 0)
     finally:
         await rt.close()

@@ -24,6 +24,7 @@ from .object_targets import (
     resolve_object_target,
 )
 from .route_planner import GridSnapshot, RouteRequest, RouteResult, SafetyEnvelope, plan_route
+from .sensor_event_contract import is_finite_number
 from .spatial_frames import FrameError, PlanarTransform, odom_base_transform, wrap_yaw_rad
 from .spatial_grid import CELL_MM, GridEvidenceError, RangeCellBatch, SpatialGrid
 from .spatial_memory import SpatialEvidence, SpatialMemory, SpatialSighting
@@ -201,6 +202,11 @@ class SpatialRuntime:
         yaw_tolerance_rad: float = math.pi / 6,
     ) -> tuple[tuple[int, int], int]:
         """Project a validated PoseReceipt through map_to_odom into grid (cell, heading)."""
+        if (
+            not is_finite_number(yaw_tolerance_rad)
+            or not 0.0 <= yaw_tolerance_rad < (math.pi / 4)
+        ):
+            raise PoseError("Invalid lattice yaw tolerance")
         state = self.states[robot_id]
         if (state.grid is None or not state.grid.anchored
                 or state.map_to_odom is None

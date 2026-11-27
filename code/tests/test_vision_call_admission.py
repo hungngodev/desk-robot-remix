@@ -98,3 +98,41 @@ async def test_invalid_vision_deadline_never_enters_uncontended_lock(remaining):
     async with vision_lock_until(lock, 1):
         assert lock.locked()
     assert not lock.locked()
+
+
+async def test_revoked_vision_call_holds_sole_slot_until_local_settlement():
+    admission = VisionCallAdmission()
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+
+    async def stubborn():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+            return "stale"
+
+    def forbidden():
+        pytest.fail("Regranted query overlapped unfinished revoked call")
+
+    first = admission.start(stubborn)
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        assert admission.revoke() == {first}
+        await asyncio.wait_for(cancelled.wait(), 1)
+        with pytest.raises(RuntimeError, match="unfinished revoked call"):
+            admission.start(forbidden)
+        release.set()
+        await asyncio.wait_for(first, 1)
+        await asyncio.sleep(0)
+
+        async def regranted():
+            return "fresh"
+
+        assert await admission.start(regranted) == "fresh"
+    finally:
+        release.set()
+        await asyncio.gather(first, return_exceptions=True)

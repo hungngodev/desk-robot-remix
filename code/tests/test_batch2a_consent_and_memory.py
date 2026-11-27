@@ -518,3 +518,73 @@ async def test_conversation_run_blocks_expired_or_usb_invalidated_room_speech(
         with pytest.raises(RuntimeError, match="revoked"):
             await conv.run(ids, "Check room", 1)
         assert speaker.spoken == []
+
+
+@pytest.mark.asyncio
+async def test_camera_off_on_blocks_regranted_vlm_overlap_until_revoked_call_exits():
+    """Cancellation-resistant VLM call holds the sole slot across OFF->ON until it settles."""
+    settings = Settings(
+        mode="hardware",
+        robots=_robots(1),
+        voice_vision_tools_enabled=True,
+        vision_model="llava:test",
+    )
+    entered_first = asyncio.Event()
+    cancelled_first = asyncio.Event()
+    release_first = asyncio.Event()
+    active_calls = 0
+    max_concurrent = 0
+
+    class StubbornScene:
+        async def answer(self, question, _images, **_kwargs):
+            nonlocal active_calls, max_concurrent
+            active_calls += 1
+            max_concurrent = max(max_concurrent, active_calls)
+            try:
+                if question == "First question":
+                    entered_first.set()
+                    try:
+                        await asyncio.Event().wait()
+                    except asyncio.CancelledError:
+                        cancelled_first.set()
+                        await release_first.wait()
+                        return "stale uncooperative answer"
+                return "fresh authorized answer"
+            finally:
+                active_calls -= 1
+
+    robot_id = settings.robots[0].id
+    heads = {r.id: SimulatedHead(r.id) for r in settings.robots}
+    orch = MultimodalOrchestrator(settings, heads, StubbornScene(), asyncio.Lock())
+    try:
+        orch.hub.offer(
+            robot_id, _tiny_jpeg(), received_at=time.monotonic(), source="proactive",
+        )
+        first_look = asyncio.create_task(orch.look(robot_id, "First question"))
+        await asyncio.wait_for(entered_first.wait(), timeout=1.0)
+
+        # Revoke consent and immediately opt back in while first VLM task resists cancel.
+        settings.voice_vision_tools_enabled = False
+        await asyncio.wait_for(cancelled_first.wait(), timeout=1.0)
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await asyncio.wait_for(first_look, timeout=1.0)
+
+        settings.voice_vision_tools_enabled = True
+        orch.hub.offer(
+            robot_id, _tiny_jpeg(), received_at=time.monotonic(), source="proactive",
+        )
+        # Regranted query must not overlap the still-running pre-revocation VLM call.
+        with pytest.raises(RuntimeError, match="unfinished revoked call"):
+            await orch.look(robot_id, "Second question while blocked")
+        assert max_concurrent == 1
+        assert orch.hub.recent_tool_context(robot_id, time.monotonic()) == []
+
+        # Once the pre-revocation call settles locally, a newly authorized query succeeds.
+        release_first.set()
+        await asyncio.sleep(0.02)
+        result = await orch.look(robot_id, "Third question after settlement")
+        assert result["answer"] == "fresh authorized answer"
+        assert max_concurrent == 1
+    finally:
+        release_first.set()
+        await orch.close()

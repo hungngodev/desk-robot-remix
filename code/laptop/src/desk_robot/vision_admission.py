@@ -97,15 +97,34 @@ async def vision_lock_until(lock: asyncio.Lock, remaining: float):
 
 
 class VisionCallAdmission:
-    """One current model call plus at most one cancellation-resistant retiree."""
+    """One current model call plus at most one cancellation-resistant retiree.
+
+    When camera consent is revoked, any in-flight revoked call holds the sole
+    model slot until its local task settles so a regranted query cannot overlap
+    pre-revocation inference work. Local cancellation does not prove a remote
+    model server terminated computation.
+    """
 
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[str]] = set()
+        self._revoked_tasks: set[asyncio.Task[str]] = set()
 
     def active(self) -> set[asyncio.Task[str]]:
         return {task for task in self._tasks if not task.done()}
 
+    def revoke(self) -> set[asyncio.Task[str]]:
+        active = self.active()
+        self._revoked_tasks.update(active)
+        for task in active:
+            if not task.cancelling():
+                task.cancel()
+        return active
+
     def start(self, request: Callable[[], Coroutine[Any, Any, str]]) -> asyncio.Task[str]:
+        if any(not task.done() for task in self._revoked_tasks):
+            raise RuntimeError(
+                "Visual model capacity occupied by unfinished revoked call"
+            )
         if len(self.active()) >= 2:
             raise RuntimeError("Visual model capacity occupied by unfinished calls")
         task = asyncio.create_task(request())
@@ -119,3 +138,4 @@ class VisionCallAdmission:
                 task.exception()
         finally:
             self._tasks.discard(task)
+            self._revoked_tasks.discard(task)
