@@ -679,14 +679,17 @@ transport, agent framework or media worker just to imitate another product.
 Existing Xiaozhi native tool speech used to slice serialized Mac facts at
 an arbitrary 1800 characters. Three completed results could be malformed
 or partially omitted before the final text/audio model response.
-The shared pure voice intent module now packs one to three receipts in
-compact valid JSON. It preserves each requested result, its order, robot
-provenance, verified numeric fields and explicit physical-qualification
-flags. Only untrusted descriptive text may be excerpted. If the complete
-typed facts cannot fit, no model speech is generated and the optional
-speaker lease is released. Existing native transport and tool executor
-are unchanged. Source regressions are in the current native omni tests.
-The isolated helper has passed Python checks, not a full repository suite.
+The historical three-receipt limit has since changed. The current
+`native_readonly_requests_with_capacity` selects at most three read-only
+routes and returns an explicit overcapacity flag; `pack_grounded_facts`
+separately packs one through six completed facts in compact valid JSON.
+It preserves result order, robot provenance, typed numeric fields and
+explicit physical-qualification flags. Only untrusted descriptive text
+may be excerpted. See [Complete tool receipt overflow behavior](#complete-tool-receipt-overflow-behavior)
+for the current native caller's distinction between malformed evidence
+and a valid batch that exceeds the context budget. Existing native
+transport and tool executor remain the owners. Historical isolated
+helper checks do not establish exact-head CI or physical acceptance.
 
 **November 17 live exploration source correction:** The guarded hardware
 exploration loop no longer opens its own repeated XIAO `head.snapshot()`
@@ -749,10 +752,14 @@ The shared `desk_robot_voice_intents.pack_grounded_facts` function accepts
 their typed origins and source order within the existing 1800-character
 context cap. Seven or more facts are not silently truncated to the first
 six. Likewise, an uncompressible six-fact set produces a bounded
-`ValueError`, so the live turn must decline to narrate partial evidence
-and release its optional speech ownership. This is the deliberate
-fail-closed response to tool receipt overflow, not a lost seventh tool
-receipt or permission to invent a summary.
+`ValueError`. In the native tool speech caller, a valid overcapacity
+batch is replaced with a limitation-only fact:
+`complete_tool_results_over_capacity`, with
+`complete_answer_available=false` and `tool_measurements_included=false`.
+The existing model speech path may explain the limitation; it receives
+none of the omitted measurements. Other packing errors reject malformed
+evidence without submitting it for narration. Neither path authorizes
+partial answers, invented summaries or physical action.
 
 A human can repeat or narrow the question to fit the bounded context.
 Actual connected tool execution, the delivered head audio and spoken
