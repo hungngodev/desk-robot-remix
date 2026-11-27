@@ -1,8 +1,10 @@
-"""Paper-only 2D placement screen for TWO independent NC dock-seat switches.
+"""Paper-only projected backstop and floor layout screen for a passive dock.
 
-Use measured switch body, actuation and optical geometry with the actual
-OpenSCAD passive dock source. It neither drills final holes, enables charging
-nor verifies physical collision, electrical polarity or motor stopping.
+Use independent left/right NC switch and IR measurements plus the unpowered
+contact gauge envelope, pinned to both OpenSCAD source hashes. The screen
+checks selected source datums, projected clearances and entered travel bounds;
+it does not render OpenSCAD, certify the measurements or verify 3D fit, wiring,
+contact mating or physical stopping. It never authorizes charging.
 """
 from __future__ import annotations
 
@@ -394,8 +396,8 @@ def screen(measurements: dict, *, cad: Path = CAD,
         x["ir_emitter_aperture_inside_backstop"] for x in checks
     )
     # The gauge is centered across the existing unpowered entry channel,
-    # with its 54mm long dimension across the dock and 25mm depth along
-    # the approach. This orientation is NOT proven for real pogo contacts.
+    # with its source-defined length across the dock and depth along the
+    # approach. This orientation is NOT proven for real pogo contacts.
     # Robot underside Z is measured from the desk surface, not from the
     # dock floor; the printed dock base thickness is part of the envelope.
     carrier_x0 = (width - contact["carrier_length_mm"]) / 2
