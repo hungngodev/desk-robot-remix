@@ -853,7 +853,7 @@ def test_dock_uses_generic_nano_not_brand_premium():
     assert "Unquoted" in row
     firmware = (mod.PLAN.parents[2] / "code/firmware/dock/platformio.ini").read_text()
     assert "board = nanoatmega328" in firmware
-    assert "Arduino-IRremote.git#v4.7.1" in firmware
+    assert "Arduino-IRremote.git#498dc591b255d8ba2e239c875804bdab2ab0fe91" in firmware
 
 
 def test_current_high_markup_sensor_rows_are_generic_and_unapproved():

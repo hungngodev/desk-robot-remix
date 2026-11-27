@@ -81,7 +81,7 @@ def test_five_distinct_classic_nec_beacons_match_decoder_contract():
     assert "command ^ command_inverse" in decoder
     assert "motor_authorized = false" in decoder
     assert "charging_authorized = false" in decoder
-    assert "Arduino-IRremote.git#v4.7.1" in ini
+    assert "Arduino-IRremote.git#498dc591b255d8ba2e239c875804bdab2ab0fe91" in ini
     assert "board = nanoatmega328" in ini
     codes = set()
     for dock_id in range(1, 6):

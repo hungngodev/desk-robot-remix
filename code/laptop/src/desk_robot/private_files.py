@@ -32,7 +32,8 @@ def validate_private_directory_ancestry(path: Path) -> None:
             raise ValueError("Memory root ancestry must contain only directories")
         if (info.st_mode & stat.S_IWOTH) and not (info.st_mode & stat.S_ISVTX):
             raise PermissionError(
-                "Memory root ancestry must not contain non-sticky world-writable directories"
+                "Private memory root ancestry must not contain "
+                "non-sticky world-writable directories"
             )
 
 

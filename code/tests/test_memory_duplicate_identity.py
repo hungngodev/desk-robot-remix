@@ -57,14 +57,23 @@ def test_each_pet_database_restricts_legacy_file_permissions(tmp_path, monkeypat
     assert store.count("pet_a") == 0
     assert stat.S_IMODE(own.stat().st_mode) == 0o600
 
-    original = os.chmod
+    original_chmod = os.chmod
+    original_fchmod = os.fchmod
+    own_identity = (own.stat().st_dev, own.stat().st_ino)
 
     def refuse_database(path, mode):
         if os.fspath(path) == os.fspath(own):
             raise PermissionError("private volume denies chmod")
-        return original(path, mode)
+        return original_chmod(path, mode)
+
+    def refuse_database_fd(fd, mode):
+        info = os.fstat(fd)
+        if (info.st_dev, info.st_ino) == own_identity:
+            raise PermissionError("private volume denies fchmod")
+        return original_fchmod(fd, mode)
 
     monkeypatch.setattr(os, "chmod", refuse_database)
+    monkeypatch.setattr(os, "fchmod", refuse_database_fd)
     with pytest.raises(PermissionError, match="Cannot protect private robot memory database"):
         store.recent("pet_a")
     # No failure on one private file changes another robot's storage.
