@@ -1,4 +1,6 @@
 #include <cstdint>
+#include <initializer_list>
+#include <limits>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -40,6 +42,7 @@ static void check_frame_boundaries() {
   CHECK(desk_robot::pn532_response(good.data(), good.size(), 0x4a, payload, size));
   CHECK(payload == good.data() + 8 && size == 1 && payload[0] == 0);
   reject(nullptr, good.size());
+  reject(good.data(), std::numeric_limits<std::size_t>::max());
   for (std::size_t n = 0; n < good.size(); ++n) {
     const std::vector<std::uint8_t> short_frame(good.begin(), good.begin() + n);
     reject(short_frame.data(), short_frame.size());
@@ -73,6 +76,7 @@ static void check_frame_boundaries() {
 
   const std::vector<std::uint8_t> ack = {1, 0, 0, 0xff, 0, 0xff, 0};
   CHECK(!desk_robot::pn532_ack(nullptr, ack.size()));
+  CHECK(!desk_robot::pn532_ack(ack.data(), std::numeric_limits<std::size_t>::max()));
   for (std::size_t i = 0; i < ack.size(); ++i) {
     const std::vector<std::uint8_t> short_ack(ack.begin(), ack.begin() + i);
     CHECK(!desk_robot::pn532_ack(short_ack.data(), short_ack.size()));
@@ -223,8 +227,28 @@ static void check_encoder_boundaries() {
   const std::vector<std::uint8_t> body(17, 0xa5);
   const std::vector<std::uint8_t> untouched(26, 0x55);
   auto out = untouched;
-  CHECK(desk_robot::pn532_encode(0x4a, body.data(), 17, out.data(), out.size()) == 0);
-  CHECK(out == untouched);
+  // Reject oversized input before adding frame overhead or accessing body.
+  const auto max_size = std::numeric_limits<std::size_t>::max();
+  for (const std::size_t size : {std::size_t{17}, std::size_t{256},
+                                max_size - 9, max_size - 8, max_size}) {
+    CHECK(desk_robot::pn532_encode(0x4a, body.data(), size, out.data(), out.size()) == 0);
+    CHECK(out == untouched);
+  }
+  // Every supported length must accept exactly its required capacity, while
+  // every smaller capacity leaves the destination entirely unchanged.
+  for (std::size_t size = 0; size <= 16; ++size) {
+    const std::vector<std::uint8_t> exact_body(size, 0xa5);
+    for (std::size_t capacity = 0; capacity < size + 9; ++capacity) {
+      CHECK(desk_robot::pn532_encode(0x4a, exact_body.data(), size,
+                                    out.data(), capacity) == 0);
+      CHECK(out == untouched);
+    }
+    std::vector<std::uint8_t> exact_out(size + 9, 0x55);
+    CHECK(desk_robot::pn532_encode(0x4a, exact_body.data(), size,
+                                  exact_out.data(), exact_out.size()) == exact_out.size());
+    CHECK(exact_out[3] == size + 2 && exact_out.back() == 0);
+    for (std::size_t i = 0; i < size; ++i) CHECK(exact_out[7 + i] == 0xa5);
+  }
   CHECK(desk_robot::pn532_encode(0x4a, body.data(), 16, out.data(), 24) == 0);
   CHECK(out == untouched);
   CHECK(desk_robot::pn532_encode(0x4a, nullptr, 1, out.data(), out.size()) == 0);
