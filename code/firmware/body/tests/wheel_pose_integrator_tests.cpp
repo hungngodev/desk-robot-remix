@@ -299,6 +299,79 @@ static void refuse_reused_wheel_acquisition() {
   check(wrap.observe(b, b.wheel.right_ms));
 }
 
+static void refuse_reused_rejected_pair_wheel_acquisition() {
+  using Quality = WheelPoseIntegrator::Quality;
+  for (std::uint32_t base : {0U, 0xfffffee0U}) {
+    for (bool before_origin : {false, true}) {
+      for (bool reuse_left : {false, true}) {
+        for (int fault = 0; fault < 4; ++fault) {
+          WheelPoseIntegrator pose;
+          check(pose.configure(calibration()));
+          const std::uint32_t accepted_pairs = before_origin ? 2U : 3U;
+          for (std::uint32_t i = 1; i <= accepted_pairs; ++i)
+            check(pose.observe(observed(i, base + i * 50U),
+                               base + i * 50U + 15U));
+          if (!before_origin)
+            check(pose.start_origin(base + accepted_pairs * 50U + 15U));
+
+          const std::uint32_t rej_seq = accepted_pairs + 1U;
+          const std::uint32_t rej_ms = base + rej_seq * 50U;
+          auto rejected = observed(rej_seq, rej_ms);
+          rejected.imu_valid = false;
+          check(!pose.observe(rejected, rej_ms + 15U));
+          check(pose.state().quality == Quality::Unavailable);
+          check(pose.state().origin == 0);
+          check(!pose.stationary_origin_ready());
+
+          auto replay = observed(rej_seq + 1U, rej_ms + 15U);
+          if (fault == 0 || fault == 3) {
+            if (reuse_left || fault == 3) {
+              replay.wheel.left_seq = rejected.wheel.left_seq;
+              replay.wheel.left_ms = rejected.wheel.left_ms;
+            }
+            if (!reuse_left || fault == 3) {
+              replay.wheel.right_seq = rejected.wheel.right_seq;
+              replay.wheel.right_ms = rejected.wheel.right_ms;
+            }
+          } else if (fault == 1) {
+            if (reuse_left) {
+              replay.wheel.left_seq = rejected.wheel.left_seq;
+              replay.wheel.left_ms = rejected.wheel.left_ms + 1U;
+            } else {
+              replay.wheel.right_seq = rejected.wheel.right_seq;
+              replay.wheel.right_ms = rejected.wheel.right_ms + 1U;
+            }
+          } else {
+            if (reuse_left) {
+              replay.wheel.left_seq = rejected.wheel.left_seq + 1U;
+              replay.wheel.left_ms = rejected.wheel.left_ms;
+            } else {
+              replay.wheel.right_seq = rejected.wheel.right_seq + 1U;
+              replay.wheel.right_ms = rejected.wheel.right_ms;
+            }
+          }
+          replay.wheel.skew_ms = replay.wheel.left_ms > replay.wheel.right_ms
+              ? replay.wheel.left_ms - replay.wheel.right_ms
+              : replay.wheel.right_ms - replay.wheel.left_ms;
+          check(replay.wheel.skew_ms <= calibration().max_pair_skew_ms);
+          const std::uint32_t replay_now = rej_ms + 30U;
+          check(!pose.observe(replay, replay_now));
+          check(pose.state().quality == Quality::Unavailable);
+          check(pose.state().origin == 0);
+
+          for (std::uint32_t k = 0; k < 3U; ++k) {
+            const std::uint32_t s = rej_seq + 2U + k;
+            const std::uint32_t t = rej_ms + (k + 1U) * 50U;
+            check(pose.observe(observed(s, t), t + 15U));
+          }
+          check(pose.start_origin(rej_ms + 165U));
+          check(pose.state().origin == (before_origin ? 1U : 2U));
+        }
+      }
+    }
+  }
+}
+
 static void unhealthy_magnet_or_cached_wheel_revokes_pose() {
   using desk_robot::AngleRaw;
   using desk_robot::WheelAngleCapture;
@@ -773,6 +846,7 @@ int main() {
   signed_heading_wrap_and_projection();
   unhealthy_magnet_or_cached_wheel_revokes_pose();
   refuse_reused_wheel_acquisition();
+  refuse_reused_rejected_pair_wheel_acquisition();
   origin_quality_respects_heading_uncertainty();
   stationary_pairs_do_not_accumulate_translation_error();
   refuse_future_wheel_acquisition();

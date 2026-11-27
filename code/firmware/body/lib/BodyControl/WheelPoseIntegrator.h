@@ -78,10 +78,25 @@ class WheelPoseIntegrator {
   bool observe(const Evidence& e, std::uint32_t now_ms) {
     if (!configured_) return false;
     const auto& w = e.wheel;
-    const auto reject = [this, &w]() {
+    const auto reject = [this, &w, now_ms]() {
       // Even a rejected complete packet must not be replayed as a new
-      // stationary origin witness on a later call.
+      // stationary origin witness on a later call, nor may its freshly
+      // observed wheel leg acquisitions be reused after invalidation.
       if (w.pair_seq > last_pair_seq_) last_pair_seq_ = w.pair_seq;
+      const auto fence_leg = [this, now_ms](std::uint32_t seq, std::uint32_t ms,
+                                            std::uint32_t& last_seq,
+                                            std::uint32_t& last_ms) {
+        if (seq == 0 || now_ms - ms > limits_.max_age_ms) return;
+        if (last_seq == 0 ||
+            (advances(seq, last_seq) && advances(ms, last_ms))) {
+          last_seq = seq;
+          last_ms = ms;
+        }
+      };
+      if (w.valid && w.segment != 0 && w.pair_seq != 0) {
+        fence_leg(w.left_seq, w.left_ms, last_left_seq_, last_left_ms_);
+        fence_leg(w.right_seq, w.right_ms, last_right_seq_, last_right_ms_);
+      }
       invalidate();
       return false;
     };
@@ -95,8 +110,9 @@ class WheelPoseIntegrator {
                              : w.pair_seq != last_pair_seq_ + 1U) ||
         (last_left_seq_ != 0 &&
          (!advances(w.left_seq, last_left_seq_) ||
-          !advances(w.right_seq, last_right_seq_) ||
-          !advances(w.left_ms, last_left_ms_) ||
+          !advances(w.left_ms, last_left_ms_))) ||
+        (last_right_seq_ != 0 &&
+         (!advances(w.right_seq, last_right_seq_) ||
           !advances(w.right_ms, last_right_ms_))) ||
         !e.imu_valid || e.imu_segment == 0 ||
         e.imu_yaw_urad < -3141593LL || e.imu_yaw_urad > 3141593LL ||
