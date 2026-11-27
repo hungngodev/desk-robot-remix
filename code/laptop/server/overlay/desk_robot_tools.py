@@ -224,6 +224,75 @@ def _valid_visual_receipt(result):
     )
 
 
+_MAX_TOOL_RESPONSE_BYTES = 65536
+
+
+def _valid_optional_bool(result: dict, *keys: str) -> bool:
+    return all(key not in result or type(result[key]) is bool for key in keys)
+
+
+def _valid_optional_str(result: dict, *keys: str) -> bool:
+    return all(key not in result or isinstance(result[key], str) for key in keys)
+
+
+def _valid_route_receipt(route: str, result: dict) -> bool:
+    if route == "plan-readonly":
+        return _valid_plan_receipt(result)
+    if route == "look":
+        return _valid_visual_receipt(result)
+    if route == "stop":
+        # A software STOP acknowledgement is distinct from measured physical standstill.
+        if (result.get("physical_stop_verified") is True
+                or result.get("measured_physical_stop") is True):
+            return False
+        return _valid_optional_bool(
+            result, "stopped", "acknowledged", "physical_stop_verified", "measured_physical_stop",
+        ) and _valid_optional_str(result, "message", "status")
+    if route in {"pickup", "latest-pickup"}:
+        if (result.get("physical_grasp_verified") is True
+                or result.get("measured_physical_grasp") is True):
+            return False
+        if "target" in result and result["target"] not in {"key", "candy"}:
+            return False
+        if "job_id" in result and (not isinstance(result["job_id"], str) or not result["job_id"]):
+            return False
+        if "job" in result and result["job"] is not None and not isinstance(result["job"], dict):
+            return False
+        return _valid_optional_bool(
+            result, "accepted", "queued", "running", "physical_grasp_verified",
+        ) and _valid_optional_str(result, "status", "state")
+    if route == "status":
+        return _valid_optional_bool(result, "armed", "stopped", "connected") and _valid_optional_str(
+            result, "backend", "state", "status",
+        )
+    if route == "power-status":
+        return all(
+            key not in result or isinstance(result[key], dict)
+            for key in ("power", "battery", "dock")
+        ) and _valid_optional_bool(result, "charging", "docked", "low_battery")
+    if route == "aux-status":
+        return all(
+            key not in result or isinstance(result[key], dict)
+            for key in ("force", "proximity", "climate", "bmp280", "power", "nfc")
+        )
+    if route == "interaction-context":
+        timeline = result.get("current_interaction_timeline")
+        if timeline is not None and (
+            not isinstance(timeline, list)
+            or any(not isinstance(item, dict) for item in timeline)
+        ):
+            return False
+        return _valid_optional_bool(result, "persistent_memory_included")
+    if route == "voice-context":
+        for key in ("memories", "facts", "results"):
+            if key in result and (
+                not isinstance(result[key], list)
+                or any(not isinstance(item, dict) for item in result[key])
+            ):
+                return False
+    return True
+
+
 def _format_receipt(response, route, robot, readonly):
     if response.status_code >= 400:
         result = {
@@ -233,6 +302,13 @@ def _format_receipt(response, route, robot, readonly):
         if route == "look":
             result["error_code"] = "observation_unavailable"
         return result
+    raw_content = getattr(response, "content", None)
+    if isinstance(raw_content, (bytes, bytearray)) and len(raw_content) > _MAX_TOOL_RESPONSE_BYTES:
+        return {"error": "Robot Mac tool response exceeds size limit", "retried": False}
+    raw_text = getattr(response, "text", None)
+    if (raw_content is None and isinstance(raw_text, str)
+            and len(raw_text.encode("utf-8", errors="ignore")) > _MAX_TOOL_RESPONSE_BYTES):
+        return {"error": "Robot Mac tool response exceeds size limit", "retried": False}
     try:
         result = response.json()
         # Python's decoder accepts NaN/Infinity and overflowing exponents.
@@ -256,10 +332,12 @@ def _format_receipt(response, route, robot, readonly):
                          and result["charging_authorized"] is not False)):
         return {"error": "Robot Mac tool identity or authority invalid",
                 "retried": False}
-    if route == "plan-readonly" and not _valid_plan_receipt(result):
-        return {"error": "Invalid read-only Mac intent plan", "retried": False}
-    if route == "look" and not _valid_visual_receipt(result):
-        return {"error": "Missing authenticated visual tool evidence", "retried": False}
+    if not _valid_route_receipt(route, result):
+        if route == "plan-readonly":
+            return {"error": "Invalid read-only Mac intent plan", "retried": False}
+        if route == "look":
+            return {"error": "Missing authenticated visual tool evidence", "retried": False}
+        return {"error": "Unexpected robot Mac tool response", "retried": False}
     return result
 
 

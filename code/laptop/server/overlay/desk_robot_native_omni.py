@@ -992,9 +992,15 @@ class NativeOmniSession:
                 # Model instruction updates may be impossible; the audio
                 # permissions must still change in the existing Python
                 # speaker, independent of Stage 0 KV support.
+                direct_reply_eligible = self._direct_reply_active or (
+                    self._direct_reply_available
+                    and 0 <= time.monotonic() - self._last_human_speech_at <= 12.0
+                )
                 if ((self._monitor_lost and not old_monitor_lost)
-                        or (self._pet_quiet and not old_quiet)
+                        or (self._pet_quiet and not old_quiet
+                            and not direct_reply_eligible)
                         or (old_autonomy and not self._pet_autonomy_enabled
+                            and not direct_reply_eligible
                             and time.monotonic() -
                                 self._last_human_speech_at > 12)):
                     events = await self._invalidate_head_first()
@@ -2436,8 +2442,9 @@ class NativeOmniSession:
                     self._native_output_words.pop(current_response, None)
                     if (generation == self._generation
                             and current_response != response_id):
-                        stopped = await self._send_device_state(
-                            "stop", generation
+                        self._clear_head_playback()
+                        stopped = await self._send_replacement_stop_state(
+                            generation
                         )
                         # STOP can yield to a new human VAD, a head
                         # reconnect, or a replaced tool answer. Recheck
@@ -2500,7 +2507,19 @@ class NativeOmniSession:
                     fully_sent = True
                     break
 
-    async def _send_device_state(self, state: str, generation: int) -> bool:
+    async def _send_replacement_stop_state(self, generation: int) -> bool:
+        import inspect
+        try:
+            params = inspect.signature(self._send_device_state).parameters
+        except (TypeError, ValueError):
+            params = {}
+        if "flush" in params:
+            return await self._send_device_state("stop", generation, flush=True)
+        return await self._send_device_state("stop", generation)
+
+    async def _send_device_state(
+        self, state: str, generation: int, *, flush: bool = False,
+    ) -> bool:
         global _output_owner, _last_passive_speech_started_at
         if self.closed or generation != self._generation:
             return False
@@ -2574,6 +2593,9 @@ class NativeOmniSession:
                         "type": "tts", "state": state,
                         "session_id": self.conn.session_id,
                     }
+                    if state == "stop" and flush:
+                        message["flush"] = True
+                        self._clear_head_playback()
                     playback = self._head_playback
                     if (state == "start" and playback is not None
                             and self._head_playback_current(generation)):
@@ -3447,9 +3469,68 @@ async def preempt_others_for_human(source_device: str) -> None:
             _output_owner = None
 
 
+async def _retire_opt_out_session(device: str, session: NativeOmniSession) -> None:
+    """Confirm head STOP for an unstarted opted-out native session before clearing."""
+    global _output_owner, _output_owner_unverified
+    import desk_robot_bridge as bridge
+    stop_confirmed = False
+    try:
+        conn = session.conn
+        if (bridge.connections.get(device) is conn
+                and getattr(conn, "client_is_speaking", False)):
+            async with asyncio.timeout(0.4):
+                async with session._device_send_lock:
+                    if bridge.connections.get(device) is conn:
+                        await conn.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop",
+                            "session_id": conn.session_id, "flush": True,
+                        }))
+                        conn.client_is_speaking = False
+                        stop_confirmed = True
+        else:
+            stop_confirmed = _output_owner_unverified != device
+    except Exception:
+        stop_confirmed = False
+    finally:
+        if _sessions.get(device) is session:
+            _sessions.pop(device, None)
+        async with _output_owner_lock:
+            if stop_confirmed:
+                if _output_owner == device:
+                    _output_owner = None
+                if _output_owner_unverified == device:
+                    _output_owner_unverified = None
+            elif _output_owner_unverified in (None, device):
+                if _output_owner is None:
+                    _output_owner = device
+                _output_owner_unverified = device
+
+
 def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     """Opted-in real PCM bypasses legacy Xiaozhi ASR/LLM/TTS, not in parallel."""
+    device = getattr(conn, "device_id", None)
+    session = _sessions.get(device) if device is not None else None
     if not opted_in(conn):
+        if session is not None and session.conn is conn:
+            # Disabling native opt-in mid-session must retire native output
+            # and flush the head BEFORE legacy Xiaozhi can consume mic frames.
+            if not session.closed:
+                session.fail("Native opt-in disabled")
+                if not session._run_entered and session.started is None:
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        _sessions.pop(device, None)
+                    else:
+                        task = loop.create_task(_retire_opt_out_session(device, session))
+                        task.add_done_callback(
+                            lambda done: None if done.cancelled() else done.exception()
+                        )
+            return True
+        if device is not None and _output_owner_unverified == device:
+            # Native head STOP has not been confirmed yet; keep consuming mic
+            # frames rather than allowing legacy Xiaozhi ASR/TTS overlap.
+            return True
         return False
     import desk_robot_bridge as bridge
     device = conn.device_id

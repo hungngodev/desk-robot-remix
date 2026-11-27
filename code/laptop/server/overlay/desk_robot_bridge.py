@@ -773,20 +773,9 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         native = _native_adapter()
     except ModuleNotFoundError:
         native = None  # Physical STOP never waits for optional inference.
-    urgent = getattr(native, "send_external_urgent_stop", None)
     stop_sent = False
     try:
-        if callable(urgent):
-            # Use the same device lock as a currently transmitted Mac Opus
-            # frame. STOP must follow it, never get overtaken by old audio.
-            await urgent(conn)
-        else:
-            await asyncio.wait_for(
-                conn.websocket.send(json.dumps({
-                    "type": "tts", "state": "stop",
-                    "session_id": conn.session_id, "flush": True,
-                })), timeout=0.4,
-            )
+        await _send_urgent_flush_stop(conn, native)
         stop_sent = True
     finally:
         # STOP may finish after this socket or turn has been replaced.
@@ -805,6 +794,34 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
                     # STOP remains independently owned; cancellation propagates.
                     _log_optional_failure("normal_barge_cleanup", exc)
     return True
+
+
+_fallback_device_send_locks: dict[str, asyncio.Lock] = {}
+
+
+def _fallback_device_send_lock(device_id: str) -> asyncio.Lock:
+    lock = _fallback_device_send_locks.get(device_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _fallback_device_send_locks[device_id] = lock
+    return lock
+
+
+async def _send_urgent_flush_stop(conn, native) -> None:
+    """Serialize urgent STOP flush with either the native or fallback send lock."""
+    urgent = getattr(native, "send_external_urgent_stop", None)
+    if callable(urgent):
+        await urgent(conn)
+        return
+
+    async def _locked_stop():
+        async with _fallback_device_send_lock(conn.device_id):
+            await conn.websocket.send(json.dumps({
+                "type": "tts", "state": "stop",
+                "session_id": conn.session_id, "flush": True,
+            }))
+
+    await asyncio.wait_for(_locked_stop(), timeout=0.4)
 
 
 async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
@@ -848,16 +865,7 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
         native = _native_adapter()
     except ModuleNotFoundError:
         native = None
-    urgent = getattr(native, "send_external_urgent_stop", None)
-    if callable(urgent):
-        # An admitted Mac Opus send must finish BEFORE the urgent flush.
-        # Reuse the same device lock as normal VAD and operator STOP.
-        await urgent(conn)
-    else:
-        await asyncio.wait_for(conn.websocket.send(json.dumps({
-            "type": "tts", "state": "stop", "session_id": conn.session_id,
-            "flush": True,
-        })), timeout=0.4)
+    await _send_urgent_flush_stop(conn, native)
     return True
 
 
@@ -967,7 +975,8 @@ async def transmit(conn, text, frames, *, passive: bool = False):
             if leased and callable(send_native):
                 await send_native(conn, packet, generation)
             else:
-                await conn.websocket.send(packet)
+                async with _fallback_device_send_lock(conn.device_id):
+                    await conn.websocket.send(packet)
             conn.last_activity_time = time.time() * 1000
             # Transport time already consumed part of this 60 ms frame.
             # Never add a second full frame of delay after the socket send.
@@ -1010,7 +1019,8 @@ async def transmit(conn, text, frames, *, passive: bool = False):
             if leased and callable(control):
                 await control(conn, generation, send_stop, terminal=True)
             else:
-                await send_stop()
+                async with _fallback_device_send_lock(conn.device_id):
+                    await send_stop()
             # A sent transport command is not an acoustic playback ACK,
             # but a failed send must never release the five-pet speaker.
             stop_confirmed = True
@@ -1258,16 +1268,7 @@ def create_app():
             # A Mac Opus packet can still be in flight when the native model
             # session is absent. Use its shared physical device lock before
             # requesting DMA flush, not an unordered direct WebSocket STOP.
-            urgent = getattr(native, "send_external_urgent_stop", None)
-            if callable(urgent):
-                await urgent(connection)
-            else:
-                await asyncio.wait_for(
-                    connection.websocket.send(json.dumps({
-                        "type": "tts", "state": "stop",
-                        "session_id": connection.session_id, "flush": True,
-                    })), timeout=0.4,
-                )
+            await _send_urgent_flush_stop(connection, native)
         return web.json_response({
             "interrupted": True,
             "device_id": device,

@@ -1975,15 +1975,22 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
         assert not task.done()
         if reason == "group_vad":
             assert not await bridge.interrupt_for_user_voice(connection, True)
-            assert await bridge.interrupt_for_user_voice(connection, True)
+            barge = asyncio.create_task(bridge.interrupt_for_user_voice(connection, True))
+            await asyncio.sleep(0)
+            release_first.set()
+            assert await asyncio.wait_for(barge, timeout=2)
             assert bridge.voice_event_history[-1]["kind"] == "group"
         else:
             payload = {"device_id": "mac-01"}
             if reason == "operator_stop":
                 payload["revoke_initiative"] = True
-            response = await handlers["/interrupt"](body_request(payload))
+            interrupt_task = asyncio.create_task(
+                handlers["/interrupt"](body_request(payload))
+            )
+            await asyncio.sleep(0)
+            release_first.set()
+            response = await asyncio.wait_for(interrupt_task, timeout=2)
             assert response.status == 200
-        release_first.set()
         with pytest.raises(RuntimeError, match="interrupted"):
             await asyncio.wait_for(task, timeout=2)
         assert [frame for frame in sent if isinstance(frame, bytes)] == [b"first"]
