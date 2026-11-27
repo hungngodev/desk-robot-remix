@@ -135,13 +135,13 @@ class I2sTransmissionPrefix:
     _failed: bool = False
 
     def begin_send(self) -> bool:
-        if not self.started or self._failed or self._pending_ms:
+        if self.started is not True or self._failed or self._pending_ms:
             return False
         self._pending_ms = self.sent_ms + 60
         return True
 
     def accept(self, committed_ms: int) -> bool:
-        if (not self.started or self._failed or type(committed_ms) is not int
+        if (self.started is not True or self._failed or type(committed_ms) is not int
                 or committed_ms != self.committed_ms + 60):
             return False
         if committed_ms <= self.sent_ms:
@@ -155,7 +155,7 @@ class I2sTransmissionPrefix:
     def finish_send(self, success: bool) -> None:
         if not self._pending_ms:
             return
-        if success:
+        if success is True:
             self.sent_ms = self._pending_ms
             if self._deferred:
                 self.committed_ms = self._pending_ms

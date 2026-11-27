@@ -1,5 +1,6 @@
 """Native full-duplex audio/video protocol regression, no invented hardware."""
 import base64
+import math
 
 import pytest
 from desk_robot.realtime_omni_protocol import I2sTransmissionPrefix, OmniDuplexWire, is_bounded_jpeg
@@ -828,3 +829,25 @@ def test_failed_i2s_send_never_accepts_late_receipt_or_retries():
 )
 def test_shared_jpeg_frame_bounds(payload, valid):
     assert is_bounded_jpeg(payload) is valid
+
+
+@pytest.mark.parametrize("invalid", [1, 1.0, "false", math.nan, math.inf, [], None])
+def test_i2s_send_requires_literal_boolean_success(invalid):
+    prefix = I2sTransmissionPrefix(started=True)
+    assert prefix.begin_send()
+    prefix.finish_send(True)
+    assert prefix.accept(60)
+    assert prefix.begin_send()
+    assert prefix.accept(120)
+    prefix.finish_send(invalid)
+    assert prefix.sent_ms == prefix.committed_ms == 60
+    assert not prefix.accept(120)
+    assert not prefix.begin_send()
+
+
+@pytest.mark.parametrize("invalid", [1, 1.0, "false", math.nan, math.inf, [], None])
+def test_i2s_start_requires_literal_boolean_authority(invalid):
+    prefix = I2sTransmissionPrefix(started=invalid)
+    assert not prefix.begin_send()
+    assert not prefix.accept(60)
+    assert prefix.sent_ms == prefix.committed_ms == 0
