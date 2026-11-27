@@ -6,6 +6,8 @@ Source: user supplied `ESP32 Deskpet Ideas.html`, 1,074,994 bytes, **41 HTML sec
 
 Audited base: `codex/initial-remix`, commit `aa7fb7deebbefda0d1642894165f4398849f360f`.
 
+**Historical audit, not current wiring instructions.** The table and evidence labels describe the November 9 checkpoint, not the live branch or its CI. For current sensor selection, wiring and physical release gates, use [wiring](../hardware/wiring.md) and the [full feature and shopping plan](../hardware/full-feature-wiring-and-shopping.md).
+
 ## Evidence labels
 
 * **SPEC VERIFIED**: a datasheet or official manufacturer reference supports the stated interface or component capability.
@@ -27,7 +29,7 @@ The following entries are independently auditable discrepancies between the HTML
 | --- | --- | --- | --- |
 | PIN01 | MAX30102 paw on GPIO41 SDA/GPIO42 SCL | In the Sense board these pins are onboard PDM microphone DATA41/CLOCK42. The repo's body I2C is GPIO21 SDA/22 SCL. See [Seeed pin map](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/) | Reject HTML wire assignment. Use the WROOM bus, possibly mux channel 5, only after breakout voltage/pullup check. No battery connection or power-on until validated. |
 | INV01 | About five purple GY MAX30102 modules were owned and approved Nov 6 | The current repo inventory and bill do not establish their receipt or count | Add as a **reported but unverified** optional input until board photos/count and electrical IDs exist. Do not change original paid total. |
-| SEN01 | Four VL6180X units are locked for five robots | ST now marks [VL6180X obsolete / out of production](https://www.st.com/en/imaging-and-photonics-solutions/vl6180x.html) | Research [VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html) as an active short range replacement; no fleet order or automatic substitution. It needs a different driver and real desk tests. |
+| SEN01 | Four VL6180X units are locked for five robots | ST now marks [VL6180X obsolete / out of production](https://www.st.com/en/imaging-and-photonics-solutions/vl6180x.html) | **Superseded proposal:** the November 9 research considered [VL53L4CD](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html) as an active short range replacement. The current [wiring and sensor selection](../hardware/wiring.md) instead selects VL53L0X; do not reopen VL53L4CD as a purchase recommendation. Exact VL53L0X carrier and physical ranging qualification remain required. |
 | SEN02 | A five sensor pipelined scan takes about 40 ms | No body sensor acquisition is implemented or measured; mux adds switching overhead | Unverified target, not a specification met. Measure full scan age with two steppers, display and audio active. |
 | SEN03 | Mux channel mapping still open | `docs/hardware/wiring.md` already assigns channel 0 front left, 1 front right, 2 rear left, 3 rear right, 4 forward | Keep mapping; test actual optical orientation and I2C pullups. |
 | SAF01 | The robot may reverse in degraded sensor mode | Canonical `CliffGuard` fails closed on missing, invalid, stale or uncalibrated sensor frames. Safety docs forbid blind retreat | Reject degraded reverse and recovery motion. Fault latch and USB rearm after fresh healthy samples; remain disarmed until a new deliberate operator arm. |
@@ -42,11 +44,11 @@ The following entries are independently auditable discrepancies between the HTML
 
 ## Pins to wire and pins not to borrow
 
-**WROOM stepper profile:** left ULN2003 IN1–4 = 13,14,25,26; right = 27,32,33,23; lift = 18; grip = 19; body I2C SDA21/SCL22; mux RESET GPIO4 only on breakout variants supporting RESET; UART RX16/TX17; touch GPIO34 input only. Current source: `code/firmware/body/include/BodyPins.h`.
+**WROOM stepper profile:** left ULN2003 IN1–4 = 13,14,25,26; right = 27,32,33,23; lift = 18; grip = 19; body I2C SDA21/SCL22; mux RESET passively pulled HIGH to 3.3 V (no MCU GPIO; `kMuxReset = -1`, GPIO4 reserved); UART RX16/TX17; touch GPIO34 input only. Current source: `code/firmware/body/include/BodyPins.h`.
 
 **Sense head:** camera pins fixed by Sense carrier, PDM clock42/data41, OLED SDA5/SCL6, MAX98357A speaker BCLK4/LRCK7/DOUT8, UART TX2/RX1. Current source: `code/firmware/head/sense/config.h` and `sense/README.md`. Do not attach a MAX30102, replacement mic or I2C bus to GPIO41/42 while retaining the microphone. Do not put audio into 5V logic inputs or drive speaker negative to ground. The Seeed Sense SD slot shares pins with the audio allocation and must remain unused.
 
-**MUX and sensors:** WROOM body I2C upstream, default mux `0x70` if A0–A2 grounded, four downward ToFs on channels 0–3, forward VL53L0X on channel 4. All downstream `0x29` in the baseline, but the sensor type and bus pullup/regulator requirements must be checked per real breakout. Texas Instruments [TCA9548A datasheet](https://www.ti.com/lit/ds/symlink/tca9548a.pdf) confirms an 8 channel I2C switch, not automatic device discovery or electrical compatibility for every clone.
+**MUX and sensors:** WROOM body I2C upstream, default mux `0x70` if A0–A2 grounded, four downward ToFs on channels 0–3, forward VL53L0X on channel 4. All downstream `0x29` in the historical baseline. The current full profile adds three read-only VL53L0X directions on lanes 5–7 (left, right, rear) of range mux `0x70`; accessories use separate mux `0x71`. The five critical channels retain local guard authority. Check the actual carrier, bus pullups and regulator before wiring; see the current wiring guide. Texas Instruments [TCA9548A datasheet](https://www.ti.com/lit/ds/symlink/tca9548a.pdf) confirms an 8 channel I2C switch, not automatic device discovery or electrical compatibility for every clone.
 
 **Heartbeat option:** MAX30102's [Analog Devices datasheet](https://www.analog.com/en/products/max30102.html) describes separate logic/LED rails. Common purple breakouts differ in regulation and level conversion. Do not presume a labeled `VIN` pin means directly 5V safe, and do not presume a 1.8V logic input accepts 3.3V. Identify the exact board before selection.
 
@@ -79,7 +81,7 @@ Until those proofs exist, report **RESEARCHED: yes** for grounded datasheet choi
 A second current-source check confirmed the key physical conflicts rather than relying only on the earlier HTML audit:
 
 * [ST official VL6180X product status](https://www.st.com/en/imaging-and-photonics-solutions/vl6180x.html): **Obsolete, Out of Production**. Do not silently use the research-era part as a current supply-ready purchase.
-* [ST official VL53L4CD product status](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html): the referenced VL53L4CD part variants are listed **Active, in volume production**. This establishes manufacturer status, **not** breakout availability, complete $50 affordability, compatible physical sensor field geometry or successful firmware migration.
+* [ST official VL53L4CD product status](https://www.st.com/en/imaging-and-photonics-solutions/vl53l4cd.html): the referenced VL53L4CD part variants are listed **Active, in volume production**. This established manufacturer status at that checkpoint, **not** breakout availability, complete $50 affordability, compatible physical sensor field geometry or successful firmware migration. The VL53L4CD proposal is superseded by the current VL53L0X selection (SEN01 above).
 * [Seeed official XIAO ESP32S3 Sense microphone usage](https://wiki.seeedstudio.com/xiao_esp32s3_sense_mic/): **GPIO41 microphone DATA and GPIO42 microphone clock**. The optional MAX30102 cannot occupy those lines while the onboard PDM mic is retained.
 * [Seeed XIAO ESP32S3 pin multiplexing](https://wiki.seeedstudio.com/xiao_esp32s3_pin_multiplexing/): GPIO43/44 are standard UART-labelled header pins, but the **actual compiled project's TX2/RX1** allocation is a different deliberate map. Do not rewire the head to a tutorial's 43/44 without corresponding reviewed firmware and collision testing.
 
