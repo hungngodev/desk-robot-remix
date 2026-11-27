@@ -600,7 +600,9 @@ def test_cleared_attention_does_not_reissue_old_conversation_generation(monkeypa
     ledger = AttentionLedger(["pet", "peer"])
     obsolete = ledger.begin_topic("pet", "Older interrupted topic", 10)
     ledger.sensor("pet", "handling_tilt", 11)
-    ledger.clear("pet")
+    with monkeypatch.context() as clock:
+        clock.setattr("desk_robot.attention.time.monotonic", lambda: 12.0)
+        ledger.clear("pet")
     assert ledger.timeline("pet", 12) == []
     current = ledger.begin_topic("pet", "Fresh conversation", 13)
     assert current > obsolete
@@ -620,7 +622,9 @@ def test_attention_clear_preserves_newer_vad_and_asr_replay_fences(monkeypatch):
     current = "omni_" + "a" * 12 + "_" + "c" * 20
     assert ledger.heard("pet", old, "Old private words", 11)
     ledger.human_started("pet", 12)
-    ledger.clear("pet")  # Revoked group prompt after newer human VAD.
+    with monkeypatch.context() as clock:
+        clock.setattr("desk_robot.attention.time.monotonic", lambda: 12.0)
+        ledger.clear("pet")  # Revoked group prompt after newer human VAD.
     assert ledger.timeline("pet", 13) == []
     assert not ledger.heard_is_current("pet", 11.5)
     assert not ledger.heard("pet", delayed, "Old delayed words", 11.5)
@@ -629,7 +633,9 @@ def test_attention_clear_preserves_newer_vad_and_asr_replay_fences(monkeypatch):
     assert ledger.heard("pet", current, "Current question", 13)
     assert ledger.heard("peer", old, "Independent words", 11)
     assert "Current question" in ledger.timeline("pet", 13)[0]["content"]
-    ledger.clear("pet")
+    with monkeypatch.context() as clock:
+        clock.setattr("desk_robot.attention.time.monotonic", lambda: 13.5)
+        ledger.clear("pet")
     assert not ledger.heard("pet", delayed, "Superseded words", 12.5)
     assert ledger.timeline("pet", 14) == []
     assert "Independent words" in ledger.timeline("peer", 14)[0]["content"]
@@ -833,7 +839,9 @@ def test_old_operator_topic_expires_without_erasing_current_social_or_fault(
     far = ledger.timeline("pet", 131)[0]["content"]
     assert "Earlier completed operator topic" not in far
     assert "Play" in far
-    ledger.clear("pet")
+    with monkeypatch.context() as clock:
+        clock.setattr("desk_robot.attention.time.monotonic", lambda: 135.0)
+        ledger.clear("pet")
     ledger.begin_topic("pet", "Another game", 140, origin="autonomous_social")
     assert "Earlier completed operator topic" not in (
         ledger.timeline("pet", 141)[0]["content"]

@@ -40,6 +40,7 @@ def _text(value: str, max_length: int) -> str:
 @dataclass
 class _Attention:
     generation: int = 0
+    cleared_at: float = -math.inf
     topic: str = ""
     topic_origin: str = "operator"
     topic_state: str = "none"
@@ -101,7 +102,7 @@ class AttentionLedger:
         state = self._state(robot_id)
         # Late or duplicated topic callbacks cannot steal the current Mac
         # activity owner or erase its live sensor evidence.
-        if state.generation > 0 and at <= state.topic_updated_at:
+        if state.generation > 0 and at <= max(state.topic_updated_at, state.cleared_at):
             raise ValueError("Topic start must follow prior topic activity")
         if origin == "autonomous_social":
             # Social banter may replace the current activity owner, but
@@ -178,12 +179,12 @@ class AttentionLedger:
         """Source time must not precede a newer voice start or ASR cue."""
         _clock(at)
         state = self._state(robot_id)
-        return at >= max(state.voice_at, state.asr_order_at)
+        return at > state.cleared_at and at >= max(state.voice_at, state.asr_order_at)
 
     def human_started(self, robot_id: str, at: float) -> None:
         _clock(at)
         state = self._state(robot_id)
-        if at <= state.voice_at:
+        if at <= max(state.voice_at, state.cleared_at):
             return
         state.interrupted_asr = None
         if (state.asr and state.last_heard_id is not None
@@ -266,7 +267,7 @@ class AttentionLedger:
         # Late previous-topic events cannot enter the new generation.
         if (state.topic_state == "active" and at < state.topic_updated_at):
             return False
-        if at < max(state.sent_at, state.voice_at):
+        if at <= state.cleared_at or at < max(state.sent_at, state.voice_at):
             # Late old speech must not reappear after new human barge.
             return False
         cleaned = _text(text, 75)
@@ -281,6 +282,8 @@ class AttentionLedger:
         """Preserve independent physical evidence during a dialogue or activity."""
         _clock(at)
         state = self._state(robot_id)
+        if at <= state.cleared_at:
+            return False
         if not isinstance(kind, str) or not re.fullmatch(r"[a-z_]{1,40}", kind):
             return False
         if detail is not None and (
@@ -487,6 +490,14 @@ class AttentionLedger:
         # receipt identities and ordering metadata, never the private words.
         self._robots[robot_id] = _Attention(
             generation=prior.generation + 1,
+            # Retire receipts from before cleanup, including callbacks that
+            # were in flight but had not yet entered the ledger. Never use a
+            # synthetic speech or ASR timestamp to stand in for this fence.
+            cleared_at=max(
+                time.monotonic(), prior.cleared_at, prior.topic_updated_at,
+                prior.voice_at, prior.asr_order_at, prior.sent_at,
+                prior.sensor_edges[-1][1] if prior.sensor_edges else -math.inf,
+            ),
             voice_at=prior.voice_at,
             asr_order_at=prior.asr_order_at,
             heard_ids=deque(prior.heard_ids, maxlen=prior.heard_ids.maxlen),
