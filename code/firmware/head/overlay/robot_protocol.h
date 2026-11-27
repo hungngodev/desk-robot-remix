@@ -231,14 +231,16 @@ inline bool Integer(std::string_view text, int& value) {
 }
 
 inline bool ParseCommand(std::string_view line, bool operator_control, Command& result) {
-    result = {};
-    if (line.empty() || line.size() > 95 || line.front() == ' ' || line.back() == ' ') return false;
-    for (unsigned char ch : line) if (ch < 32 || ch > 126) return false;
+    // Delay clearing output until input is no longer needed: line may alias
+    // result.wire or result.verb. Every rejected parse still clears stale state.
+    const auto reject = [&result]() { result = {}; return false; };
+    if (line.empty() || line.size() > 95 || line.front() == ' ' || line.back() == ' ') return reject();
+    for (unsigned char ch : line) if (ch < 32 || ch > 126) return reject();
     std::vector<std::string_view> parts;
     for (size_t pos = 0; pos < line.size();) {
         size_t end = line.find(' ', pos);
         if (end == std::string_view::npos) end = line.size();
-        if (end == pos) return false;
+        if (end == pos) return reject();
         parts.push_back(line.substr(pos, end - pos));
         pos = end + 1;
     }
@@ -246,22 +248,22 @@ inline bool ParseCommand(std::string_view line, bool operator_control, Command& 
     parsed.verb = std::string(parts[0]);
     for (size_t i = 1; i < parts.size(); ++i) {
         int n = 0;
-        if (!Integer(parts[i], n)) return false;
+        if (!Integer(parts[i], n)) return reject();
         parsed.args.push_back(n);
     }
     const auto& v = parsed.verb;
     const auto& a = parsed.args;
     if (v == "drive") {
-        if (a.size() != 2 && a.size() != 3) return false;
-        if (a[0] < -100 || a[0] > 100 || a[1] < -100 || a[1] > 100) return false;
-        if (a.size() == 3 && (a[2] < 1 || a[2] > 250)) return false;
+        if (a.size() != 2 && a.size() != 3) return reject();
+        if (a[0] < -100 || a[0] > 100 || a[1] < -100 || a[1] > 100) return reject();
+        if (a.size() == 3 && (a[2] < 1 || a[2] > 250)) return reject();
     } else if (v == "lift" || v == "grip") {
-        if (a.size() != 1 || a[0] < 60 || a[0] > 120) return false;
+        if (a.size() != 1 || a[0] < 60 || a[0] > 120) return reject();
     } else if (v == "arm" || v == "disarm" || v == "keepalive") {
-        if (!operator_control || !a.empty()) return false;
+        if (!operator_control || !a.empty()) return reject();
     } else if (v == "stop" || v == "halt" || v == "status" || v == "aux" || v == "ir" || v == "optics" || v == "pose" || v == "ping") {
-        if (!a.empty()) return false;
-    } else return false;
+        if (!a.empty()) return reject();
+    } else return reject();
     parsed.wire = std::string(line);
     result = std::move(parsed);
     return true;

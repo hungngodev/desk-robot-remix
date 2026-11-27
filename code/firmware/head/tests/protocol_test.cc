@@ -268,6 +268,25 @@ int main() {
         assert(!CompleteJpeg(bounded_jpeg, length));
     assert(CompleteJpeg(bounded_jpeg, sizeof(bounded_jpeg)));
 
+    // An input view may refer to the output command's own storage.
+    // Keep both short and heap-backed input alive until parsing finishes.
+    {
+        Command c;
+        const std::string wire = std::string("drive ") + std::string(87, '0') + " 0";
+        assert(ParseCommand(wire, true, c));
+        assert(ParseCommand(c.wire, true, c));
+        assert(c.wire == wire && c.args == std::vector<int>({0, 0}));
+        assert(ParseCommand("stop", false, c));
+        assert(ParseCommand(c.verb, false, c));
+        assert(c.wire == "stop" && c.args.empty());
+        c = {"stale", {1}, "drive 1 1 251"};
+        assert(!ParseCommand(c.wire, true, c));
+        assert(c.verb.empty() && c.args.empty() && c.wire.empty());
+        c = {"stale", {1}, "arm"};
+        assert(!ParseCommand(c.wire, false, c));
+        assert(c.verb.empty() && c.args.empty() && c.wire.empty());
+    }
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");
