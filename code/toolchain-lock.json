@@ -44,7 +44,7 @@
       "platformio/toolchain-gccarmnoneeabi": "1.70201.0"
     },
     "platformio": "6.1.18",
-    "inventory_baseline_run": 45892803019,
+    "inventory_baseline_run": 46051423168,
     "direct_libraries": {
       "Sensirion I2C SCD4x": {
         "url": "https://github.com/Sensirion/arduino-i2c-scd4x.git",
@@ -81,7 +81,7 @@
       "Adafruit BusIO": "1.17.4",
       "Adafruit SSD1306": "2.5.17",
       "Adafruit ST7735 and ST7789 Library": "1.12.0",
-      "Adafruit seesaw Library": "1.7.9",
+      "Adafruit seesaw Library": "1.7.10",
       "Adafruit ILI9341": "1.7.0",
       "Adafruit STMPE610": "1.1.6",
       "Adafruit TouchScreen": "1.1.6",
@@ -95,7 +95,7 @@
       "Adafruit BusIO": "https://github.com/adafruit/Adafruit_BusIO/blob/3b8364267c3ee6e16bad91bc2101aefbd5b5915f/LICENSE",
       "Adafruit SSD1306": "https://github.com/adafruit/Adafruit_SSD1306/blob/d94f699451d72286357cba7259055ffff2c2940b/license.txt",
       "Adafruit ST7735 and ST7789 Library": "https://github.com/adafruit/Adafruit-ST7735-Library/blob/d568339f957380ceb05dda57f6712c2704a6394f/README.txt",
-      "Adafruit seesaw Library": "https://github.com/adafruit/Adafruit_Seesaw/blob/985b41efae3d9a8cba12a7b4d9ff0d226f9e0759/Adafruit_seesaw.cpp",
+      "Adafruit seesaw Library": "https://github.com/adafruit/Adafruit_Seesaw/blob/9f71ddb057d527bdf5655ee19dcfe80eb9d1759f/Adafruit_seesaw.cpp",
       "Adafruit ILI9341": "https://github.com/adafruit/Adafruit_ILI9341/blob/1871d9597f0d67cd15e3a331b8952c5dd3d3c418/README.md",
       "Adafruit STMPE610": "https://github.com/adafruit/Adafruit_STMPE610/blob/3707ff5e8ff9149f352626d217e7255812df010f/LICENSE",
       "Adafruit TouchScreen": "https://github.com/adafruit/Adafruit_TouchScreen/blob/b64e777d8f6e321ba2ed726412955dd2ae8d26e0/license.txt",
