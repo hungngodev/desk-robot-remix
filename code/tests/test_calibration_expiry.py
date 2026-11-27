@@ -95,3 +95,37 @@ def test_rollback_cannot_extend_or_revive_robot_calibration(monkeypatch, wall_ex
         ticks = 110.0
     with pytest.raises(ValueError, match="expired"):
         calibration.verify_ready(robot_id="robot-01")
+
+
+def test_forward_clock_correction_shortens_deadline_before_expiry(monkeypatch):
+    wall = datetime(2099, 1, 1, tzinfo=UTC)
+    ticks = 100.0
+
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is UTC
+            return wall
+
+    monkeypatch.setattr(calibration_module, "datetime", FixedClock)
+    monkeypatch.setattr(calibration_module, "monotonic", lambda: ticks)
+    calibration = Calibration.model_validate({
+        **_payload(), "robot_id": "robot-01", "expires_at": "2099-01-01T00:00:10Z",
+    })
+    calibration.verify_ready(robot_id="robot-01")
+
+    # A forward correction leaves three seconds, not the original eight.
+    ticks = 102.0
+    wall = datetime(2099, 1, 1, 0, 0, 7, tzinfo=UTC)
+    calibration.verify_ready(robot_id="robot-01")
+
+    # Rolling back the wall clock cannot restore the discarded five seconds.
+    wall = datetime(2098, 12, 31, tzinfo=UTC)
+    ticks = 104.999
+    calibration.verify_ready(robot_id="robot-01")
+    ticks = 105.0
+    with pytest.raises(ValueError, match="expired.*re-calibrate"):
+        calibration.verify_ready(robot_id="robot-01")
+    ticks = 106.0
+    with pytest.raises(ValueError, match="expired.*re-calibrate"):
+        calibration.verify_ready(robot_id="robot-01")
