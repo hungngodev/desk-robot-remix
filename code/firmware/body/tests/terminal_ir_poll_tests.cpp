@@ -1,8 +1,12 @@
 #include "TerminalIr.h"
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <deque>
 #include <iostream>
+#include <initializer_list>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -27,7 +31,7 @@ Packet packet(bool corrupt = false, std::uint32_t code = kCode) {
   Packet p{};
   p.symbols[0] = {9000, 0, 4500, 1};
   for (unsigned bit = 0; bit != 32; ++bit)
-    p.symbols[bit + 1] = {560, 0, (code & (1U << bit)) ? 1690U : 560U, 1};
+    p.symbols[bit + 1] = {560, 0, (code & (std::uint32_t{1} << bit)) ? 1690U : 560U, 1};
   p.symbols[33] = {560, 0, 0, 0};
   if (corrupt) p.symbols[5].level0 = 1;
   return p;
@@ -103,6 +107,36 @@ void check_mixed_arrivals(unsigned side, unsigned total, bool noise_first) {
   pair(); poll(ir, now + 25); check_matched(ir, 25);
   CHECK(ir.evidence(now).left_seq == prior.left_seq + 1);
   CHECK(ir.evidence(now).right_seq == prior.right_seq + 1);
+  CHECK(!ir.begin(36, 36));
+}
+// Byte counts are supplied by the driver, not inferred from the backing array.
+// Neither a partial symbol nor an oversized packet may refresh either side.
+void check_packet_size_boundaries(unsigned side) {
+  reset_fixture();
+  desk_robot::TerminalIr ir;
+  CHECK(ir.begin(36, 39));
+  poll(ir, 100);
+  pair(); poll(ir, 125); check_matched(ir, 25);
+  constexpr std::size_t expected = 34 * sizeof(rmt_item32_t);
+  for (const auto bytes : {std::size_t{0}, std::size_t{1}, expected - 1,
+                           expected + 1, std::numeric_limits<std::size_t>::max()}) {
+    const auto prior = ir.evidence(now);
+    const auto left_returns = queues[0].returns;
+    const auto right_returns = queues[1].returns;
+    auto malformed = packet();
+    malformed.bytes = bytes;
+    queues[side].pending.push_back(malformed);
+    push(1 - side);
+    poll(ir, now + 25); check_unmatched(ir);
+    CHECK(queues[0].returns == left_returns + 1);
+    CHECK(queues[1].returns == right_returns + 1);
+    CHECK(queues[0].pending.empty() && queues[1].pending.empty());
+    CHECK(ir.evidence(now).left_seq == prior.left_seq);
+    CHECK(ir.evidence(now).right_seq == prior.right_seq);
+    pair(); poll(ir, now + 25); check_matched(ir, 25);
+    CHECK(ir.evidence(now).left_seq == prior.left_seq + 1);
+    CHECK(ir.evidence(now).right_seq == prior.right_seq + 1);
+  }
   CHECK(!ir.begin(36, 36));
 }
 // Fresh, checksum-valid frames from different docks must revoke a previous
@@ -370,6 +404,7 @@ int main(int argc, char** argv) {
     CHECK(!ir.begin(36, 36));
     CHECK(!queues[0].installed && !queues[1].installed);
     for (unsigned side = 0; side != 2; ++side) {
+      check_packet_size_boundaries(side);
       check_mismatched_dock_ids(side);
       check_receipt_window_pair(side, 120);
       check_receipt_window_pair(side, 121);
