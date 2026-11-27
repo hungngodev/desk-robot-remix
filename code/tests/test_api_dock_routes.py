@@ -24,7 +24,9 @@ def test_dock_route_roles_and_lifecycle():
         return SimpleNamespace(data=lambda: {"state": "queued"})
 
     coord = SimpleNamespace(robot=lambda _: None, dock=dock)
-    settings = SimpleNamespace(mode="simulation", voice_vision_tools_enabled=False)
+    settings = SimpleNamespace(
+        mode="simulation", voice_vision_tools_enabled=False, camera_consent_generation=0,
+    )
     register_dock_routes(app, settings, authorize=authorize, operator=operator,
                          coordinator=lambda: coord)
     prefix = "/v1/robots/robot-01/dock"
@@ -93,3 +95,45 @@ def test_dock_observe_failure_contract(monkeypatch, source, status):
         assert response.json() == diagnostic
     else:
         assert response.json() == {"detail": "Camera consent revoked during dock observation"}
+
+
+def test_dock_observe_rejects_consent_cycle_during_admission(monkeypatch):
+    robot = SimpleNamespace(id="robot-01")
+    head = object()
+    calls = []
+
+    class CyclingSettings:
+        camera_consent_generation = 1
+        switched = False
+
+        @property
+        def voice_vision_tools_enabled(self):
+            if not self.switched:
+                # Simulate an operator revoking and restoring consent between
+                # the original grant and permission reads on separate threads.
+                self.switched = True
+                self.camera_consent_generation += 1
+            return True
+
+        def register_camera_revocation(self, _listener):
+            pass
+
+    async def observe(actual_head, actual_robot, *, consent_valid):
+        calls.append((actual_head, actual_robot))
+        assert consent_valid()
+        return {"source": "not_calibrated"}
+
+    monkeypatch.setattr("desk_robot.api_dock_routes.observe_actual_dock", observe)
+    settings = CyclingSettings()
+    coord = SimpleNamespace(robot=lambda _: robot, heads={robot.id: head})
+    app = FastAPI()
+    register_dock_routes(app, settings, authorize=lambda: None, operator=lambda: None,
+                         coordinator=lambda: coord)
+    url = f"/v1/robots/{robot.id}/dock/observe"
+    with TestClient(app) as client:
+        response = client.get(url)
+        assert response.status_code == 409
+        assert calls == []
+        # A genuinely new request may use the new grant.
+        assert client.get(url).status_code == 200
+    assert calls == [(head, robot)]

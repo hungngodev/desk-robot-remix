@@ -24,9 +24,13 @@ def register_dock_routes(
     async def dock_observe(robot_id: str):
         """Passive marker detection only, bounded by the original camera grant."""
         robot = coordinator().robot(robot_id)
+        # Capture the generation before reading consent so an intervening
+        # revoke/regrant cannot authorize an already admitted request.
+        camera_grant = settings.camera_consent_generation
         if not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Camera consent required for dock observation")
-        camera_grant = settings.camera_consent_generation
+        if settings.camera_consent_generation != camera_grant:
+            raise HTTPException(409, "Camera grant changed during dock observation")
 
         def original_camera_grant_valid() -> bool:
             return (
