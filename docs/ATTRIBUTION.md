@@ -1,7 +1,11 @@
 # Source attribution and license boundaries
 
-Upstream revisions are recorded in [upstream lock](../code/upstream-lock.json); copies stay in ignored
-`code/upstream/`. New integration code uses this repository's MIT license. That does
+The four repositories restored by `code/scripts/restore_upstreams.py` are pinned in
+[upstream lock](../code/upstream-lock.json); those checkouts stay in ignored
+`code/upstream/`. PlatformIO-managed libraries are pinned separately in the
+[body profiles](../code/firmware/body/platformio.ini) and
+[room-station profiles](../code/firmware/room_station/platformio.ini); room-station
+resolved versions and notices are recorded in the [toolchain lock](../code/toolchain-lock.json). New integration code uses this repository's MIT license. That does
 not change the licenses of models, CAD, dependencies or copied upstream code.
 
 | Source | Reuse | Terms and notices |
@@ -14,7 +18,7 @@ not change the licenses of models, CAD, dependencies or copied upstream code.
 | [SMARS](https://www.thingiverse.com/thing:2662828) | Four original screwless chassis/wheel/track STLs and assembly documents, saved unchanged with source/hash register | tristomietitoredeituit; [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) |
 | [SMARS Gripper Arm](https://www.thingiverse.com/thing:4253681) | Three original arm/rack/pinion STLs saved unchanged, with source/hash register | bluino; [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
 | [Forklift module for SMARS](https://www.thingiverse.com/thing:3027255) | Original lift E/F STLs and assembly PDF, linked by Bluino; saved unchanged with source/hash register | tristomietitoredeituit; [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) |
-| [EVA Robot case](https://www.thingiverse.com/thing:7319190/files) | Unmodified `cad/originals/eva-head/EVA-Robot.3mf` and its embedded preview; component/case layout reference | Ksirailway-Base; [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); hash, source and dimensions in its `source.json` |
+| [EVA Robot case](https://www.thingiverse.com/thing:7319190/files) | Unmodified `cad/originals/eva-head/EVA-Robot.3mf` and its embedded preview; historical component/case layout reference, not the selected rounded-head fit candidate | Ksirailway-Base; [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/); hash, source and mesh-derived dimensions in its [source record](cad/originals/eva-head/source.json); physical fit remains unverified |
 
 The EVA case, nine mechanism/chassis/wheel/track STLs and original assembly
 documents are downloaded without modification. Record all future geometry changes. The
@@ -102,8 +106,8 @@ assets are copied here. [Research and archive audit](research/2026-11-03-fetch-a
 | Reference or dependency | Actual incorporation | Integration and audit boundary |
 | --- | --- | --- |
 | [Xiaozhi ESP32](https://github.com/78/xiaozhi-esp32) and [xinnan server](https://github.com/xinnan-tech/xiaozhi-esp32-server) | **Pinned external upstream with source overlays** for physical microphone, camera, LCD/OLED and Opus plus group speaker bridge | The shipped Sense and local server revisions must compile together; the Mac does not run a second microphone or fake human VAD source |
-| [Pololu VL53L0X](https://github.com/pololu/vl53l0x-arduino) and ST VL53L0X API | **Pinned MIT library reused for initialization; bounded nonblocking register reads adapted for local guard** | Five critical physical guard lanes plus three optional lanes, generic GY-530 carriers not qualified until real 3.3V desk optical and loaded-stop trials |
-| [ncmreynolds/ld2410 v0.2.2](https://github.com/ncmreynolds/ld2410/tree/v0.2.2) | **Pinned external library** in the Feather room-station PlatformIO profiles; the source calls its radar decoder | GNU LGPL-2.1, not MIT/Apache; [retained exact license](licenses/ld2410-LGPL-2.1.txt). Static binary distribution remains on HOLD pending the linked inventory and Section 6 compliance package described in [third-party notices](../THIRD_PARTY_NOTICES.md). |
+| [Pololu VL53L0X](https://github.com/pololu/vl53l0x-arduino) and ST VL53L0X API | **Pinned library reused for initialization; bounded nonblocking register reads adapted for local guard** | Release 1.3.1, commit [`9f3773cb48d4e4e844d689cfc529a06f96d1d264`](https://github.com/pololu/vl53l0x-arduino/tree/9f3773cb48d4e4e844d689cfc529a06f96d1d264); Pololu MIT and STMicroelectronics BSD-3-Clause terms for ST API-derived portions, both retained in the [body firmware notice](../code/firmware/body/THIRD_PARTY_NOTICES.md). Five critical guard lanes plus three read-only side/rear lanes; generic GY-530 carriers remain unqualified pending real 3.3V, optical and loaded-stop trials |
+| [ncmreynolds/ld2410 v0.2.2](https://github.com/ncmreynolds/ld2410/tree/v0.2.2) | **Pinned external library** at commit [`9e202ad6f2340bc79ee0dd802e1ef58b0ae2cfa2`](https://github.com/ncmreynolds/ld2410/tree/9e202ad6f2340bc79ee0dd802e1ef58b0ae2cfa2) in the Feather room-station PlatformIO profiles; the source calls its radar decoder | GNU LGPL-2.1, not MIT/Apache; [retained exact license](licenses/ld2410-LGPL-2.1.txt). Static binary distribution remains on HOLD pending the linked inventory and Section 6 compliance package described in [third-party notices](../THIRD_PARTY_NOTICES.md). |
 | [Stackchan-agent](https://github.com/botamochi6277/stackchan-agent) | **Vendored pinned MIT HSM header** `code/firmware/head/overlay/stackchan_behavior.hpp` with license in source, adapted from [Behavior.hpp at bfb98fb8](https://github.com/botamochi6277/stackchan-agent/blob/bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613/include/Behavior.hpp) | Owns OLED idle/expression decisions, not motors, voice transport or new runtime |
 | [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) | **Design reference only**, not Reachy code, SDK, daemon or joints | Inspired one owner, cheap initiative gate and expressive idles; do not claim the Reachy software was imported |
 | [LiveKit Agents](https://github.com/livekit/agents) and [Frigate](https://github.com/blakeblackshear/frigate) | **Algorithmic reference only**, not vendored libraries | Adaptive VAD video cadence, cheap motion gate, priority capture and bounded per-robot RAM buffers are original Mac glue |
