@@ -66,7 +66,7 @@ def test_telemetry_and_reconnect_never_issue_control() -> None:
     assert "body_bridge_" not in reconnect and "Transact(" not in reconnect
     body = (BODY / "src/main.cpp").read_text()
     assert "LineReceiver usb_receiver(true);" in body
-    assert "LineReceiver head_receiver;" in body
+    assert "LineReceiver head_receiver(false, true);" in body
     assert "process_input(head_uart, head_receiver, head_replies, false);" in body
     assert "process_input(Serial, usb_receiver, usb_replies, true);" in body
 

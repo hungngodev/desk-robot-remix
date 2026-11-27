@@ -410,4 +410,33 @@ int main() {
         if (value >= 32 && value <= 126) continue;
         assert(!ParseCommand(std::string("stop") + static_cast<char>(value), true, c));
     }
+
+    // 868NDJv: integrity framing round-trip and single-byte corruption.
+    const std::string framed = FormatIntegrityFrame(42U, "drive 20 20 250");
+    std::uint32_t rx_id = 0U;
+    std::string_view rx_payload;
+    assert(ParseIntegrityFrame(framed, rx_id, rx_payload));
+    assert(rx_id == 42U && rx_payload == "drive 20 20 250");
+    assert(FormatIntegrityFrame(0U, "stop").empty());
+    for (std::size_t idx = 0; idx < framed.size(); ++idx) {
+        std::string corrupted = framed;
+        corrupted[idx] = (corrupted[idx] == '4') ? '5' : '4';
+        assert(!ParseIntegrityFrame(corrupted, rx_id, rx_payload));
+    }
+
+    // 868rLbt: CAP1188 eight-zone bursts (4..8 rises) vs dedicated touch (cap=3).
+    {
+        RealTouchEdges body_cap, wroom_touch;
+        assert(body_cap.AcceptBoot(7U) && wroom_touch.AcceptBoot(7U));
+        assert(body_cap.Observe(10U, 8) == 0);
+        assert(wroom_touch.Observe(10U) == 0);
+        assert(body_cap.Observe(13U, 8) == 3);
+        assert(wroom_touch.Observe(13U) == 3);
+        assert(body_cap.Observe(17U, 8) == 4);
+        assert(wroom_touch.Observe(17U) == 0);
+        assert(body_cap.Observe(25U, 8) == 8);
+        assert(wroom_touch.Observe(25U) == 0);
+        assert(body_cap.Observe(34U, 8) == 0); // > 8 burst rejected
+        assert(wroom_touch.Observe(34U) == 0);
+    }
 }

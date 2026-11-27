@@ -22,6 +22,7 @@
 #include "scd_sample_freshness.h"
 #include "bme_completed_sample.h"
 #include "usb_epoch_sync.h"
+#include "thermal_consent_gate.h"
 #include "sensor_recovery.h"
 
 #ifndef ROOM_SOIL_FITTED
@@ -169,6 +170,9 @@ constexpr uint32_t kScdStaleMs = 8500;
 constexpr uint32_t kBmeStaleMs = 3000;
 constexpr uint32_t kRadarStaleMs = 3000;
 constexpr uint32_t kThermalStaleMs = 3000;
+// 868hhEn (EXP-026): intra-scan abandonment threshold checked between
+// 16-byte chunk transfers, NOT a hard I2C transaction deadline on pinned
+// Adafruit nRF52 1.6.1 Wire (whose TX/RX/STOP loops wait synchronously).
 constexpr uint32_t kThermalScanMaxMs = 250;
 constexpr uint32_t kScdNoSampleMs = 15000;
 constexpr uint8_t kBmePrimary = 0x77;
@@ -187,6 +191,7 @@ Adafruit_BME680 bme(&Wire);
 class AmgRecovery {
  public:
   void begin() { phase_ = Phase::normalize; ready_ = false; }
+  void reset() { phase_ = Phase::idle; ready_ = false; }
   bool active() const { return phase_ != Phase::idle; }
   bool take_ready() {
     const bool ready = ready_;
@@ -307,6 +312,7 @@ ld2410 radar;
 desk_robot_room::RadarSampleClock radar_sample_clock;
 desk_robot_room::RadarTargetSample radar_completed;
 desk_robot_room::UsbEpochSync usb_epoch_sync;
+desk_robot_room::ThermalConsentGate thermal_consent;
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
 bool scd_started = false;
 bool scd_stop_pending = false;
@@ -512,8 +518,22 @@ void soil_observation(uint32_t now) {
 // Read only one 16-byte I2C chunk per loop iteration. The LD2410C
 // 256000-baud UART needs service between transfers; do not block it
 // through eight sensor transactions inside one JSON report.
+void revoke_thermal_scan() {
+  thermal_scan_active = false;
+  thermal_valid = false;
+  thermal_ever_requested = false;
+  thermal_next_chunk = 0;
+  thermal_requested_ms = thermal_started_ms = thermal_sample_ms = 0;
+  amg_started = false;
+  amg_recovery.reset();
+  memset(thermal, 0, sizeof(thermal));
+  memset(thermal_staging, 0, sizeof(thermal_staging));
+}
 void thermal_step(uint32_t now) {
-  if (!ROOM_AMG_FITTED || !amg_started) return;
+  if (!ROOM_AMG_FITTED || !thermal_consent.allowed() || !amg_started) {
+    if (!thermal_consent.allowed()) revoke_thermal_scan();
+    return;
+  }
   if (!thermal_scan_active) {
     if (thermal_ever_requested && now - thermal_requested_ms < kReportMs)
       return;
@@ -524,12 +544,17 @@ void thermal_step(uint32_t now) {
   }
   // A stalled or partially missing scan is not a completed frame.
   // These are sequential pixel readings, not a simultaneous thermal image.
+  // kThermalScanMaxMs is a scan abandonment threshold only, not an I2C bus timeout.
   const bool chunk_ok = now - thermal_started_ms < kThermalScanMaxMs &&
       desk_robot_room::read_thermal_chunk(
           Wire, kAmgAddress, thermal_next_chunk,
           thermal_staging + 8U * thermal_next_chunk,
           AMG88xx_PIXEL_ARRAY_SIZE - 8U * thermal_next_chunk);
   now = millis();
+  if (!thermal_consent.allowed()) {
+    revoke_thermal_scan();
+    return;
+  }
   if (!chunk_ok || now - thermal_started_ms >= kThermalScanMaxMs) {
     thermal_scan_active = false;
     thermal_valid = false;
@@ -549,7 +574,8 @@ void thermal_step(uint32_t now) {
 }
 void thermal_observation(uint32_t now) {
   // Never read I2C in the report path or stamp cached pixels with now.
-  const bool valid = ROOM_AMG_FITTED && thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
+  const bool valid = ROOM_AMG_FITTED && thermal_consent.allowed() &&
+      thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
   // Retire expired grids until a complete new scan, even across clock rollover.
   thermal_valid = valid;
   telemetry.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
@@ -592,14 +618,15 @@ void recover_sensors(uint32_t now) {
     scd_started_ms = millis();
     return;
   }
-  if (ROOM_AMG_FITTED) {
+  if (ROOM_AMG_FITTED && thermal_consent.allowed()) {
     const bool amg_transaction = amg_recovery.step(Wire, now);
     if (amg_recovery.take_ready()) amg_started = true;
     if (amg_transaction) return;
   }
-  // Exclude a disabled optional peripheral from retry scheduling entirely.
+  // Exclude a disabled or unconsented optional peripheral from retry scheduling.
+  const bool amg_excluded = !ROOM_AMG_FITTED || !thermal_consent.allowed();
   const bool active[] = {scd_started || scd_stop_pending, bme_started,
-                         !ROOM_AMG_FITTED || amg_started || amg_recovery.active()};
+                         amg_excluded || amg_started || amg_recovery.active()};
   const int sensor = sensor_recovery.next(now, active);
   if (sensor == desk_robot_room::SensorRecoverySchedule::kScd) {
     scd_valid = false;
@@ -616,7 +643,7 @@ void recover_sensors(uint32_t now) {
   } else if (sensor == desk_robot_room::SensorRecoverySchedule::kBme) {
     bme_started = begin_bme();
     if (!bme_started) bme_completed.invalidate();
-  } else if (ROOM_AMG_FITTED && sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
+  } else if (!amg_excluded && sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
     thermal_scan_active = false;
     thermal_valid = false;
     amg_started = false;
@@ -670,8 +697,12 @@ void loop() {
   for (uint8_t count = 0; count < 32 && Serial.available() > 0; ++count) {
     const int value = Serial.read();
     if (value < 0) break;
-    if (usb_epoch_sync.consume(static_cast<uint8_t>(value))) {
+    const uint8_t ch = static_cast<uint8_t>(value);
+    if (usb_epoch_sync.consume(ch)) {
       usb_tx.queue_ack(usb_epoch_sync.token());
+    }
+    if (thermal_consent.consume(ch) && thermal_consent.take_revoked()) {
+      revoke_thermal_scan();
     }
   }
   radar_uart.begin_poll();

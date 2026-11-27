@@ -32,6 +32,11 @@ def run_tests(station: Path, build: Path) -> None:
     (build / "bme_step_under_test.h").write_text(temperature + step)
     # Exercise the actual firmware's default, acquisition and JSON paths,
     # without requiring Arduino or duplicating their decision in a test fake.
+    if any(source.name == "thermal_consent_tests.cpp" for source in sources):
+        thermal_code = _firmware_section(
+            firmware, "void revoke_thermal_scan(", "void thermal_observation("
+        )
+        (build / "thermal_under_test.h").write_text(thermal_code)
     if any(source.name == "soil_profile_tests.cpp" for source in sources):
         soil_prefix = "\n".join(
             line for line in firmware.split("namespace {", 1)[0].splitlines()
@@ -70,6 +75,20 @@ def run_tests(station: Path, build: Path) -> None:
                     ("default", ["-DEXPECT_SOIL_ENABLED=0"]),
                     ("bench", ["-DEXPECT_SOIL_ENABLED=0", "-DROOM_SOIL_FITTED=0"]),
                     ("full", ["-DEXPECT_SOIL_ENABLED=1", "-DROOM_SOIL_FITTED=1"]),
+                ):
+                    print(f"Sanitizer test: {source.name} {standard} {profile}", flush=True)
+                    subprocess.run(
+                        [*cmd, f"-std={standard}", *flags, str(source), "-o", str(executable)],
+                        check=True, timeout=30,
+                    )
+                    subprocess.run([str(executable)], check=True, timeout=15)
+            continue
+        if source.name == "thermal_consent_tests.cpp":
+            for standard in ("c++11", "c++17"):
+                for profile, flags in (
+                    ("default", []),
+                    ("unfitted", ["-DROOM_AMG_FITTED=0"]),
+                    ("fitted", ["-DROOM_AMG_FITTED=1"]),
                 ):
                     print(f"Sanitizer test: {source.name} {standard} {profile}", flush=True)
                     subprocess.run(

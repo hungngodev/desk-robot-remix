@@ -235,7 +235,10 @@ inline bool ParseCommand(std::string_view line, bool operator_control, Command& 
     // result.wire or result.verb. Every rejected parse still clears stale state.
     const auto reject = [&result]() { result = {}; return false; };
     if (line.empty() || line.size() > 95 || line.front() == ' ' || line.back() == ' ') return reject();
-    for (unsigned char ch : line) if (ch < 32 || ch > 126) return reject();
+    for (const char raw : line) {
+        const auto ch = static_cast<unsigned char>(raw);
+        if (ch < 32U || ch > 126U) return reject();
+    }
     std::vector<std::string_view> parts;
     for (size_t pos = 0; pos < line.size();) {
         size_t end = line.find(' ', pos);
@@ -287,6 +290,65 @@ inline std::string ExpectedAck(const Command& command) {
 inline bool MatchingError(std::string_view reply, const Command& command) {
     const std::string prefix = "ERR " + command.verb + " ";
     return reply.substr(0, prefix.size()) == prefix || reply == "ERR input line_too_long" ||
-           reply == "ERR input invalid_ascii";
+           reply == "ERR input invalid_ascii" || reply == "ERR input bad_checksum" ||
+           reply == "ERR input unframed";
+}
+
+inline std::uint8_t UartCrc8(std::string_view data) {
+    std::uint8_t crc = 0x00U;
+    for (const char raw : data) {
+        crc ^= static_cast<unsigned char>(raw);
+        for (int bit = 0; bit < 8; ++bit) {
+            const unsigned shifted = static_cast<unsigned>(crc) << 1U;
+            crc = (crc & 0x80U) != 0U
+                ? static_cast<std::uint8_t>(shifted ^ 0x07U)
+                : static_cast<std::uint8_t>(shifted);
+        }
+    }
+    return crc;
+}
+
+inline std::string FormatIntegrityFrame(std::uint32_t tx_id, std::string_view payload) {
+    if (tx_id == 0U || payload.empty()) return {};
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string out = "@" + std::to_string(tx_id) + ":";
+    out.append(payload);
+    const std::uint8_t crc = UartCrc8(out);
+    out.push_back('*');
+    out.push_back(kHex[(crc >> 4) & 0x0FU]);
+    out.push_back(kHex[crc & 0x0FU]);
+    return out;
+}
+
+inline bool ParseIntegrityFrame(std::string_view line, std::uint32_t& tx_id,
+                                std::string_view& payload) {
+    tx_id = 0U;
+    payload = {};
+    if (line.size() < 7U || line.front() != '@') return false;
+    const auto colon = line.find(':', 1);
+    if (colon == std::string_view::npos || colon <= 1U) return false;
+    const auto id_view = line.substr(1, colon - 1U);
+    if (id_view.front() < '1' || id_view.front() > '9') return false;
+    std::uint32_t parsed_id = 0U;
+    const auto [end, ec] = std::from_chars(
+        id_view.data(), id_view.data() + id_view.size(), parsed_id);
+    if (ec != std::errc{} || end != id_view.data() + id_view.size() || parsed_id == 0U)
+        return false;
+    const auto star = line.size() - 3U;
+    if (star <= colon + 1U || line[star] != '*') return false;
+    const auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        return -1;
+    };
+    const int hi = hex_val(line[star + 1U]);
+    const int lo = hex_val(line[star + 2U]);
+    if (hi < 0 || lo < 0) return false;
+    const std::uint8_t expected = UartCrc8(line.substr(0, star));
+    if (static_cast<std::uint8_t>((hi << 4) | lo) != expected) return false;
+    tx_id = parsed_id;
+    payload = line.substr(colon + 1U, star - (colon + 1U));
+    return !payload.empty();
 }
 }  // namespace desk_robot

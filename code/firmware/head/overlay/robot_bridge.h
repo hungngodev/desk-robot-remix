@@ -50,7 +50,10 @@ private:
     httpd_handle_t server_ = nullptr;
     std::mutex uart_mutex_;
     UrgentStopGate urgent_stop_gate_{};
+    std::uint32_t next_tx_id_ = 1U;
     std::atomic<bool> body_read_busy_{false};
+    std::atomic<int> command_workers_{0};
+    static constexpr int kMaxCommandWorkers = 4;
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
@@ -64,6 +67,7 @@ private:
     RealTouchEdges head_touch_edges_{};
     RealTouchEdges body_cap_edges_{};
     static void BodyReadTask(void* context);
+    static void CommandTask(void* context);
     static void CameraTask(void* context);
     static void CameraStreamTask(void* context);
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
@@ -71,9 +75,11 @@ private:
 #endif
     Reply Transact(const std::string& command, bool operator_control);
     // Caller retains the UART mutex and urgency request through the reply.
-    static Reply ReadBodyReply(const Command& command, const UrgentStopGate::Request& urgency);
+    static Reply ReadBodyReply(const Command& command, std::uint32_t expected_tx_id,
+                               const UrgentStopGate::Request& urgency);
     bool Authorize(httpd_req_t* req);
     esp_err_t Handle(httpd_req_t* req);
+    esp_err_t HandleCommandBody(httpd_req_t* req);
     esp_err_t Json(httpd_req_t* req, int status, const std::string& body);
     static esp_err_t Dispatch(httpd_req_t* req);
     void AddTools();

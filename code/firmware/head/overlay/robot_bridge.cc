@@ -488,7 +488,9 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     // Still attempt STOP/HALT; RX failure must not suppress a stop write.
     const bool rx_clean = uart_flush_input(kUart) == ESP_OK;
     if (!rx_clean && !urgent) return {503, false, "body UART receive cleanup failed"};
-    const std::string wire = command.wire + "\r\n";
+    if (next_tx_id_ == 0U) next_tx_id_ = 1U;
+    const std::uint32_t tx_id = next_tx_id_++;
+    const std::string wire = FormatIntegrityFrame(tx_id, command.wire) + "\r\n";
     // A stalled read must not resurrect old operator intent or feed the
     // body watchdog with an aged keepalive. Never expire STOP or HALT.
     if (!ControlQueueFresh(command.verb, admitted_us, esp_timer_get_time()))
@@ -499,10 +501,11 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     if (uart_write_bytes(kUart, wire.data(), wire.size()) != static_cast<int>(wire.size()) ||
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     if (!rx_clean) return {503, false, "body stop sent; ACK uncertain after receive cleanup failure"};
-    return ReadBodyReply(command, urgency);
+    return ReadBodyReply(command, tx_id, urgency);
 }
 
 Reply Bridge::ReadBodyReply(const Command& command,
+                            std::uint32_t expected_tx_id,
                             const UrgentStopGate::Request& urgency) {
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
@@ -522,6 +525,19 @@ Reply Bridge::ReadBodyReply(const Command& command,
         if (c == '\n') {
             if (!BodyWireValid(line))
                 return {503, false, "malformed body response"};
+            std::uint32_t rx_tx_id = 0U;
+            std::string_view inner_view;
+            if (!ParseIntegrityFrame(line, rx_tx_id, inner_view) || rx_tx_id != expected_tx_id) {
+                if (line == "ERR input line_too_long" || line == "ERR input invalid_ascii" ||
+                    line == "ERR input bad_checksum" || line == "ERR input unframed") {
+                    if (MatchingError(line, command))
+                        return {command.verb == "pose" ? 503 : 400, false, line};
+                }
+                line.clear();  // EVT, startup output, corrupted frame, or stale tx_id reply.
+                continue;
+            }
+            const std::string decoded(inner_view);
+            line = decoded;
             // Old WROOM builds reject this new read-only verb explicitly.
             if (command.verb == "pose" && line == "ERR input unknown_command")
                 return {501, false, "pose unsupported by body firmware"};
@@ -542,7 +558,7 @@ Reply Bridge::ReadBodyReply(const Command& command,
                 if (command.verb == "pose" && !line.empty() && line.front() == '{')
                     return {503, false, "malformed or unsupported pose response"};
             } else if (line == ExpectedAck(command)) return {200, true, line};
-            line.clear();  // EVT, startup output, and unrelated ACKs are never success.
+            line.clear();  // Unmatched payload is never success.
         } else {
             if (c < 32 || c > 126 || line.size() >= kMaxReply) return {503, false, "malformed body response"};
             line.push_back(static_cast<char>(c));
@@ -613,7 +629,7 @@ BodyInteraction Bridge::PollInteraction() {
         // The optional CAP1188 count shares the same WROOM boot identity.
         if (!body_cap_edges_.AcceptBoot(body_boot_id)) return observation;
         observation.cap_touch_events = body_cap_edges_.Observe(
-            static_cast<std::uint32_t>(cap_events->valuedouble));
+            static_cast<std::uint32_t>(cap_events->valuedouble), 8);
     } else {
         body_cap_edges_.Reset();
     }
@@ -699,6 +715,17 @@ void Bridge::BodyReadTask(void* context) {
         }
     }
     bridge->body_read_busy_.store(false, std::memory_order_release);
+    httpd_req_async_handler_complete(req);
+    vTaskDelete(nullptr);
+}
+
+void Bridge::CommandTask(void* context) {
+    // Dispatch /api/command and /api/face bodies off the HTTPD server thread so
+    // a slow POST recv or ordinary UART read never delays urgent STOP ingress.
+    auto* req = static_cast<httpd_req_t*>(context);
+    auto* bridge = static_cast<Bridge*>(req->user_ctx);
+    bridge->HandleCommandBody(req);
+    bridge->command_workers_.fetch_sub(1, std::memory_order_release);
     httpd_req_async_handler_complete(req);
     vTaskDelete(nullptr);
 }
@@ -1191,6 +1218,32 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     const std::string_view type(content_type, type_bytes);
     if (type != "application/json" && type != "application/json; charset=utf-8")
         return reject(415, "application/json required");
+    int active = command_workers_.load(std::memory_order_acquire);
+    while (active < kMaxCommandWorkers &&
+           !command_workers_.compare_exchange_weak(
+               active, active + 1, std::memory_order_acq_rel, std::memory_order_acquire)) {}
+    if (active >= kMaxCommandWorkers)
+        return Json(req, 503, Envelope(false, "command worker busy"));
+    httpd_req_t* async_req = nullptr;
+    if (httpd_req_async_handler_begin(req, &async_req) != ESP_OK) {
+        command_workers_.fetch_sub(1, std::memory_order_release);
+        return Json(req, 503, Envelope(false, "command worker unavailable"));
+    }
+    if (xTaskCreate(CommandTask, "robot_command", 8192,
+                    async_req, 4, nullptr) != pdPASS) {
+        Json(async_req, 503, Envelope(false, "command task unavailable"));
+        httpd_req_async_handler_complete(async_req);
+        command_workers_.fetch_sub(1, std::memory_order_release);
+    }
+    return ESP_OK;
+}
+
+esp_err_t Bridge::HandleCommandBody(httpd_req_t* req) {
+    const auto reject = [this, req](int status, const char* message) {
+        Json(req, status, Envelope(false, message));
+        httpd_resp_set_hdr(req, "Connection", "close");
+        return ESP_FAIL;
+    };
     std::string body(req->content_len, '\0');
     size_t got = 0;
     const auto deadline = esp_timer_get_time() + 2'000'000;

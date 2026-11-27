@@ -212,6 +212,55 @@ void verify(BodyProfile profile, std::uint32_t start) {
     verify_urgent_stop(body, head, usb, guard, now + 1);
     verify_dock_contact(body, head, guard, now + 10);
 }
+
+void verify_framed_integrity_cross_board(BodyProfile profile) {
+    CliffConfig config;
+    config.calibrated = true;
+    config.freshness_ms = 100;
+    config.front_obstacle_mm = 30;
+    config.front_max_mm = 1000;
+    for (auto& interval : config.floor) {
+        interval.min_mm = 40;
+        interval.max_mm = 60;
+    }
+    CliffGuard guard;
+    assert(guard.configure(config));
+    fresh(guard, 5000U);
+    BodyControl body(profile, &guard);
+    body.set_boot_epoch(42);
+    LineReceiver usb(true);
+    LineReceiver head(false, true);
+    assert(frame(body, usb, "rearm\r\n", 5000U) == "OK rearm");
+    std::uint32_t tx_id = 100U;
+    auto send_framed = [&](const std::string& text, bool operator_ctrl, std::uint32_t now) {
+        Command cmd;
+        assert(ParseCommand(text, operator_ctrl, cmd));
+        const std::string wire = FormatIntegrityFrame(tx_id, cmd.wire) + "\r\n";
+        char reply[kReplyCapacity]{};
+        unsigned completed = 0;
+        for (char c : wire) {
+            if (head.feed(c, now, body, reply, sizeof(reply), now * 1000ULL)) ++completed;
+        }
+        assert(completed == 1);
+        assert(head.last_tx_id() == tx_id);
+        assert(head.wrap_reply(reply, sizeof(reply)));
+        std::uint32_t rx_id = 0U;
+        std::string_view inner;
+        assert(ParseIntegrityFrame(reply, rx_id, inner) && rx_id == tx_id);
+        ++tx_id;
+        return std::string(inner);
+    };
+    assert(send_framed("arm", true, 5001U) == "OK arm");
+    assert(send_framed("drive 20 20 250", true, 5002U) == "OK drive left=20 right=20 ms=250");
+    assert(body.state().left == 20 && body.state().right == 20);
+    // Corrupted checksum frame rejected without renewing drive lease.
+    std::string bad = FormatIntegrityFrame(tx_id++, "drive 10 10 250");
+    bad[bad.find("10")] = '3';
+    assert(frame(body, head, bad + "\r\n", 5010U) == "ERR input bad_checksum");
+    assert(body.state().left == 20);
+    assert(send_framed("stop", false, 5020U) == "OK stop");
+    assert(body.state().left == 0 && body.state().right == 0);
+}
 }  // namespace
 
 int main() {
@@ -219,5 +268,6 @@ int main() {
                          desk_robot::BodyProfile::DcGuarded}) {
         verify(profile, 1000U);
         verify(profile, 0xffffff80U);
+        verify_framed_integrity_cross_board(profile);
     }
 }
