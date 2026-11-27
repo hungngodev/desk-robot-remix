@@ -1,12 +1,12 @@
-# Reused OpenCV AprilTag observation for a future real dock
+# Reused OpenCV AprilTag observation for the required, physically unqualified dock
 
 **Not a working automatic charging dock and never an alternative movement authority.**
 
 The repo already has an optional `vision` dependency with OpenCV. New
 `code/laptop/src/desk_robot/dock_vision.py` reuses OpenCV's existing
 `aruco.ArucoDetector` with `DICT_APRILTAG_36h11` and its
-`solvePnP(..., SOLVEPNP_IPPE_SQUARE)` rather than implementing a new marker
-detector. It accepts a camera calibration from the real XIAO Sense and a
+`solvePnP` with `SOLVEPNP_IPPE_SQUARE` and `SOLVEPNP_ITERATIVE` rather
+than implementing a new marker detector. It accepts a camera calibration from the real XIAO Sense and a
 measured printed marker side length. It rejects missing, duplicated, stale,
 implausible or high reprojection error poses.
 
@@ -31,8 +31,12 @@ tags requires the optional OpenCV dependency and a real calibrated JPEG.
 
 The authenticated GET /v1/robots/{robot_id}/dock/observe endpoint now uses
 the existing head camera snapshot and OpenCV AprilTag detector, but only after
-a per-robot dock_calibration JSON sets measured=true and real camera intrinsics,
-AprilTag marker size/ID and target distance.
+a per-robot `dock_calibration` JSON provides `schema_version: 1`,
+`measured: true`, matching robot/head identity, real camera intrinsics,
+AprilTag marker size/ID, and target distance (50 to 500 mm). The API also
+requires the current `voice_vision_tools_enabled` camera consent grant;
+revocation or replacement of that grant prevents pose publication. The
+recorded OV3660 or OV5640 sensor PID must match the live camera.
 
 A missing or unmeasured file returns HOLD without even opening a camera frame.
 With a real JPEG, the endpoint returns the raw camera-relative tag pose.
@@ -49,23 +53,33 @@ mechanical fit remain explicitly unverified.
 
 ## Operator permitted guarded approach, not automatic charge
 
-The Mac Coordinator now has a dock_approach job, exposed only through
-operator-authorized POST /v1/robots/{robot_id}/dock/approach.
-The robot config must explicitly set dock_motion_qualified true after real
-swept-path and track calibration, include measured dock_turn_sign and
-dock_forward_sign, and have a physically measured dock_calibration file.
-The job consumes an ordinary operator permit and uses the existing WROOM
-arm, cliff guard, stop, keepalive and watchdog authority. It takes at most
-16 short 100ms movement pulses, reobserving the marker after each.
-Turns require all three read-only lateral/rear ToF readings to be fresh and
-far enough; unknown directions cannot trigger a blind turn.
+The Mac Coordinator has a `dock_approach` job exposed through the
+operator-authorized POST /v1/robots/{robot_id}/dock/approach and the separately
+opt-in low-battery dispatch described below. Hardware mode, `motion_enabled`,
+`dock_motion_qualified`, measured steering signs, forward sign +1, active
+camera consent, assigned NEC beacon, and a physically measured calibration
+bound to the robot and head are required. Motion also requires measured lens
+distortion, frame resolution, camera PID and camera-to-chassis mounting geometry.
+The job consumes a bounded permit and uses the existing WROOM arm, cliff
+guard, stop, keepalive and watchdog authority. It permits at most 16 straight
+forward 100 ms pulses, reobserving the marker after each. Both independent IR
+receivers must report fresh matching assigned-dock evidence. A diagnostic
+`align` phase refuses movement; side/rear ranges are read-only context, not
+swept-footprint clearance. Front range below 350 mm produces HOLD; three
+pulses without a closer marker also produce HOLD and request help.
 
 The approach intentionally stops for front obstacles and never moves to
 the last unqualified centimeters or turns on charging contacts.
 Because head snapshots currently expose a receipt timestamp rather than a
 calibrated exposure timestamp, any autonomous approach needs real motion
 and image latency qualification before setting dock_motion_qualified true.
-No automatic battery low docking is claimed.
+The opt-in `request_autonomous_low_battery_dock` path exists but is not
+physically qualified. It requires `autonomous_low_battery_dock_enabled`, fresh
+low-battery evidence, the same motion and camera gates, no dock inhibition or
+active fleet motion, and a fresh bounded arm/permit. Human speech can defer
+dispatch; it cannot bypass these gates. Neither path authorizes final seating
+or charging. The complete first robot still requires an independently qualified
+dedicated dock; physical release remains HOLD.
 
 
 **Dock MJPEG freshness guard:** When the actual `HttpHead` supports
@@ -74,10 +88,15 @@ reuse the authenticated continuous MJPEG transport and require a frame
 received by the Mac within the preceding **200 ms**. A disconnected
 stream cannot silently fall back to a legacy `/api/camera.jpg` call,
 including while the capture lock is pending. Ordinary conversational
-snapshot semantics are unchanged. The stream transport returns the original JPEG and Mac receipt timestamp as one
-atomic pair; both dock consumers feed that original timestamp to AprilTag
-pose freshness assessment rather than resetting the clock after awaiting a
-camera lock or native detector. Stale, malformed, future or nonfinite receipt
+snapshot semantics are unchanged. The real stream transport returns an atomic four-field receipt: JPEG, Mac
+receipt timestamp, camera boot/frame identity and stream generation. Both dock
+consumers preserve the original timestamp and reject retired or replaced
+streams; physical steering requires the four-field receipt, not a legacy
+compatibility JPEG. Identity, consent, IR freshness and dock inhibition are
+rechecked before guarded motion dispatch. The 200 ms observation boundary is
+inclusive, but additional receipt-bound work requires strictly positive time
+remaining. Neither consumer resets the clock after awaiting a camera lock or
+native detector. Stale, malformed, future or nonfinite receipt
 timestamps fail closed before motion planning. This still measures Mac
 **receipt** age, not the original camera sensor exposure timestamp or
 end-to-end latency.
