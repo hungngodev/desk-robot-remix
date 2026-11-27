@@ -1539,3 +1539,88 @@ async def test_navigation_rechecks_qualification_after_pose_io(settings, tmp_pat
         assert "halt" in head.commands
     finally:
         await rt.close()
+
+
+@pytest.mark.parametrize("stage", ["validation", "detector"])
+@pytest.mark.parametrize("cancel_parent", [False, True])
+async def test_spatial_detector_distinguishes_child_and_owner_cancellation(
+    settings, monkeypatch, stage, cancel_parent,
+):
+    """An internal cancellation is not a STOP from the navigation owner."""
+    from desk_robot.object_detector import DetectorFrame
+    from desk_robot.runtime import Runtime
+
+    rt = Runtime(settings)
+    entered, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    task = None
+
+    async def interrupted_child(*_args, **_kwargs):
+        entered.set()
+        try:
+            await release.wait()
+            raise asyncio.CancelledError
+        finally:
+            finished.set()
+
+    async def valid_sizes(*_args, **_kwargs):
+        return ((640, 480),)
+
+    class HeldVision:
+        async def detect(self, jpeg: bytes, target: str):
+            assert stage == "detector"
+            return await interrupted_child(jpeg, target)
+
+    monkeypatch.setattr(
+        "desk_robot.object_detector.validated_camera_sizes",
+        interrupted_child if stage == "validation" else valid_sizes,
+    )
+    try:
+        robot_id = settings.robots[0].id
+        _seed_safe_grid(rt.spatial, robot_id, SpatialHead(robot_id))
+        st = rt.spatial.state(robot_id)
+        now_us = rt.spatial.now_us()
+        monkeypatch.setattr(rt.spatial, "now_us", lambda: now_us)
+        frame = DetectorFrame(
+            robot_id=robot_id,
+            session_id="operator-session",
+            turn_id="operator-turn",
+            origin_id=st.origin_id,
+            epoch=st.epoch,
+            anchor_id=st.anchor_id,
+            calibration_id=st.calibration_id,
+            camera_boot=st.camera_boot,
+            host_boot_id=rt.spatial.host_boot_id,
+            camera_grant=settings.camera_consent_generation,
+            frame_seq=1,
+            captured_us=now_us,
+            received_us=now_us,
+            seen_at_wall_s=time.time(),
+            jpeg=_valid_jpeg(),
+        )
+        task = asyncio.create_task(rt.spatial.confirm_target_frame(
+            HeldVision(), frame, label="key", model_qualified=True,
+            safety_clear=lambda: True, request_is_current=lambda: True,
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        if cancel_parent:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+        else:
+            release.set()
+            receipt = await asyncio.wait_for(task, timeout=1)
+            assert receipt.status == "rejected"
+            assert receipt.reason == (
+                "camera_validation_cancelled" if stage == "validation" else "detector_cancelled"
+            )
+            assert receipt.evidence is None
+            assert receipt.may_execute is False
+            assert receipt.arrived is False
+        await asyncio.wait_for(finished.wait(), timeout=1)
+        assert not st.observations
+    finally:
+        release.set()
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await rt.close()

@@ -236,6 +236,8 @@ async def detect_object_frame(
         reason = await wait_current(validation)
         if reason:
             return reject(reason)
+        if validation.cancelled():
+            return reject("camera_validation_cancelled")
         ((width, height),) = validation.result()
     except TimeoutError:
         return reject("inference_timeout")
@@ -259,6 +261,8 @@ async def detect_object_frame(
         reason = await wait_current(task)
         if reason:
             return reject(reason)
+        if task.cancelled():
+            return reject("detector_cancelled")
         # Native completion, not merely request submission, is the receipt.
         try:
             results = task.result()
