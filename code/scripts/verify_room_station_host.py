@@ -7,6 +7,17 @@ import tempfile
 from pathlib import Path
 
 
+def _firmware_section(firmware: str, start: str, end: str) -> str:
+    """Extract an exact test excerpt or report a drifted source marker."""
+    _, marker, remainder = firmware.partition(start)
+    if not marker:
+        raise RuntimeError(f"Missing firmware excerpt start: {start!r}")
+    section, marker, _ = remainder.partition(end)
+    if not marker:
+        raise RuntimeError(f"Missing firmware excerpt end: {end!r} after {start!r}")
+    return start + section
+
+
 def run_tests(station: Path, build: Path) -> None:
     compiler = shutil.which("c++")
     if compiler is None:
@@ -16,12 +27,8 @@ def run_tests(station: Path, build: Path) -> None:
     if not sources:
         raise RuntimeError("No room station C++ tests found")
     firmware = (includes / "main.cpp").read_text()
-    temperature = "bool finite_temperature(" + firmware.split(
-        "bool finite_temperature(", 1
-    )[1].split("void jsbool(", 1)[0]
-    step = "void bme_step(" + firmware.split(
-        "void bme_step(", 1
-    )[1].split("void bme_observation(", 1)[0]
+    temperature = _firmware_section(firmware, "bool finite_temperature(", "void jsbool(")
+    step = _firmware_section(firmware, "void bme_step(", "void bme_observation(")
     (build / "bme_step_under_test.h").write_text(temperature + step)
     # Exercise the actual firmware's default, acquisition and JSON paths,
     # without requiring Arduino or duplicating their decision in a test fake.
@@ -30,15 +37,11 @@ def run_tests(station: Path, build: Path) -> None:
             line for line in firmware.split("namespace {", 1)[0].splitlines()
             if not line.startswith("#include ")
         ) + "\n"
-        report_ms = "constexpr uint32_t kReportMs" + firmware.split(
-            "constexpr uint32_t kReportMs", 1
-        )[1].split(";", 1)[0] + ";\n"
-        jsbool = "void jsbool(" + firmware.split(
-            "void jsbool(", 1
-        )[1].split("void number(", 1)[0]
-        soil = "#if ROOM_SOIL_FITTED\n" + firmware.split(
-            "#if ROOM_SOIL_FITTED\n", 1
-        )[1].split("// The pinned Adafruit AMG88xx", 1)[0]
+        report_ms = _firmware_section(firmware, "constexpr uint32_t kReportMs", ";") + ";\n"
+        jsbool = _firmware_section(firmware, "void jsbool(", "void number(")
+        soil = _firmware_section(
+            firmware, "#if ROOM_SOIL_FITTED\n", "// The pinned Adafruit AMG88xx"
+        )
         (build / "soil_profile_under_test.h").write_text(
             soil_prefix + report_ms + jsbool + soil
         )
