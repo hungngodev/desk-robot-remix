@@ -48,6 +48,9 @@ class RobotSpatialState:
     envelope: SafetyEnvelope | None = None
     viewpoints: list[SearchViewpoint] = field(default_factory=list)
     observations: list[ObjectEvidence] = field(default_factory=list)
+    anchored_cliff_borders: dict[tuple[str, str, int, int], set[tuple[int, int]]] = field(
+        default_factory=dict,
+    )
     invalidated_reason: str | None = "unanchored"
 
 
@@ -82,6 +85,9 @@ class SpatialRuntime:
         state.last_navigation_pose = None
         state.map_to_odom = None
         if state.grid is not None:
+            for key, cells in state.grid._anchored_cliff_borders.items():
+                if cells:
+                    state.anchored_cliff_borders[key] = set(cells)
             state.grid.invalidate_origin(state.body_boot, f"reset-{state.epoch}")
             state.grid.epoch = state.epoch
             state.origin_id = state.grid.origin_id
@@ -115,6 +121,21 @@ class SpatialRuntime:
             or (map_to_odom.parent, map_to_odom.child) != ("map", "odom")
         ):
             raise ValueError("Invalid map-to-odom localization transform")
+        previous_grid = state.grid
+        if previous_grid is not None:
+            for key, cells in previous_grid._anchored_cliff_borders.items():
+                if cells:
+                    state.anchored_cliff_borders[key] = set(cells)
+            # A map-to-odom correction on an uninterrupted origin means prior cells
+            # in that frame used an unverified transform; drop that frame's cache.
+            if (
+                previous_grid.anchored
+                and state.invalidated_reason is None
+                and body_boot == state.body_boot
+                and origin_id == state.origin_id
+                and state.map_to_odom != map_to_odom
+            ):
+                state.anchored_cliff_borders.pop(previous_grid._anchor_frame_key(), None)
         next_epoch = state.epoch + 1
         grid = SpatialGrid(
             robot_id,
@@ -127,7 +148,7 @@ class SpatialRuntime:
             epoch=next_epoch,
             ttl_us=ttl_us,
         )
-        grid.inherit_clock_reference(state.grid)
+        grid.inherit_clock_reference(previous_grid)
         state.epoch = next_epoch
         state.body_boot = body_boot
         state.origin_id = origin_id
@@ -139,6 +160,12 @@ class SpatialRuntime:
         state.last_navigation_pose = None
         state.invalidated_reason = None if anchored else "unanchored"
         grid.anchored = anchored
+        if anchored and map_to_odom is not None:
+            grid.restore_anchored_cliff_borders(state.anchored_cliff_borders)
+        else:
+            grid._anchored_cliff_borders = {
+                key: set(cells) for key, cells in state.anchored_cliff_borders.items()
+            }
         state.grid = grid
         state.viewpoints.clear()
         return grid

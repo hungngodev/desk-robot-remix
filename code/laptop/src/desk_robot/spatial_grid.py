@@ -94,9 +94,13 @@ class SpatialGrid:
         self.ttl_us = ttl_us
         self.anchored = False  # Only future validated map-to-odom can change this.
         self._cells: dict[tuple[int, int], _Cell] = {}
+        self._anchored_cliff_borders: dict[tuple[str, str, int, int], set[tuple[int, int]]] = {}
         self._last_source: dict[int, tuple[int, int, int]] = {}
         self._clock_reference: dict[int, tuple[int, int]] = {}
         self._last_update_us = 0
+
+    def _anchor_frame_key(self) -> tuple[str, str, int, int]:
+        return (self.anchor_id, self.calibration_id, self.width, self.height)
 
     def _contains_cell(self, x: int, y: int) -> bool:
         return (type(x) is int and type(y) is int
@@ -214,6 +218,12 @@ class SpatialGrid:
                 target.floor_sample_us = batch.sample_us
                 target.floor_calibration = batch.calibration_id
                 target.floor_epoch = batch.epoch
+                if self.anchored:
+                    key = self._anchor_frame_key()
+                    if batch.kind == "floor_unsafe":
+                        self._anchored_cliff_borders.setdefault(key, set()).add(cell)
+                    elif key in self._anchored_cliff_borders:
+                        self._anchored_cliff_borders[key].discard(cell)
             else:
                 # Evidence from a different geometry must never cancel a fresh
                 # obstacle hit or lend false clearance after recalibration.
@@ -300,6 +310,39 @@ class SpatialGrid:
             raise GridEvidenceError("Grid clock reference robot identity mismatch")
         if previous is not None and previous.body_boot == self.body_boot:
             self._clock_reference.update(previous._clock_reference)
+
+    def restore_anchored_cliff_borders(
+        self,
+        borders: dict[tuple[str, str, int, int], set[tuple[int, int]]],
+    ) -> None:
+        """Copy remembered stable-anchor cliff borders; activate only if anchored."""
+        self._anchored_cliff_borders = {
+            key: set(cells) for key, cells in borders.items() if cells
+        }
+        if not self.anchored:
+            return
+        for cell in self._anchored_cliff_borders.get(self._anchor_frame_key(), ()):
+            if not self._contains_cell(*cell):
+                continue
+            target = self._cells.setdefault(cell, _Cell())
+            if target.floor_received_us == 0:
+                target.floor = "unsafe"
+                target.floor_calibration = self.calibration_id
+                target.floor_epoch = self.epoch
+
+    def relocalize_anchor(self, anchor_id: str, calibration_id: str) -> None:
+        """Re-anchor after reset and restore only cliff borders for the verified frame."""
+        if (type(anchor_id) is not str or not anchor_id
+                or type(calibration_id) is not str or not calibration_id):
+            raise ValueError("Verified anchor and calibration IDs required")
+        self.epoch += 1
+        self.anchor_id = anchor_id
+        self.calibration_id = calibration_id
+        self.anchored = True
+        self._cells.clear()
+        self._last_source.clear()
+        self._last_update_us = 0
+        self.restore_anchored_cliff_borders(self._anchored_cliff_borders)
 
     def invalidate_calibration(self, calibration_id: str) -> None:
         if type(calibration_id) is not str or not calibration_id:

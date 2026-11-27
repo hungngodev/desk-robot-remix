@@ -862,3 +862,52 @@ def test_full_recall_candidate_ranking_is_stable_across_row_order():
             result = _rank_search_rows("robot-01", candidates, now=now, limit=limit)
             assert [item.event_id for item in result] == expected[:limit]
     assert _rank_search_rows("robot-01", [], now=now, limit=12) == []
+
+
+def test_search_isolates_malformed_persisted_sqlite_rows_and_preserves_provenance(tmp_path):
+    now = time.time()
+    path = tmp_path / "robot-01.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            """CREATE TABLE memory_identity (
+                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                 robot_id TEXT NOT NULL)"""
+        )
+        db.execute("INSERT INTO memory_identity VALUES (1, 'robot-01')")
+        db.execute(
+            """CREATE TABLE memories (
+                 event_id TEXT PRIMARY KEY, source_robot TEXT NOT NULL,
+                 witnessed INTEGER NOT NULL, kind TEXT NOT NULL,
+                 summary TEXT NOT NULL, observed_at REAL NOT NULL,
+                 confidence REAL NOT NULL)"""
+        )
+        db.executemany(
+            "INSERT INTO memories VALUES (?,?,?,?,?,?,?)",
+            [
+                ("valid_own", "robot-01", 1, "key", "silver key firsthand", now - 30, 0.9),
+                ("valid_peer", "robot-02", 0, "key", "silver key peer story", now - 20, 0.95),
+                (
+                    "peer_claim_spoof", "robot-01", 1, "peer_claim",
+                    "silver key spoof", now - 10, 0.9,
+                ),
+                ("text_clock", "robot-01", 1, "key", "silver key bad clock", "not-a-time", 0.9),
+                ("future_clock", "robot-01", 1, "key", "silver key future", now + 86400, 0.9),
+                ("inf_conf", "robot-01", 1, "key", "silver key inf conf", now - 15, float("inf")),
+                ("bad_conf", "robot-01", 1, "key", "silver key bad conf", now - 15, 2.5),
+                ("bad_witness", "robot-02", 1, "key", "silver key wrong witness", now - 15, 0.8),
+                ("self_unwit", "robot-01", 0, "key", "silver key self unwitnessed", now - 15, 0.8),
+                ("ctrl_text", "robot-01", 1, "key", "silver key \x00 bad", now - 15, 0.8),
+            ],
+        )
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+
+    own_matches = store.search("robot-01", "silver key", limit=6, own_only=True)
+    assert [m.event_id for m in own_matches] == ["valid_own"]
+    assert own_matches[0].witnessed is True
+
+    all_matches = store.search("robot-01", "silver key", limit=6, own_only=False)
+    by_id = {m.event_id: m for m in all_matches}
+    assert set(by_id) == {"valid_own", "valid_peer", "peer_claim_spoof"}
+    assert by_id["valid_own"].witnessed is True
+    assert by_id["valid_peer"].witnessed is False
+    assert by_id["peer_claim_spoof"].witnessed is False

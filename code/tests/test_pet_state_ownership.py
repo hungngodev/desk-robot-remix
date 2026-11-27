@@ -21,6 +21,8 @@ def _controller(tmp_path, **kwargs):
     settings = load_settings(
         Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
     )
+    settings.memory_dir = tmp_path / "app_mem"
+    settings.trials_file = tmp_path / "trials.jsonl"
     memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
     conversation = Conversation(
         settings, SimulatedChat(), SimulatedSpeaker(), memory=memory
@@ -31,8 +33,13 @@ def _controller(tmp_path, **kwargs):
 
 
 def test_visual_initiative_policy_cannot_be_mutated():
-    with pytest.raises(TypeError):
-        _VISUAL_INITIATIVE_MIN_CONFIDENCE["person"] = 0.0
+    original = _VISUAL_INITIATIVE_MIN_CONFIDENCE["person"]
+    try:
+        with pytest.raises(TypeError):
+            _VISUAL_INITIATIVE_MIN_CONFIDENCE["person"] = 0.0
+    finally:
+        if _VISUAL_INITIATIVE_MIN_CONFIDENCE.get("person") != original:
+            _VISUAL_INITIATIVE_MIN_CONFIDENCE["person"] = original
     assert not _initiative_evidence(SceneChange("person", "A person appeared", 0.87))
     assert _initiative_evidence(SceneChange("person", "A person appeared", 0.88))
 
@@ -219,6 +226,8 @@ async def test_native_pet_speech_policy_reads_immutable_pet_states_mapping(
     settings = load_settings(
         Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
     )
+    settings.memory_dir = tmp_path / "app_mem"
+    settings.trials_file = tmp_path / "trials.jsonl"
     monkeypatch.setenv(
         settings.coordinator_token_env, "test-operator-token-at-least-32-characters"
     )

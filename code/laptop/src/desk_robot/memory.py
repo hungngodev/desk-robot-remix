@@ -148,29 +148,81 @@ def _validate_memory_text(
         raise ValueError(invalid_character_message or message)
 
 
-_SearchRow = tuple[str, str, int, str, str, float, float, float]
+_SearchRow = tuple[object, ...]
+
+
+def _valid_search_row(
+    robot_id: str,
+    row: _SearchRow,
+    *,
+    now: float,
+    own_only: bool = False,
+) -> tuple[tuple[float, float, float, str], Memory] | None:
+    if len(row) != 8:
+        return None
+    event_id, source, witnessed_raw, kind, summary, at, confidence, relevance = row
+    if (
+        type(event_id) is not str
+        or _EVENT_ID.fullmatch(event_id) is None
+        or type(source) is not str
+        or not is_private_robot_id(source)
+        or type(witnessed_raw) is not int
+        or witnessed_raw not in (0, 1)
+        or type(kind) is not str
+        or _EVENT_KIND.fullmatch(kind) is None
+        or type(summary) is not str
+        or not 1 <= len(summary) <= 300
+        or not summary.strip()
+        or _INVALID_MEMORY_CHARACTER.search(summary) is not None
+        or type(at) not in (int, float)
+        or not 0 <= at <= now + 60
+        or not math.isfinite(at)
+        or type(confidence) not in (int, float)
+        or not 0 <= confidence <= 1
+        or not math.isfinite(confidence)
+        or type(relevance) not in (int, float)
+        or not -1e12 <= relevance <= 1e12
+        or not math.isfinite(relevance)
+    ):
+        return None
+    if (witnessed_raw == 1) != (source == robot_id):
+        return None
+    witnessed = witnessed_raw == 1 and kind not in PEER_MEMORY_KINDS
+    if own_only and not witnessed:
+        return None
+    age_days = max(0.0, now - float(at)) / 86400
+    # BM25 scores are lower for better matches. Quantize tiny
+    # floating noise so confidence, firsthand source and recency
+    # fairly break equal-ranking topical results.
+    rank = (
+        round(-float(relevance), 6),
+        float(confidence) + (0.25 if witnessed else 0) + 0.25 / (1 + age_days / 14),
+        float(at),
+        event_id,
+    )
+    return rank, Memory(
+        robot_id, event_id, source, witnessed, kind, summary, at, confidence,
+    )
 
 
 def _rank_search_rows(
-    robot_id: str, rows: list[_SearchRow], *, now: float, limit: int,
+    robot_id: str,
+    rows: list[_SearchRow],
+    *,
+    now: float,
+    limit: int,
+    own_only: bool = False,
 ) -> list[Memory]:
-    ranked: list[tuple[tuple[float, float, float, str], Memory]] = []
-    for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:
-        witnessed = bool(witnessed) and kind not in PEER_MEMORY_KINDS
-        age_days = max(0.0, now - at) / 86400
-        # BM25 scores are lower for better matches. Quantize tiny
-        # floating noise so confidence, firsthand source and recency
-        # fairly break equal-ranking topical results.
-        rank = (
-            round(-float(relevance), 6),
-            float(confidence) + (0.25 if witnessed else 0)
-            + 0.25 / (1 + age_days / 14),
-            at, event_id,
+    ranked = [
+        validated
+        for row in rows
+        if (
+            validated := _valid_search_row(
+                robot_id, row, now=now, own_only=own_only,
+            )
         )
-        ranked.append((
-            rank, Memory(robot_id, event_id, source, bool(witnessed),
-                         kind, summary, at, confidence),
-        ))
+        is not None
+    ]
     ranked.sort(key=lambda entry: entry[0], reverse=True)
     return [memory for _, memory in ranked[:limit]]
 
@@ -961,7 +1013,9 @@ class MemoryStore:
                        WHERE memories_fts MATCH ? LIMIT 250""",
                     (expression,),
                 ).fetchall()
-        return _rank_search_rows(robot_id, rows, now=time.time(), limit=limit)
+        return _rank_search_rows(
+            robot_id, rows, now=time.time(), limit=limit, own_only=own_only,
+        )
 
     def reserve_core_fact_mutation(
         self, robot_id: str, slot: str, value: str | None = None,
