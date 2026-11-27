@@ -32,29 +32,39 @@ int main() {
     const auto old_generation = activity.generation();
     const auto old_capture = activity.BeginWindow();
     activity.RecordAccepted(old_generation, 160, 10000);
+    assert(activity.SnapshotNow().frames == 160);
     assert(activity.AdvancedSince(old_capture, 10000));
 
     // STOP invalidates a blocking I2S writer's original generation.
     activity.Reset();
+    assert(activity.generation() != old_generation);
     const auto new_capture = activity.BeginWindow();
+    assert(new_capture.frames == 0);
     activity.RecordAccepted(old_generation, 320, 15000);
+    assert(activity.SnapshotNow().frames == 0);
     assert(!activity.AdvancedSince(new_capture, 20000));
     assert(!activity.AdvancedSince(old_capture, 10000));
     activity.RecordAccepted(activity.generation(), 0, 15001);
+    assert(activity.SnapshotNow().frames == 0);
     activity.RecordAccepted(activity.generation(), -1, 15002);
+    assert(activity.SnapshotNow().frames == 0);
     assert(!activity.AdvancedSince(new_capture, 20000));
     activity.RecordAccepted(activity.generation(), 160, 20000);
+    assert(activity.SnapshotNow().frames == 160);
     assert(activity.AdvancedSince(new_capture, 20000));
 
     // A newer STOP invalidates even the previously active capture.
     activity.Reset();
     assert(!activity.AdvancedSince(new_capture, 20000));
     const auto current = activity.BeginWindow();
+    assert(current.frames == 0);
     activity.RecordAccepted(old_generation, 160, 10000);
+    assert(activity.SnapshotNow().frames == 0);
     assert(!activity.AdvancedSince(current, 30000));
     activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
     activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
     activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
+    assert(activity.SnapshotNow().frames == uint64_t{INT_MAX} * 3);
     assert(activity.SnapshotNow().frames > UINT32_MAX);
     assert(activity.AdvancedSince(current, 30000));
 
