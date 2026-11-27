@@ -16,6 +16,7 @@ def runtime_ready(state: State) -> bool:
     return (
         owner is not None
         and getattr(state, "runtime_started", False) is True
+        and getattr(state, "runtime_lifespan_owner", owner) is owner
         and not getattr(owner, "_closed", False)
         and getattr(owner, "_fatal_service_error", None) is None
     )
@@ -25,11 +26,15 @@ def runtime_ready(state: State) -> bool:
 async def runtime_lifespan(state: State) -> AsyncIterator[None]:
     """Preserve the initiating failure while reporting unconfirmed cleanup."""
     state.runtime_started = False
+    owner = state.runtime
+    state.runtime_lifespan_owner = owner
     primary: BaseException | None = None
     try:
-        start = getattr(state.runtime, "start", None)
+        start = getattr(owner, "start", None)
         if callable(start):
             await start()
+        if getattr(state, "runtime", None) is not owner:
+            raise RuntimeError("Runtime owner changed during startup")
         state.runtime_started = True
         yield
     except BaseException as error:
@@ -37,8 +42,9 @@ async def runtime_lifespan(state: State) -> AsyncIterator[None]:
         raise
     finally:
         state.runtime_started = False
+        state.runtime_lifespan_owner = None
         try:
-            await state.runtime.close()
+            await owner.close()
         except (Exception, asyncio.CancelledError) as error:
             if primary is None:
                 raise

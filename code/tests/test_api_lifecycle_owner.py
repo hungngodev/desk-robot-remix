@@ -56,3 +56,38 @@ async def test_lifespan_reports_cleanup_failure_without_primary_failure():
         async with runtime_lifespan(state):
             assert runtime_ready(state)
     assert not runtime_ready(state)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["startup", "serving"])
+async def test_lifespan_keeps_cleanup_bound_to_started_owner(stage):
+    state = State()
+    calls = []
+
+    async def replacement_close():
+        calls.append("replacement close")
+
+    replacement = SimpleNamespace(close=replacement_close)
+
+    async def start():
+        calls.append("original start")
+        if stage == "startup":
+            state.runtime = replacement
+
+    async def close():
+        assert not runtime_ready(state)
+        calls.append("original close")
+
+    state.runtime = SimpleNamespace(start=start, close=close)
+    if stage == "startup":
+        with pytest.raises(RuntimeError, match="Runtime owner changed during startup"):
+            async with runtime_lifespan(state):
+                pytest.fail("replacement runtime must not be admitted")
+    else:
+        async with runtime_lifespan(state):
+            assert runtime_ready(state)
+            state.runtime = replacement
+            assert not runtime_ready(state)
+
+    assert calls == ["original start", "original close"]
+    assert not runtime_ready(state)
