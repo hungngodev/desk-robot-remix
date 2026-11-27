@@ -42,8 +42,10 @@ class LatestFrameAdmission:
         self, robot_id: str, received: float, *, clock: Callable[[], float],
         reserve: Callable[[], bool], admit: Callable[[], bool],
     ) -> None:
-        if self._closed or not admit():
+        if self._closed or admit() is not True:
             raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
+        if type(robot_id) is not str or not robot_id:
+            raise FrameAdmissionDropped("Invalid camera admission identity")
         _remaining_frame_budget(received, clock())
         previous = self._pending.get(robot_id)
         if previous is not None and received <= previous[1]:
@@ -55,13 +57,17 @@ class LatestFrameAdmission:
             while True:
                 if self._pending.get(robot_id) is not ticket:
                     raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
-                if self._closed or not admit():
+                if self._closed or admit() is not True:
                     raise FrameAdmissionDropped(
                         "Camera preprocessing admission invalidated or expired"
                     )
                 remaining = _remaining_frame_budget(received, clock())
-                if next(iter(self._pending)) == robot_id and reserve():
-                    return
+                if next(iter(self._pending)) == robot_id:
+                    reserved = reserve()
+                    if reserved is True:
+                        return
+                    if reserved is not False:
+                        raise FrameAdmissionDropped("Invalid camera capacity reservation result")
                 self._changed.clear()
                 try:
                     async with asyncio.timeout(remaining):

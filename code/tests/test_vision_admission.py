@@ -49,7 +49,8 @@ async def test_flood_replaces_only_own_ticket_without_jumping_fleet_order():
 
 
 @pytest.mark.asyncio
-async def test_cancel_revocation_and_close_do_not_reserve_or_block_peers():
+@pytest.mark.parametrize("revoked_value", [False, 1, "yes"])
+async def test_cancel_revocation_and_close_do_not_reserve_or_block_peers(revoked_value):
     gate = LatestFrameAdmission()
     admitted = []
     allowed = True
@@ -71,7 +72,7 @@ async def test_cancel_revocation_and_close_do_not_reserve_or_block_peers():
     cancelled.cancel()
     with pytest.raises(asyncio.CancelledError):
         await cancelled
-    allowed = False
+    allowed = revoked_value
     gate.notify()
     with pytest.raises(RuntimeError, match="invalidated"):
         await revoked
@@ -123,3 +124,81 @@ async def test_expired_and_out_of_order_frames_do_not_displace_newer_ticket():
     assert not gate._pending
     await offer(11.1)
     assert admitted == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [True, False, None, [], {}, ""])
+async def test_invalid_robot_identity_does_not_reserve(invalid):
+    gate = LatestFrameAdmission()
+    reservations = []
+
+    def reserve():
+        reservations.append(True)
+        return True
+
+    with pytest.raises(FrameAdmissionDropped):
+        await gate.acquire(invalid, 10.0, clock=lambda: 10.0,
+                           reserve=reserve, admit=lambda: True)
+    assert not reservations
+    assert not gate._pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [1, "yes", [True], float("nan")])
+async def test_nonboolean_admission_cannot_displace_waiting_frame(invalid):
+    gate = LatestFrameAdmission()
+    busy = True
+
+    def reserve():
+        return not busy
+
+    waiting = asyncio.create_task(gate.acquire(
+        "robot-01", 10.0, clock=lambda: 10.1, reserve=reserve, admit=lambda: True,
+    ))
+    await asyncio.sleep(0)
+    original = gate._pending["robot-01"]
+    try:
+        with pytest.raises(FrameAdmissionDropped, match="invalidated"):
+            await gate.acquire("robot-01", 10.1, clock=lambda: 10.1,
+                               reserve=lambda: True, admit=lambda: invalid)
+        assert gate._pending["robot-01"] is original
+        busy = False
+        gate.notify()
+        await asyncio.wait_for(waiting, 1)
+        assert not gate._pending
+    finally:
+        if not waiting.done():
+            waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [1, "yes", [], None])
+async def test_nonboolean_reservation_result_is_not_admission(invalid):
+    gate = LatestFrameAdmission()
+    with pytest.raises(FrameAdmissionDropped, match="reservation"):
+        await gate.acquire("robot-01", 10.0, clock=lambda: 10.0,
+                           reserve=lambda: invalid, admit=lambda: True)
+    assert not gate._pending
+    await gate.acquire("robot-02", 10.0, clock=lambda: 10.0,
+                       reserve=lambda: True, admit=lambda: True)
+    assert not gate._pending
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [True, False, float("nan"), float("inf"),
+                                    float("-inf"), 10**400, "10", None])
+async def test_invalid_timestamps_do_not_reserve_or_queue(invalid):
+    gate = LatestFrameAdmission()
+    reservations = []
+
+    def reserve():
+        reservations.append(True)
+        return True
+
+    for received, now in ((invalid, 10.0), (10.0, invalid)):
+        with pytest.raises(FrameAdmissionDropped, match="invalidated"):
+            await gate.acquire("robot-01", received, clock=lambda now=now: now,
+                               reserve=reserve, admit=lambda: True)
+        assert not gate._pending
+    assert not reservations
