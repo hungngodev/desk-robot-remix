@@ -3341,6 +3341,60 @@ async def test_close_uses_one_deadline_for_stream_and_physical_snapshot():
         await asyncio.gather(stream, snapshot, return_exceptions=True)
 
 
+async def test_cancelled_fleet_camera_close_still_clears_frames_and_retires_owners():
+    """Cancellation of the close waiter must not skip synchronous cleanup."""
+    settings = config()
+    settings.robots = [SimpleNamespace(id=f"robot-{i:02}") for i in range(1, 6)]
+    ids = [robot.id for robot in settings.robots]
+    visual = MultimodalOrchestrator(
+        settings, {rid: Head() for rid in ids}, Vision(), asyncio.Lock(),
+    )
+    started = {rid: asyncio.Event() for rid in ids}
+    cancelling = {rid: asyncio.Event() for rid in ids}
+    release = asyncio.Event()
+
+    async def worker(rid):
+        started[rid].set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelling[rid].set()
+            await release.wait()
+
+    workers = {rid: asyncio.create_task(worker(rid)) for rid in ids}
+    visual._stream_tasks.update(workers)
+    prepared = (image(), bytes(64 * 48), 0.5)
+    for rid in ids:
+        visual.hub.offer_prepared(rid, prepared, time.monotonic(), source="proactive")
+    waiter = None
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in started.values())), 1
+        )
+        waiter = asyncio.create_task(visual.close())
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in cancelling.values())), 1
+        )
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert all(not visual.hub.frames[rid] for rid in ids)
+        with pytest.raises(RuntimeError, match="shutdown"):
+            visual._preprocess_pool.submit(lambda: None)
+        assert visual._stream_tasks == workers
+        release.set()
+        await asyncio.gather(*workers.values())
+        await asyncio.sleep(0)
+        assert not visual._stream_tasks
+    finally:
+        release.set()
+        if waiter is not None and not waiter.done():
+            waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
+        await asyncio.gather(*workers.values(), return_exceptions=True)
+        await visual.close()
+
+
 async def test_close_bounds_cancellation_resistant_stream_worker():
     """A stubborn stream worker cannot hang shutdown or lose ownership."""
     entered, release = asyncio.Event(), asyncio.Event()

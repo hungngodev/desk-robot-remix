@@ -2509,28 +2509,30 @@ class MultimodalOrchestrator:
             )
         # One deadline for all asyncio and native workers, not one per pet.
         waiters = tasks.union(native_waiters)
-        if waiters:
-            await asyncio.wait(waiters, timeout=0.5)
+        try:
+            if waiters:
+                await asyncio.wait(waiters, timeout=0.5)
+        finally:
+            # Cancellation of the shutdown waiter must not skip evidence cleanup.
+            def retire(owner, robot_id, task):
+                if not task.cancelled():
+                    task.exception()
+                if owner.get(robot_id) is task:
+                    owner.pop(robot_id, None)
 
-        def retire(owner, robot_id, task):
-            if not task.cancelled():
-                task.exception()
-            if owner.get(robot_id) is task:
-                owner.pop(robot_id, None)
-
-        # Preserve unfinished owners and observe their terminal exceptions.
-        for registry in registries:
-            for robot_id, task in tuple(registry.items()):
-                if task.done():
-                    retire(registry, robot_id, task)
-                else:
-                    task.add_done_callback(
-                        lambda done, rid=robot_id, owner=registry: retire(owner, rid, done)
-                    )
-        self.hub.close()
-        self._preprocess_futures = {
-            worker for worker in self._preprocess_futures if not worker.done()
-        }
+            # Preserve unfinished owners and observe their terminal exceptions.
+            for registry in registries:
+                for robot_id, task in tuple(registry.items()):
+                    if task.done():
+                        retire(registry, robot_id, task)
+                    else:
+                        task.add_done_callback(
+                            lambda done, rid=robot_id, owner=registry: retire(owner, rid, done)
+                        )
+            self.hub.close()
+            self._preprocess_futures = {
+                worker for worker in self._preprocess_futures if not worker.done()
+            }
         unfinished = sum(not task.done() for task in tasks)
         if unfinished or self._preprocess_futures:
             raise TimeoutError(
