@@ -336,7 +336,8 @@ def test_immutable_procedure_identity_rejects_boolean_float_or_padded_ids():
             row, SHA, lambda url, v=invalid: identity_lookup(url, v))
 
 
-def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement(encoding):
     row = promoted("MEASURED")["procedures"][0]
     row["physical_measurement_receipt"]["raw_data_url"] = RAW.replace(
         "bench.csv", "duplicate.json",
@@ -353,7 +354,7 @@ def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
     def signed_file(url, contents):
         if "/contents/" not in url:
             return lookup(url)
-        data = contents.encode()
+        data = contents.encode(encoding)
         return {"type": "file", "size": len(data), "encoding": "base64",
                 "content": base64.b64encode(data).decode()}
 
@@ -373,6 +374,8 @@ def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
         good.replace('"lift_mm": 10', '"lift_mm": 1e-999999999999999999999999999999'),
         good.replace('"lift_mm": 10', '"lift_mm": -1e-999999999999999999999999999999'),
         good.replace('"lift_mm": 10', '"lift_mm": 1.0000000000000001'),
+        good.replace('"lift_mm": 10', '"lift_mm": 9223372036854775808'),
+        good.replace('"lift_mm": 10', '"lift_mm": -9223372036854775809'),
     ):
         assert not verify.verified_procedure_record(
             row, SHA, lambda url, raw=corrupt: signed_file(url, raw))

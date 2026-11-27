@@ -507,12 +507,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
                    for record in records):
                 return False
         elif urlsplit(url).path.lower().endswith(".json"):
-            document = json.loads(
-                content, object_pairs_hook=strict_receipt_object,
-                parse_constant=reject_nonfinite_receipt_value,
-                parse_float=finite_receipt_float,
-                parse_int=bounded_receipt_int,
-            )
+            document = parse_ledger(content)
             records = document.get("receipts") if isinstance(document, dict) else None
         else:
             return False
