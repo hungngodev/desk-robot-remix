@@ -108,12 +108,10 @@ def test_calibrate_terminal_ir_requires_per_receiver_ids_in_inferred_mode():
 
 def test_export_fit_kit_rejects_concurrent_scad_edit_during_footprint(tmp_path, monkeypatch):
     """868cabS: SCAD edit during footprint check prevents publishing fit_kit_manifest.json."""
-    import shutil
-    if shutil.which("openscad") is None:
-        pytest.skip("OpenSCAD CLI unavailable")
-    # Build minimal temp copy only of SCAD sources? Instead, test via monkeypatch
-    # on _read_scad_source after reference_body_footprint_screen runs.
     import importlib.util
+    import shutil
+    from struct import pack
+
     spec = importlib.util.spec_from_file_location("export_fit_b2c", SCRIPTS / "export_fit_kit.py")
     efk = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(efk)
@@ -128,12 +126,34 @@ def test_export_fit_kit_rejects_concurrent_scad_edit_during_footprint(tmp_path, 
     out = tmp_path / "out"
     calls = {"fp": 0}
 
+    def _cube_binstl() -> bytes:
+        c = (
+            (0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 10.0, 0.0), (0.0, 10.0, 0.0),
+            (0.0, 0.0, 10.0), (10.0, 0.0, 10.0), (10.0, 10.0, 10.0), (0.0, 10.0, 10.0),
+        )
+        tris = [
+            (0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+            (0, 4, 7), (0, 7, 3), (1, 2, 6), (1, 6, 5),
+        ]
+        buf = bytearray(b"cube".ljust(80, b"\0") + pack("<I", len(tris)))
+        for i0, i1, i2 in tris:
+            buf.extend(pack("<12fH", 0.0, 0.0, 0.0, *c[i0], *c[i1], *c[i2], 0))
+        return bytes(buf)
+
+    def fake_run(cmd, **_kwargs):
+        out_path = Path(cmd[cmd.index("-o") + 1])
+        out_path.write_bytes(_cube_binstl())
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
     def fake_footprint(_root, _out):
         calls["fp"] += 1
         target = scad_dir / "one_robot_adapter_kit.scad"
         target.write_text(target.read_text(encoding="utf-8") + "\n// mutated\n", encoding="utf-8")
         return {"ok": True}
 
+    monkeypatch.setattr(efk.shutil, "which", lambda _cmd: "/fake/openscad")
+    monkeypatch.setattr(efk.subprocess, "run", fake_run)
     monkeypatch.setattr(efk, "ADAPTERS", ("tof_adjustable",))
     monkeypatch.setattr(efk, "GAUGES", ())
     monkeypatch.setattr(efk, "SPEAKER_FITS", ())
@@ -142,7 +162,7 @@ def test_export_fit_kit_rejects_concurrent_scad_edit_during_footprint(tmp_path, 
     monkeypatch.setattr(efk, "DOCKS", ())
     monkeypatch.setattr(efk, "reference_body_footprint_screen", fake_footprint)
     with pytest.raises(ValueError, match="SCAD source changed during export"):
-        efk.export_fit_kit(tmp_path, out)
+        efk.export_kit(tmp_path, output_dir=out)
     assert calls["fp"] == 1
     assert not (out / "fit_kit_manifest.json").exists()
 
