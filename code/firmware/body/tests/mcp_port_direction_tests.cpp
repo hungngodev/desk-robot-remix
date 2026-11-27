@@ -158,12 +158,30 @@ static void check_direction_drift_after_verified_reset() {
   CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
 }
 
+static void check_expectation_change_revokes_verification() {
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  CHECK(regs.verify(lock) && lock.verified());
+  lock.expect_haptic_output();
+  CHECK(!lock.verified() && !lock.faulted() && regs.writes == 0);
+  regs.values[1] = 0xFB;
+  CHECK(regs.verify(lock) && lock.verified());
+  lock.expect_haptic_output();
+  CHECK(lock.verified()); // unchanged expectation does not revoke proof
+  regs.values[1] = 0xF9;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  lock.expect_haptic_output();
+  CHECK(lock.faulted() && !lock.verified());
+  CHECK(!regs.verify(lock) && lock.faulted());
+}
+
 int main() {
   try {
     check_every_direction_bit();
     check_every_pullup_value();
     check_reset_and_transport_faults();
     check_direction_drift_after_verified_reset();
+    check_expectation_change_revokes_verification();
     std::cout << "PASS MCP23017 direction lock and verified reset\n";
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << error.what() << '\n';

@@ -6,7 +6,12 @@ namespace desk_robot {
 // A verified configuration mismatch is sticky until explicit initialization.
 class McpPortDirectionLock {
  public:
-  void expect_haptic_output() { expected_b_ = 0xFB; }
+  void expect_haptic_output() {
+    if (expected_b_ != 0xFB) {
+      expected_b_ = 0xFB;
+      verified_ = false; // proof of the old direction is no longer current
+    }
+  }
   bool faulted() const { return faulted_; }
   bool verified() const { return verified_; }
 
