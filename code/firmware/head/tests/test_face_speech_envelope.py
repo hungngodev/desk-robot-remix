@@ -20,6 +20,7 @@ def test_speech_envelope_noise_peak_slew_and_reset(tmp_path, standard):
     binary = tmp_path / "speech"
     source.write_text(r'''
 #include "face_speech_envelope.hpp"
+#include "../overlay/face_presence.hpp"
 #include <cassert>
 #include <limits>
 using namespace desk_robot;
@@ -85,6 +86,27 @@ int main() {
     level.Reset();
     assert(!level.Read(max_time).fresh);
     assert(level.Read(max_time).mean_abs == 0);
+    // Sustained digital audio must not reopen the cosmetic mouth during a
+    // local body fault, even if privacy and voice-link events arrive too.
+    level.Publish(32768ULL * 160, 160, 1000000);
+    assert(mouth.Step(level.Read(1000000), true) == 3);
+    assert(mouth.Step(level.Read(1000000), true) == 5);
+    assert(mouth.Step(level.Read(1000000), true) == 7);
+    for (int tick = 1; tick <= 100; ++tick) {
+        const int64_t now = 1000000 + tick * 100000LL;
+        level.Publish(32768ULL * 160, 160, now);
+        const bool dock = tick % 2 == 0;
+        const auto status = SelectFaceStatus(true, dock, tick % 3 == 0, tick % 5 == 0);
+        assert(status == (dock ? FaceStatus::kDockLock : FaceStatus::kBodyFault));
+        assert(FaceStatusBlocksExpression(status));
+        assert(level.Read(now).fresh);
+        assert(mouth.Step(level.Read(now), !FaceStatusBlocksExpression(status)) == 0);
+    }
+    // On a permitted new expression, restart from the closed-mouth baseline.
+    level.Reset();
+    assert(mouth.Step(level.Read(11000000), true) == 1);
+    level.Publish(32768ULL * 160, 160, 11000001);
+    assert(mouth.Step(level.Read(11000001), true) == 3);
 }
 ''')
     flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
