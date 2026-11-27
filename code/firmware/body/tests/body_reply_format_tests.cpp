@@ -75,6 +75,24 @@ void invalid_arguments() {
   CHECK(std::strcmp(reply, "OK halt") == 0);
 }
 
+// A formatter must not advertise a complete reply if UART would see only
+// a prefix, an empty frame, or multiple lines. Reuse a real success buffer.
+void malformed_frames() {
+  char reply[64];
+  const int delimiters[] = {0, '\r', '\n'};
+  for (int delimiter : delimiters) {
+    CHECK(desk_robot::format_reply(reply, sizeof(reply), "OK stop"));
+    CHECK(!desk_robot::format_reply(reply, sizeof(reply),
+                                    "OK stop%cERR drive safety_interlock", delimiter));
+    CHECK(reply[0] == '\0');
+  }
+  CHECK(desk_robot::format_reply(reply, sizeof(reply), "OK arm"));
+  CHECK(!desk_robot::format_reply(reply, sizeof(reply), "%s", ""));
+  CHECK(reply[0] == '\0');
+  CHECK(desk_robot::format_reply(reply, sizeof(reply), "OK halt"));
+  CHECK(std::strcmp(reply, "OK halt") == 0);
+}
+
 void full_buffer_boundary() {
   char payload[1800];
   std::memset(payload, 'x', sizeof(payload));
@@ -93,4 +111,5 @@ int main() {
   numeric_boundaries();
   full_buffer_boundary();
   invalid_arguments();
+  malformed_frames();
 }
