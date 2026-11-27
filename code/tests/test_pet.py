@@ -9000,6 +9000,7 @@ async def test_proactive_model_peripherals_reject_missing_mismatched_or_retired_
     """An obsolete WROOM boot cannot create apparent new gesture or NFC context."""
     from copy import deepcopy
 
+    fleet.robots[0].nfc_interactions_qualified = True
     value = {
         "robot_id": "robot-01",
         "force": {"boot_id": 53},

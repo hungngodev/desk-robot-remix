@@ -220,7 +220,26 @@ class MemoryStore:
             self._initialize_provenance_tables(db)
             self._initialize_deletion_fence(db)
             self._initialize_mutation_tables(db)
+            self._migrate_mutation_replay_fences(db)
             self._initialize_search_index(db)
+
+    @staticmethod
+    def _migrate_mutation_replay_fences(db: sqlite3.Connection) -> None:
+        """Carry historical episode_mutations corrections into deleted_episode_ids."""
+        version = db.execute("PRAGMA user_version").fetchone()
+        if version is None or int(version[0]) >= 1:
+            return
+        db.execute(
+            "INSERT OR IGNORE INTO deleted_episode_ids(event_id) "
+            "SELECT event_id FROM episode_mutations"
+        )
+        db.execute(
+            """UPDATE deletion_fence_guard SET writes_sealed=1
+               WHERE singleton=1
+                 AND (SELECT COUNT(*) FROM deleted_episode_ids) >= ?""",
+            (_MAX_DELETED_EPISODE_IDS,),
+        )
+        db.execute("PRAGMA user_version = 1")
 
     def _initialize_episode_tables(self, db: sqlite3.Connection, robot: str) -> None:
         # A deny-only safety budget, separate from recallable memories.

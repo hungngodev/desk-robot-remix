@@ -31,6 +31,7 @@ def _reject_calibration_json_constant(token: str) -> None:
 
 def load_real_dock_calibration(
     path, *, robot_id: str | None = None, head_device_id: str | None = None,
+    expected_marker_id: int | None = None,
 ) -> tuple[DockCameraCalibration, float]:
     if path is None:
         raise ValueError("No dock calibration configured")
@@ -80,6 +81,8 @@ def load_real_dock_calibration(
     target = data.get("target_distance_mm")
     if type(target) not in (float, int) or not 50 <= target <= 500 or not math.isfinite(target):
         raise ValueError("Dock stopping distance is not calibrated")
+    if expected_marker_id is not None and calibration.marker_id != expected_marker_id:
+        raise ValueError("Dock calibration marker_id does not match assigned robot dock marker")
     return calibration, float(target)
 
 
@@ -197,6 +200,7 @@ async def observe_actual_dock(
         calib, target = load_real_dock_calibration(
             robot.dock_calibration, robot_id=robot.id,
             head_device_id=getattr(robot, "device_id", None),
+            expected_marker_id=getattr(robot, "dock_marker_id", None),
         )
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")

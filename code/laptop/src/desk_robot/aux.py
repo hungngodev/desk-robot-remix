@@ -237,6 +237,7 @@ def _validate_climate(climate: dict[str, Any]) -> None:
 
 
 def _validate_power(power: dict[str, Any]) -> None:
+    """Validate power telemetry; invalid-gauge cell_mv is raw diagnostic only."""
     if (not is_uint(power.get("cell_mv"), 4500)
             or not is_uint(power.get("soc_centi"), 10000)
             or not is_uint(power.get("bus_mv"), 40959)

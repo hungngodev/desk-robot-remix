@@ -6,6 +6,7 @@ from time import monotonic
 from typing import Awaitable, Callable, TypeVar
 
 from .command_framing import MAX_DRIVE_DURATION_MS, command_ack_matches, expected_ack
+from .sleep_clock import continuous_monotonic
 
 __all__ = [
     "OperationError",
@@ -37,12 +38,18 @@ async def dispatch_job_command(
     deadline = (
         monotonic() + MAX_DRIVE_DURATION_MS / 1000 if command.startswith("drive ") else None
     )
+    cont_deadline = (
+        continuous_monotonic() + MAX_DRIVE_DURATION_MS / 1000
+        if command.startswith("drive ") else None
+    )
 
     def at_dispatch() -> None:
         check()
         if dispatch_check is not None:
             dispatch_check()
-        if deadline is not None and monotonic() >= deadline:
+        if (deadline is not None and monotonic() >= deadline) or (
+            cont_deadline is not None and continuous_monotonic() >= cont_deadline
+        ):
             raise OperationError("Drive dispatch expired before transport send")
 
     check()

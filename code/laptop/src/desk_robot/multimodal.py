@@ -17,7 +17,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import aclosing
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -35,6 +35,7 @@ from .scene_motion import _scene_change_mask as _scene_change_mask
 from .scene_motion import change_fraction
 from .scene_motion import scene_change_mask as scene_change_mask
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
+from .sleep_clock import continuous_monotonic
 from .vision import OllamaScene
 from .vision_admission import (
     FrameAdmissionDropped,
@@ -136,13 +137,15 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
 
 @dataclass(frozen=True)
 class CameraEvidence:
-    jpeg: bytes
+    jpeg: bytes = field(repr=False)
     received_at: float  # Mac receive time, NOT sensor exposure time.
     motion_fraction: float
     source: str
     trigger_kind: str | None = None  # Scheduling cause, NOT object recognition.
     # Device-local capture completion receipt; NOT Mac-time exposure proof.
     source_identity: tuple[int, int, int] | None = None
+    received_continuous_at: float | None = None
+    received_wall_at: float | None = None
 
 
 # Keep the stream's cheap motion admission consistent with the pet's
@@ -312,6 +315,21 @@ class CameraFrameHub:
         self._shared_room = deepcopy(observation)
         self._shared_room_grant = grant
         self._shared_room_epoch = epoch
+
+    def admitted_room_stamp(self) -> tuple[float, int] | None:
+        """Return (received_at, connection_epoch) for the currently valid shared room reading."""
+        room = self._shared_room
+        allowed, grant = self._room_grant()
+        epoch = self._shared_room_epoch
+        if (
+            not allowed
+            or grant != self._shared_room_grant
+            or room is None
+            or epoch is None
+            or epoch != getattr(self, "_room_connection_epoch", 0)
+        ):
+            return None
+        return room.received_at, epoch
 
     def _check(self, robot_id: str) -> None:
         if type(robot_id) is not str or robot_id not in self.robots:
@@ -489,8 +507,12 @@ class CameraFrameHub:
         )
         self.last_capture[robot_id] = received_at
         self.urgent[robot_id] = False
-        evidence = CameraEvidence(reduced, received_at, motion, source,
-                                  trigger_kind, source_identity)
+        evidence = CameraEvidence(
+            reduced, received_at, motion, source,
+            trigger_kind, source_identity,
+            received_continuous_at=continuous_monotonic(),
+            received_wall_at=time.time(),
+        )
         self.frames[robot_id].append(evidence)
         return evidence
 
@@ -1161,12 +1183,24 @@ class MultimodalOrchestrator:
         }
 
     def _camera_revoked(self, settings: Settings) -> None:
-        """Purge every pet's queued visual evidence at the operator opt-out."""
+        """Purge every pet's queued visual evidence and cancel active inference."""
         if self._closed or settings is not self.settings:
             return
         for robot_id in self.hub.robots:
             self._camera_grant_valid(robot_id, self._camera_grants[robot_id])
         self._frame_admission.notify()
+        active_tasks = set(self._model_admission.active())
+        for owner in (
+            self._look_tasks,
+            self._proactive_snapshots,
+            self._head_snapshot_tasks,
+            self._capture_tasks,
+            self._sensor_tasks,
+        ):
+            active_tasks.update(owner.values())
+        for task in active_tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
 
     def _camera_grant_valid(self, robot_id: str, origin: int | None) -> bool:
         """Reject old media grants and invalidate their cached JPEGs once.
@@ -2465,6 +2499,9 @@ class MultimodalOrchestrator:
             raise
         except asyncio.CancelledError:
             metrics["visual_errors"] += 1
+            if (not self.settings.voice_vision_tools_enabled
+                    or self.settings.camera_consent_generation != camera_consent_generation):
+                raise RuntimeError("Visual query cancelled by camera consent revocation") from None
             if not current_turn():
                 reason = (
                     "newer speech" if self._turn_epoch[robot_id] != turn

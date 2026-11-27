@@ -11,11 +11,32 @@ import re
 import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence, TypedDict
 
 from .memory import FICTIONAL_MEMORY_KINDS, PEER_MEMORY_KINDS, CoreFact, Memory
 from .range_context import visual_range_caveat
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS
+
+
+class TimelineEntry(TypedDict, total=False):
+    """Typed boundary shape for bounded Mac timeline items."""
+
+    channel: str
+    kind: str
+    age_ms: int
+    source: str
+    content: str | None
+    source_at: float
+    station_id: str
+    station_seq: int
+    physical_action_verified: bool
+    identity_verified: bool
+    shared_not_robot_eyewitness: bool
+    fault_detail: str
+    robot_id: str
+    state: str
+    range_caveat: str
+    max_distance_mm: int
 
 
 @dataclass(frozen=True)
@@ -80,7 +101,11 @@ def is_camera_derived_timeline_item(entry: object) -> bool:
 
 
 def live_asr_in_current_grant(
-    entry: dict, *, now: float, enabled: bool, consent_started_at: float,
+    entry: Mapping[str, object] | TimelineEntry,
+    *,
+    now: float,
+    enabled: bool,
+    consent_started_at: float,
 ) -> bool:
     """Use the exact Mac source stamp, never a rounded display age.
 
@@ -322,7 +347,9 @@ _CUE_PRIORITIES = {
 }
 
 
-def _timeline_window(timeline: Sequence[dict]) -> tuple[Sequence[dict], list[dict]]:
+def _timeline_window(
+    timeline: Sequence[Mapping[str, object] | TimelineEntry],
+) -> tuple[Sequence[Mapping[str, object] | TimelineEntry], list[Mapping[str, object] | TimelineEntry]]:
     # A burst of camera receipts must not erase older tool or touch evidence
     # before modality-aware deduplication. Bound the scan for prompt latency,
     # reserving fresh authenticated safety evidence before suffix windowing.
@@ -716,8 +743,11 @@ def _requested_tool_kinds(heard_requests: list[str]) -> set[str]:
 
 
 def compose_brain_context(
-    recent: Sequence[Memory], core: Sequence[CoreFact],
-    timeline: Sequence[dict], *, topical_event_id: str | None = None,
+    recent: Sequence[Memory],
+    core: Sequence[CoreFact],
+    timeline: Sequence[Mapping[str, object] | TimelineEntry],
+    *,
+    topical_event_id: str | None = None,
 ) -> ContextBundle:
     """Format evidence by authority under independent, tight text budgets.
 

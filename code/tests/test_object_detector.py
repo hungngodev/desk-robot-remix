@@ -440,9 +440,12 @@ async def test_malformed_frame_identity_is_rejected_before_inference(changes):
 async def test_native_partial_results_cannot_certify_an_object_observation(
     tmp_path, corrupt, over_budget,
 ):
+    import hashlib
+
     weights = tmp_path / "local-model.pt"
     weights.write_bytes(b"fixture only")
-    detector = YoloWorldVision(weights)
+    digest = hashlib.sha256(b"fixture only").hexdigest()
+    detector = YoloWorldVision(weights, expected_sha256=digest)
     box = SimpleNamespace(
         conf=SimpleNamespace(item=lambda: float("nan") if corrupt else 0.95),
         xyxy=[SimpleNamespace(tolist=lambda: [4, 4, 14, 14])],
@@ -454,7 +457,7 @@ async def test_native_partial_results_cannot_certify_an_object_observation(
         ],
     )
     try:
-        receipt = await inspect(detector)
+        receipt = await inspect(detector, qualified_model_sha256=digest)
         assert receipt.status == "rejected"
         assert receipt.reason == "detector_failed"
         assert receipt.evidence is None

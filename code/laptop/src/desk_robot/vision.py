@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
+import os
 import threading
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -59,11 +61,30 @@ class Vision(Protocol):
     async def detect(self, jpeg: bytes, label: str) -> list[Detection]: ...
 
 
+def _sha256_file(path: Path) -> tuple[str, tuple[int, int, int, int]]:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        st = os.fstat(handle.fileno())
+        while chunk := handle.read(65536):
+            digest.update(chunk)
+    identity = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    return digest.hexdigest(), identity
+
+
 class YoloWorldVision:
     """Existing Ultralytics detector. An explicitly supplied local weights file is required."""
 
-    def __init__(self, weights: Path | None):
+    def __init__(
+        self, weights: Path | None, *, expected_sha256: str | None = None,
+        runtime_asset_identity: str | None = None,
+    ):
         self.weights = weights
+        self.expected_sha256 = (
+            expected_sha256.lower() if isinstance(expected_sha256, str) else expected_sha256
+        )
+        self.runtime_asset_identity = runtime_asset_identity
+        self.verified_weights_sha256: str | None = None
+        self._verified_weights_stat: tuple[int, int, int, int] | None = None
         self.model = None
         # Cancelling an asyncio awaiter does not stop an Ultralytics CPU call.
         # Keep ownership until the real native worker returns, not until the
@@ -72,6 +93,25 @@ class YoloWorldVision:
         self._inference_slot = threading.BoundedSemaphore(1)
         self._closed = False
         self._inflight: Future | None = None
+
+    def verify_weights_identity(self) -> str:
+        """Compute and verify the local YOLO-World weights SHA-256 digest."""
+        if self.weights is None or not self.weights.is_file():
+            raise RuntimeError(
+                "Install vision extra and explicitly download/set local YOLO-World weights"
+            )
+        digest, stat_id = _sha256_file(self.weights)
+        if self.expected_sha256 is not None and digest != self.expected_sha256:
+            raise RuntimeError("YOLO-World weights SHA-256 mismatch")
+        if (self._verified_weights_stat is not None
+                and stat_id != self._verified_weights_stat):
+            raise RuntimeError("YOLO-World weights file changed after qualification")
+        if (self.verified_weights_sha256 is not None
+                and digest != self.verified_weights_sha256):
+            raise RuntimeError("YOLO-World weights digest changed after qualification")
+        self.verified_weights_sha256 = digest
+        self._verified_weights_stat = stat_id
+        return digest
 
     async def close(self) -> None:
         """Retire submissions and wait for actual native inference termination.
@@ -135,10 +175,12 @@ class YoloWorldVision:
             raise RuntimeError(
                 "Install vision extra and explicitly download/set local YOLO-World weights"
             )
+        self.verify_weights_identity()
         if self.model is None:
             from ultralytics import YOLOWorld
 
             self.model = YOLOWorld(str(self.weights))
+            self.verify_weights_identity()
         self.model.set_classes([label])
         # Letterbox/coordinate restoration is handled by the upstream model, not guessed here.
         result = self.model.predict(image, verbose=False, device="cpu")[0]

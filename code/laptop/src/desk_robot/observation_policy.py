@@ -30,20 +30,24 @@ camera_receipt_is_current = receipt_age_is_current
 def prepare_camera_receipt(
     *, robot_id: str, event_id: str, wall_now: float, monotonic_now: float,
     received_at: float, max_age: float, source_identity: tuple[int, int, int] | None,
+    receipt_wall_at: float | None = None,
 ) -> tuple[str, float] | None:
     """Calculate replay identity and original wall time before any SQLite write."""
     if not receipt_age_is_current(
         received_at=received_at, now=monotonic_now, max_age=max_age,
     ):
         return None
-    if not _finite_number(wall_now):
-        return None
-    try:
-        observed_at = wall_now - (monotonic_now - received_at)
-    except OverflowError:
-        return None
-    if not _finite_number(observed_at):
-        return None
+    if receipt_wall_at is not None and _finite_number(receipt_wall_at):
+        observed_at = float(receipt_wall_at)
+    else:
+        if not _finite_number(wall_now):
+            return None
+        try:
+            observed_at = wall_now - (monotonic_now - received_at)
+        except OverflowError:
+            return None
+        if not _finite_number(observed_at):
+            return None
     if source_identity is not None:
         identity = source_identity
         if (type(identity) is not tuple or len(identity) != 3

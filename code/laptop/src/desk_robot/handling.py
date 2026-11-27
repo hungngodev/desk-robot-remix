@@ -18,14 +18,41 @@ ACC_COUNTS_PER_G = 16384.0  # MPU6050: ACCEL_CONFIG 0x00, +/-2g.
 GYRO_COUNTS_PER_DPS = 131.0  # MPU6050: GYRO_CONFIG 0x00, +/-250dps.
 
 
+def _stationary_servo_body(body: dict) -> bool:
+    """Validate optional WROOM commanded servo fields when present."""
+    if "servo" not in body:
+        return True
+    servo = body.get("servo")
+    if (not isinstance(servo, dict)
+            or type(servo.get("attached")) is not bool
+            or type(servo.get("lift")) is not int
+            or type(servo.get("grip")) is not int
+            or type(servo.get("lift_target")) is not int
+            or type(servo.get("grip_target")) is not int
+            or not 0 <= servo["lift"] <= 180
+            or not 0 <= servo["lift_target"] <= 180
+            or not 0 <= servo["grip"] <= 180
+            or not 0 <= servo["grip_target"] <= 180):
+        return False
+    source = servo.get("position_source")
+    if source is not None and source != "commanded":
+        return False
+    return (
+        servo["lift"] == servo["lift_target"]
+        and servo["grip"] == servo["grip_target"]
+    )
+
+
 def _stationary_body(body: object) -> bool:
-    """Consume canonical WROOM motor.m0/m1, never assume legacy flat fields.
+    """Consume canonical WROOM motor.m0/m1 and servo state, with legacy motor fallback.
 
     Reject contradictory dual representations rather than trusting the
     quieter pair during a real motor command or an out-of-order callback.
     """
     if (not isinstance(body, dict) or type(body.get("drive_ms")) is not int
             or body["drive_ms"] != 0):
+        return False
+    if not _stationary_servo_body(body):
         return False
     motors = body.get("motor")
     if motors is not None:

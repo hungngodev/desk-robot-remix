@@ -445,7 +445,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/robots/{robot_id}/explore",
               dependencies=[Depends(operator), Depends(require_runtime_ready)], status_code=202)
     async def explore(robot_id: str, defer_on_voice: bool = False):
-        if app.state.runtime.pet.states[robot_id].quiet:
+        if app.state.runtime.pet.is_quiet(robot_id):
             raise OperationError("Quiet mode blocks exploration")
         coord = coordinator()
         if defer_on_voice and coord.voice_blocks_motion():
@@ -453,7 +453,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 robot_id, "exploration",
                 submit_fn=lambda: coord.explore(robot_id),
                 consent_check=lambda: (
-                    not app.state.runtime.pet.states[robot_id].quiet
+                    not app.state.runtime.pet.is_quiet(robot_id)
                     and coord.robot(robot_id).exploration_qualified
                 ),
             ).data()
@@ -500,7 +500,18 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             message="XIAO speech interruption unconfirmed",
         )
 
-    async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
+    def _caller_is_operator(credentials: HTTPAuthorizationCredentials | None) -> bool:
+        # Direct in-process Python calls pass FastAPI's Depends(security) default.
+        if not isinstance(credentials, HTTPAuthorizationCredentials):
+            return True
+        return (
+            credentials.credentials.isascii()
+            and token_matches(credentials.credentials, app.state.operator_token)
+        )
+
+    async def stop_pet_and_audio(
+        robot_id: str, *, quiet: bool, explicit_recovery: bool = True,
+    ):
         """Stop body, pet initiative, and native speaker concurrently.
 
         Cleanup must run despite previous failures. Crucially, a slow or
@@ -518,8 +529,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 message="Pet pause timeout; speaker STOP still required",
             )
 
+        coord = coordinator()
+        tracked_stop = getattr(coord, "_tracked_stop", None)
+        body_stop = (
+            coord.stop(robot_id)
+            if (explicit_recovery or not callable(tracked_stop))
+            else tracked_stop(robot_id, explicit_recovery=False)
+        )
         body_res, pet_res, audio_res = await asyncio.gather(
-            coordinator().stop(robot_id),
+            body_stop,
             _stop_pet(),
             stop_native_pet_speech(robot_id),
             return_exceptions=True,
@@ -542,9 +560,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         return body_res, pet_res
 
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
-    async def stop(robot_id: str):
+    async def stop(
+        robot_id: str,
+        credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    ):
         coordinator().robot(robot_id)
-        acknowledgement, _ = await stop_pet_and_audio(robot_id, quiet=False)
+        acknowledgement, _ = await stop_pet_and_audio(
+            robot_id, quiet=False, explicit_recovery=_caller_is_operator(credentials),
+        )
         return acknowledgement
 
     @app.get("/v1/pet/{robot_id}", dependencies=[Depends(authorize)])
@@ -562,14 +585,18 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.post("/v1/pet/{robot_id}/pause", dependencies=[Depends(authorize)])
     async def pet_pause(robot_id: str):
         coordinator().robot(robot_id)
-        _, result = await stop_pet_and_audio(robot_id, quiet=False)
+        _, result = await stop_pet_and_audio(
+            robot_id, quiet=False, explicit_recovery=False,
+        )
         return result
 
     @app.post("/v1/pet/{robot_id}/quiet", dependencies=[Depends(operator)])
     async def pet_quiet(robot_id: str, request: QuietRequest):
         coordinator().robot(robot_id)
         if request.quiet:
-            _, result = await stop_pet_and_audio(robot_id, quiet=True)
+            _, result = await stop_pet_and_audio(
+                robot_id, quiet=True, explicit_recovery=True,
+            )
             return result
         return await app.state.runtime.pet.set_quiet(robot_id, False)
 

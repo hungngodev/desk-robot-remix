@@ -427,6 +427,8 @@ class _PlanContext:
     memory_granted_at_request: bool
     memory_consent_generation: int
     context: str
+    room_received_at: float | None = None
+    room_connection_epoch: int | None = None
 
 
 def _capture_context(app: FastAPI, settings: Settings, robot_id: str) -> _PlanContext:
@@ -460,6 +462,18 @@ def _capture_context(app: FastAPI, settings: Settings, robot_id: str) -> _PlanCo
         item.get("channel") == "room_station" for item in timeline
     )
     room_consent_generation = settings.room_station_consent_generation
+    room_received_at = None
+    room_connection_epoch = None
+    if room_context_used and visual is not None:
+        hub = getattr(visual, "hub", None)
+        stamp = getattr(hub, "admitted_room_stamp", None)
+        if callable(stamp) and (info := stamp()) is not None:
+            room_received_at, room_connection_epoch = info
+        else:
+            room_obj = getattr(hub, "_shared_room", None)
+            if room_obj is not None:
+                room_received_at = getattr(room_obj, "received_at", None)
+            room_connection_epoch = getattr(hub, "_room_connection_epoch", None)
     memory_granted_at_request = settings.voice_memory_tools_enabled
     memory_consent_generation = settings.voice_memory_consent_generation
     context = compose_brain_context([], [], timeline).interaction[:280]
@@ -474,6 +488,8 @@ def _capture_context(app: FastAPI, settings: Settings, robot_id: str) -> _PlanCo
         memory_granted_at_request=memory_granted_at_request,
         memory_consent_generation=memory_consent_generation,
         context=context,
+        room_received_at=room_received_at,
+        room_connection_epoch=room_connection_epoch,
     )
 
 
@@ -497,6 +513,15 @@ def _revalidate_context(
     if (snapshot.room_context_used
             and settings.room_station_consent_generation != snapshot.room_consent_generation):
         raise HTTPException(409, "Room station grant changed during planning")
+    if snapshot.room_context_used and snapshot.room_received_at is not None:
+        if not 0 <= time.monotonic() - snapshot.room_received_at <= 12:
+            raise HTTPException(409, "Room station evidence expired during planning")
+    if snapshot.room_context_used and snapshot.room_connection_epoch is not None:
+        hub = getattr(getattr(app.state.runtime, "multimodal", None), "hub", None)
+        if (hub is None
+                or getattr(hub, "_room_connection_epoch", None)
+                != snapshot.room_connection_epoch):
+            raise HTTPException(409, "Room station connection changed during planning")
 
 
 def _revalidate_selected_grants(

@@ -192,10 +192,10 @@ def test_cancelled_shutdown_waiter_does_not_cancel_owner_cleanup():
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("service", ["voice", "room"])
 @pytest.mark.parametrize("exit_kind", ["error", "return", "cancel"])
-def test_unexpected_runtime_service_exit_closes_all_owners(monkeypatch, service, exit_kind):
-    """A permanent service exit must not leave a live runtime or turn receipt."""
+def test_unexpected_runtime_service_exit_closes_all_owners(monkeypatch, exit_kind):
+    """A permanent critical voice-monitor exit must close all runtime owners."""
+    service = "voice"
     import sys
 
     async def scenario():
@@ -524,5 +524,228 @@ def test_runtime_start_rechecks_ownership_after_detector_warmup(
             await asyncio.gather(*starts, return_exceptions=True)
             if not runtime._closed:
                 await runtime.close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("exit_kind", ["error", "return", "cancel"])
+def test_optional_room_service_exit_degrades_without_closing_runtime(monkeypatch, exit_kind):
+    """A terminal room-feed exit invalidates cached context without closing robots."""
+    import sys
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class RoomFeed:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def run(self, stop):
+                entered.set()
+                await release.wait()
+                if exit_kind == "error":
+                    raise ValueError("usb bridge unplugged permanently")
+
+        class VoiceListener:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def run(self):
+                await asyncio.Event().wait()
+
+        monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+        monkeypatch.setattr("desk_robot.runtime.RoomSerialFeed", RoomFeed)
+        monkeypatch.setattr("desk_robot.runtime.VoiceEventListener", VoiceListener)
+        monkeypatch.setattr("desk_robot.runtime.secret", lambda name: "s" * 32)
+        monkeypatch.setattr("desk_robot.dock_runtime.close_detector_pool", AsyncMock())
+
+        hub = SimpleNamespace(invalidate_room=AsyncMock())
+        # Use a synchronous invalidate_room matching CameraFrameHub.invalidate_room
+        invalidated = []
+        hub.invalidate_room = lambda *, epoch=None: invalidated.append(epoch)
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(
+            mode="hardware", room_station_enabled=True, room_station_port="/dev/cu.usbserial-1",
+            room_station_soil_dry_adc=None, speech_bridge_url="http://127.0.0.1:8766",
+            speech_bridge_token_env="SPEECH_TOKEN", pet_autostart_enabled=False,
+            robots=[SimpleNamespace(id="robot-01", device_id="head01")],
+        )
+        runtime.coordinator = SimpleNamespace(close=AsyncMock(), shutdown_stop_failures={})
+        runtime.pet = SimpleNamespace(close=AsyncMock(), set_voice_monitor_ready=lambda ready: None)
+        runtime.conversation = SimpleNamespace(
+            stop=AsyncMock(), speaker=SimpleNamespace(monitor_lost=AsyncMock()),
+        )
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = SimpleNamespace(start_streams=lambda: None, close=AsyncMock(), hub=hub)
+        runtime._voice_task = None
+        runtime._room_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = ("stale",)
+        runtime._room_dispatch_enqueued = False
+        runtime._closed = False
+        runtime._voice_turn_generations = {"robot-01": 7}
+
+        await runtime.start()
+        task = runtime._room_task
+        assert task is not None
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if exit_kind == "cancel":
+                task.cancel()
+            else:
+                release.set()
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=1)
+            await asyncio.sleep(0)
+            assert not runtime._closed
+            assert runtime.room_station_degraded is True
+            assert runtime._room_task is None
+            assert runtime._room_dispatch_pending is None
+            assert invalidated
+            runtime.coordinator.close.assert_not_called()
+        finally:
+            release.set()
+            await runtime.close()
+
+    asyncio.run(scenario())
+
+
+def test_fatal_shutdown_retries_unconfirmed_owner_and_preserves_fatal_error():
+    """After fatal exit, a failed/timed-out close() can retry unconfirmed owners safely."""
+    async def scenario():
+        entered = asyncio.Event()
+        release_second = asyncio.Event()
+        attempts = 0
+
+        async def flaky_coordinator_close():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                entered.set()
+                await asyncio.Future()
+            await release_second.wait()
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(mode="simulation")
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(side_effect=flaky_coordinator_close), shutdown_stop_failures={},
+        )
+        runtime.pet = SimpleNamespace(close=AsyncMock())
+        runtime.conversation = SimpleNamespace(stop=AsyncMock())
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = None
+        runtime._voice_task = None
+        runtime._room_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._fatal_service_error = RuntimeError("Native voice monitor stopped unexpectedly")
+        runtime._closed = True
+
+        # Replace _shutdown_step_tasks scenario with an already-done failed close task,
+        # simulating a previous pass where coordinator.close raised/timed out.
+        async def fail_first():
+            await flaky_coordinator_close()
+
+        # First pass triggers timeout in step("WROOM motion", ..., 4.0) if real 4s;
+        # instead test a direct raising step so close() fails fast and allows retry!
+        attempts = 0
+
+        async def fail_then_succeed():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError("simulated WROOM cleanup timeout")
+
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(side_effect=fail_then_succeed), shutdown_stop_failures={},
+        )
+        with pytest.raises(RuntimeError, match="Native voice monitor stopped unexpectedly"):
+            await runtime.close()
+        assert attempts == 1
+
+        # Second close() retries the unconfirmed coordinator step without re-running already
+        # confirmed owners, while still surfacing sticky _fatal_service_error!
+        with pytest.raises(RuntimeError, match="Native voice monitor stopped unexpectedly"):
+            await runtime.close()
+        assert attempts == 2
+        runtime.pet.close.assert_awaited_once()
+        runtime.conversation.stop.assert_awaited_once()
+        runtime.client.aclose.assert_awaited_once()
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_native_monitor_stop_timeout_stays_owned_by_runtime_and_conversation():
+    async def scenario():
+        release = asyncio.Event()
+        tracked: list[asyncio.Task] = []
+
+        async def stalled_stop(_robot):
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                await release.wait()
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(
+            mode="hardware",
+            robots=[SimpleNamespace(id="robot-01", device_id="head01")],
+        )
+        runtime.coordinator = SimpleNamespace(close=AsyncMock(), shutdown_stop_failures={})
+        runtime.pet = SimpleNamespace(
+            close=AsyncMock(), set_voice_monitor_ready=lambda ready: None,
+        )
+        runtime.conversation = SimpleNamespace(
+            stop=AsyncMock(),
+            speaker=SimpleNamespace(monitor_lost=stalled_stop),
+            _track_speaker_abort=tracked.append,
+        )
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = None
+        runtime._voice_task = None
+        runtime._room_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._closed = False
+
+        try:
+            with pytest.raises(RuntimeError, match="Native speaker shutdown STOP unconfirmed"):
+                await runtime.close()
+            assert len(tracked) >= 1
+            assert any(not t.done() for t in tracked)
+            assert runtime._has_unsettled_native_stop()
+        finally:
+            release.set()
+            await asyncio.gather(*tracked, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_room_context_consumer_throttles_logs_and_sanitizes_payload(caplog):
+    async def scenario():
+        def bad_remember(_obs):
+            raise RuntimeError("SECRET_ROOM_CO2_PAYLOAD=999ppm")
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(room_station_context_enabled=True)
+        runtime.multimodal = SimpleNamespace(hub=SimpleNamespace(remember_room=bad_remember))
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
+        runtime.room_context_failures = 0
+        runtime._closed = False
+        loop = asyncio.get_running_loop()
+
+        for _ in range(105):
+            runtime._queue_room_observation(loop, object())
+            await asyncio.sleep(0)
+        assert runtime.room_context_failures == 105
+        assert "SECRET_ROOM_CO2_PAYLOAD" not in caplog.text
+        assert "Room context consumer failed (1 total): RuntimeError" in caplog.text
+        assert caplog.text.count("Room context consumer failed") == 1
 
     asyncio.run(scenario())

@@ -944,7 +944,15 @@ class Conversation:
         if not self.settings.room_station_context_enabled:
             timeline = [item for item in timeline if item.get("channel") != "room_station"]
         elif any(item.get("channel") == "room_station" for item in timeline):
-            consent.admit_room()
+            hub = getattr(self.multimodal, "hub", None)
+            stamp = getattr(hub, "admitted_room_stamp", None)
+            if callable(stamp) and (info := stamp()) is not None:
+                received_at, conn_epoch = info
+                consent.admit_room(
+                    received_at=received_at, connection_epoch=conn_epoch,
+                )
+            else:
+                consent.admit_room()
         return timeline
 
     def _group_live_cues(
@@ -1015,6 +1023,11 @@ class Conversation:
             )
 
         def consent_still_valid() -> bool:
+            hub = getattr(self.multimodal, "hub", None)
+            room_epoch = (
+                getattr(hub, "_room_connection_epoch", None)
+                if hub is not None else None
+            )
             return (
                 self.stop_generation == stop_generation
                 and loop.time() < deadline
@@ -1023,7 +1036,11 @@ class Conversation:
                          and consent.allows_autonomous_social(
                              has_permission_check=permission_check is not None,
                          )))
-                and not consent.revoked(private_memory_current=private_memory_current())
+                and not consent.revoked(
+                    private_memory_current=private_memory_current(),
+                    now=time.monotonic(),
+                    current_room_epoch=room_epoch,
+                )
                 and (permission_check is None or permission_check())
             )
 

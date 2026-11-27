@@ -8,7 +8,7 @@ key/candy accuracy were measured. Never dispatch a motor or infer floor pose.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .object_targets import (
@@ -18,7 +18,7 @@ from .object_targets import (
     _identity,
     _valid_request_identity,
 )
-from .vision import Detection, Vision, validated_camera_sizes
+from .vision import Detection, Vision, YoloWorldVision, validated_camera_sizes
 
 DEFAULT_FRAME_FRESH_US = 250_000
 
@@ -41,7 +41,7 @@ class DetectorFrame:
     captured_us: int
     received_us: int
     seen_at_wall_s: float
-    jpeg: bytes
+    jpeg: bytes = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -52,6 +52,8 @@ class DetectorReceipt:
     box: tuple[float, float, float, float] | None = None
     may_execute: bool = False
     arrived: bool = False
+    model_sha256: str | None = None
+    model_asset_identity: str | None = None
 
 
 def _frame_valid(frame: DetectorFrame, query: ObjectQuery, owner: ObjectOwner,
@@ -135,6 +137,14 @@ def _checked_detection(results: object, label: str, width: int, height: int,
     return "camera_seen", Detection(best.label, float(best.confidence), box)
 
 
+def _valid_sha256_hex(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(ch in "0123456789abcdefABCDEF" for ch in value)
+    )
+
+
 async def detect_object_frame(
     detector: Vision,
     frame: DetectorFrame,
@@ -142,6 +152,8 @@ async def detect_object_frame(
     owner: ObjectOwner,
     *,
     model_qualified: bool = False,
+    qualified_model_sha256: str | None = None,
+    model_asset_identity: str | None = None,
     now_us: int,
     clock_us: Callable[[], int],
     request_is_current: Callable[[], bool],
@@ -162,6 +174,10 @@ async def detect_object_frame(
     if (not isinstance(frame, DetectorFrame)
             or not _valid_request_identity(query, owner)
             or type(model_qualified) is not bool
+            or (qualified_model_sha256 is not None
+                and not _valid_sha256_hex(qualified_model_sha256))
+            or (model_asset_identity is not None
+                and (type(model_asset_identity) is not str or not model_asset_identity.strip()))
             or type(now_us) is not int or now_us < 0
             or type(fresh_us) is not int or not 1 <= fresh_us <= 5_000_000
             or type(timeout_s) not in (int, float)
@@ -173,6 +189,33 @@ async def detect_object_frame(
         return reject("invalid_detection_request")
     if model_qualified is not True:
         return reject("detector_not_qualified")
+    expected_sha256: str | None = (
+        qualified_model_sha256.lower() if qualified_model_sha256 is not None else None
+    )
+    resolved_asset_identity = model_asset_identity or getattr(
+        detector, "runtime_asset_identity", None
+    )
+    verify_weights = getattr(detector, "verify_weights_identity", None)
+    requires_provenance = (
+        isinstance(detector, YoloWorldVision)
+        or qualified_model_sha256 is not None
+        or callable(verify_weights)
+    )
+    verified_sha256: str | None = None
+    if requires_provenance:
+        if not callable(verify_weights) or expected_sha256 is None:
+            return reject("detector_provenance_unverified")
+        try:
+            verified_sha256 = verify_weights()
+        except Exception:
+            return reject("detector_provenance_unverified")
+        if (not _valid_sha256_hex(verified_sha256)
+                or verified_sha256.lower() != expected_sha256):
+            return reject("detector_provenance_unverified")
+        verified_sha256 = verified_sha256.lower()
+        if (model_asset_identity is not None
+                and getattr(detector, "runtime_asset_identity", None) not in (None, model_asset_identity)):
+            return reject("detector_provenance_unverified")
     if query.cancelled:
         return reject("cancelled")
     if (type(query.created_us) is not int or type(query.deadline_us) is not int
@@ -276,7 +319,19 @@ async def detect_object_frame(
         if outcome == "invalid_detector_result":
             return reject(outcome)
         if outcome in ("inconclusive_low_confidence", "inconclusive_multiple_candidates"):
-            return DetectorReceipt("inconclusive", outcome)
+            return DetectorReceipt(
+                "inconclusive", outcome,
+                model_sha256=verified_sha256,
+                model_asset_identity=resolved_asset_identity,
+            )
+        if requires_provenance:
+            try:
+                post_sha = verify_weights()
+            except Exception:
+                return reject("detector_provenance_unverified")
+            if (not _valid_sha256_hex(post_sha)
+                    or post_sha.lower() != expected_sha256):
+                return reject("detector_provenance_unverified")
         # Source receipt remains the original Mac-frame receipt, NOT the time
         # a delayed model finished. Guide50 must separately project to floor.
         evidence = ObjectEvidence(
@@ -289,8 +344,12 @@ async def detect_object_frame(
             camera_grant=query.camera_grant, frame_seq=frame.frame_seq,
             confidence=float(best.confidence) if best is not None else 1.0,
         )
-        return DetectorReceipt(outcome, "qualified_frame_detection", evidence,
-                               best.box if best is not None else None)
+        return DetectorReceipt(
+            outcome, "qualified_frame_detection", evidence,
+            best.box if best is not None else None,
+            model_sha256=verified_sha256,
+            model_asset_identity=resolved_asset_identity,
+        )
     except asyncio.CancelledError:
         task.cancel()
         raise

@@ -13,6 +13,7 @@ import asyncio
 import inspect
 import json
 import math
+import os
 import random
 import sqlite3
 import time
@@ -435,6 +436,68 @@ class PetController:
         self._proactive_aux_active_boot: dict[str, int] = {}
         self._proactive_aux_retired_boots: dict[str, set[int]] = {}
         self._closed = False
+        self._restore_fleet_cooldowns()
+
+    def _cooldown_state_path(self):
+        memory_dir = getattr(self.settings, "memory_dir", None)
+        if memory_dir is None or getattr(self.settings, "mode", None) != "hardware":
+            return None
+        return memory_dir / ".fleet_speech_cooldowns.json"
+
+    def _restore_fleet_cooldowns(self) -> None:
+        path = self._cooldown_state_path()
+        if path is None or not path.is_file() or path.is_symlink():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(data, dict):
+            return
+        wall_now = time.time()
+        mono_now = time.monotonic()
+        for key, attr, cap in (
+            ("group_last_spoken_wall", "_group_last_spoken", 3600.0),
+            ("social_last_started_wall", "_social_last_started", 3600.0),
+        ):
+            stamp = data.get(key)
+            if (
+                type(stamp) in (int, float)
+                and math.isfinite(stamp)
+                and 0 <= wall_now - stamp <= cap
+            ):
+                setattr(self, attr, mono_now - (wall_now - float(stamp)))
+
+    def _persist_fleet_cooldowns(self) -> None:
+        path = self._cooldown_state_path()
+        if path is None:
+            return
+        wall_now = time.time()
+        mono_now = time.monotonic()
+        payload: dict[str, float] = {}
+        if math.isfinite(self._group_last_spoken) and mono_now >= self._group_last_spoken:
+            payload["group_last_spoken_wall"] = wall_now - (mono_now - self._group_last_spoken)
+        if math.isfinite(self._social_last_started) and mono_now >= self._social_last_started:
+            payload["social_last_started_wall"] = wall_now - (mono_now - self._social_last_started)
+        if not payload or not path.parent.is_dir() or path.parent.is_symlink():
+            return
+        try:
+            tmp = path.with_suffix(".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
+        except OSError:
+            return
+
+    def cancel_active_vision(self) -> None:
+        """Invalidate and cancel any in-flight PetController scene comparison."""
+        self._vision_preemption_epoch += 1
+        task = getattr(self, "_vision_inflight", None)
+        if task is not None and not task.done() and not task.cancelling():
+            task.cancel()
 
     @property
     def states(self) -> Mapping[str, PetState]:
@@ -515,7 +578,7 @@ class PetController:
 
     def _quiet_hours_active(self) -> bool:
         active = quiet_hours_active(getattr(self.settings, "pet_quiet_hours", None))
-        if active != self._scheduled_quiet:
+        if active != getattr(self, "_scheduled_quiet", False):
             # Wall-clock changes decide quiet; monotonic receipt time retires
             # optional work across either observed edge without resetting cooldowns.
             self._scheduled_quiet = active
@@ -749,6 +812,7 @@ class PetController:
         self._clear_deferred_speech(state)
         self._cancel_face_cue(state)
         self._group_last_spoken = time.monotonic()
+        self._persist_fleet_cooldowns()
         # Priority inversion would let an old 45-second background VLM call
         # block a human's direct look request. Abort the candidate analysis.
         self.preempt_background_vision()
@@ -809,6 +873,7 @@ class PetController:
         preemption_epoch: int | None = None,
         camera_received_at: float | None = None,
         camera_source_identity: tuple[int, int, int] | None = None,
+        camera_received_wall_at: float | None = None,
     ) -> bool:
         """Same text/event ID, different eyewitness provenance per local DB.
 
@@ -828,6 +893,7 @@ class PetController:
             return False
         receipt = self._prepare_observation_receipt(
             robot_id, camera_derived, camera_received_at, camera_source_identity,
+            camera_received_wall_at=camera_received_wall_at,
         )
         if receipt is None:
             return False
@@ -885,6 +951,8 @@ class PetController:
     def _prepare_observation_receipt(
         self, robot_id: str, camera_derived: bool, camera_received_at: float | None,
         camera_source_identity: tuple[int, int, int] | None,
+        *,
+        camera_received_wall_at: float | None = None,
     ) -> tuple[str, float, CameraProvenance | None] | None:
         # Camera evidence retains the original authenticated Mac receive
         # chronology, not the later, variably delayed semantic completion.
@@ -900,6 +968,7 @@ class PetController:
                 robot_id=robot_id, event_id=event_id, wall_now=observed_at,
                 monotonic_now=time.monotonic(), received_at=camera_received_at,
                 max_age=self.max_observation_age, source_identity=camera_source_identity,
+                receipt_wall_at=camera_received_wall_at,
             )
             if receipt is None:
                 return None
@@ -2548,7 +2617,7 @@ class PetController:
                     continue
 
                 candidates: list[tuple[
-                    bytes, float, tuple[int, int, int] | None
+                    bytes, float, tuple[int, int, int] | None, float | None
                 ]] = []
                 if self.multimodal is not None:
                     hub = self.multimodal.hub
@@ -2556,7 +2625,8 @@ class PetController:
                     # already identity checked and chronologically ordered.
                     candidates = [
                         (frame.jpeg, frame.received_at,
-                         getattr(frame, "source_identity", None))
+                         getattr(frame, "source_identity", None),
+                         getattr(frame, "received_wall_at", None))
                         for frame in tuple(hub.frames[robot_id])
                         if frame.source in ("sensor", "proactive")
                         and frame.received_at > state.quiet_changed_at
@@ -2613,6 +2683,7 @@ class PetController:
                             candidates = [(
                                 evidence.jpeg, evidence.received_at,
                                 getattr(evidence, "source_identity", None),
+                                getattr(evidence, "received_wall_at", None),
                             )]
                         else:
                             # Lightweight test adaptors without a real
@@ -2624,15 +2695,15 @@ class PetController:
                                 offer = getattr(self.multimodal, "offer_proactive", None)
                                 if callable(offer):
                                     await offer(robot_id, jpeg, received)
-                                candidates = [(jpeg, received, None)]
+                                candidates = [(jpeg, received, None, time.time())]
                 else:
                     started = time.monotonic()
                     jpeg = await self.heads[robot_id].snapshot()
                     received = time.monotonic()
                     if received - started <= 2.0:
-                        candidates = [(jpeg, received, None)]
+                        candidates = [(jpeg, received, None, time.time())]
 
-                for jpeg, received, camera_identity in candidates:
+                for jpeg, received, camera_identity, camera_wall in candidates:
                     if (not state.enabled or state.generation != generation
                             or self._closed or not current_camera_grant()):
                         break
@@ -2793,6 +2864,7 @@ class PetController:
                             preemption_epoch=preemption_epoch,
                             camera_received_at=received,
                             camera_source_identity=camera_identity,
+                            camera_received_wall_at=camera_wall,
                         )
                         if not stored:
                             state.stale_camera_events += 1
@@ -2889,6 +2961,7 @@ class PetController:
                 or change.kind != "person"
                 or not _initiative_evidence(change)
                 or not state.enabled or state.generation != generation
+                or self.is_quiet(robot_id) or captured_at < state.quiet_changed_at
                 or self._closed or not self.settings.voice_vision_tools_enabled
                 or (camera_consent_generation is not None
                     and self.settings.camera_consent_generation
@@ -2920,6 +2993,8 @@ class PetController:
             acknowledged = (
                 self.settings.mode == "hardware"
                 and state.enabled and state.generation == generation
+                and not self.is_quiet(robot_id)
+                and captured_at >= state.quiet_changed_at
                 and not self._closed and self.settings.voice_vision_tools_enabled
                 and (camera_consent_generation is None
                      or self.settings.camera_consent_generation
@@ -3073,6 +3148,7 @@ class PetController:
         return first_initiative_veto(
             ("quiet_mode", lambda: self.is_quiet(robot_id)),
             ("dock_charging_inhibited", lambda: self.is_dock_charging_inhibited(robot_id)),
+            ("battery_low", lambda: self.states[robot_id].last_battery_low),
             ("invalid_fleet_speech_clock", lambda: elapsed is None),
             ("personality_cooldown", lambda: profile_waits_beyond_fleet_floor(
                 self.settings.robot(robot_id).personality_profile,
@@ -3289,6 +3365,7 @@ class PetController:
         if peer_id is not None:
             self._social_round += 1
             self._social_last_started = now
+            self._persist_fleet_cooldowns()
         self._speech_robot = robot_id
         self._speech_participants = frozenset(
             {robot_id, peer_id} if peer_id is not None else {robot_id}
@@ -3468,6 +3545,7 @@ class PetController:
                     }
             nfc = result.get("nfc")
             if (boot is not None and isinstance(nfc, dict)
+                    and self.settings.robot(robot_id).nfc_interactions_qualified
                     and nfc.get("v") is True):
                 if (type(nfc.get("e")) is int
                         and 0 <= nfc["e"] <= 0xffffffff):
@@ -3813,6 +3891,8 @@ class PetController:
         """Reuse one fleet speech owner for a consent-fenced social event."""
         state = self.states[robot_id]
         peer = self.states[social_peer_id]
+        sharing_grant = getattr(self.settings, "fleet_sharing_consent_generation", None)
+        social_grant = getattr(self.settings, "fleet_social_autonomy_generation", None)
 
         def safety_current() -> bool:
             return (
@@ -3873,6 +3953,10 @@ class PetController:
                 not self._closed and self.voice_monitor_ready
                 and self.settings.fleet_social_autonomy_enabled
                 and self.settings.fleet_text_sharing_enabled
+                and getattr(self.settings, "fleet_sharing_consent_generation", None)
+                    == sharing_grant
+                and getattr(self.settings, "fleet_social_autonomy_generation", None)
+                    == social_grant
                 and safety_current()
                 and state.enabled and not self.is_quiet(robot_id)
                 and state.generation == generation
@@ -3902,6 +3986,7 @@ class PetController:
             if sent_robot_id not in {robot_id, social_peer_id}:
                 return
             self._group_last_spoken = time.monotonic()
+            self._persist_fleet_cooldowns()
             if sent_robot_id not in sent_speakers:
                 sent_speakers.add(sent_robot_id)
                 self.states[sent_robot_id].spoken += 1
@@ -4308,6 +4393,10 @@ class PetController:
                 return (
                     not self._closed and self.voice_monitor_ready
                     and state.enabled and not self.is_quiet(robot_id)
+                    and (not scheduled_activity or (
+                        not self.is_dock_charging_inhibited(robot_id)
+                        and not state.last_battery_low
+                    ))
                     and offered_at >= state.quiet_changed_at
                     and state.generation == generation
                     and private_memory_current()
@@ -4454,6 +4543,7 @@ class PetController:
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()
                 self._group_last_spoken = now
+                self._persist_fleet_cooldowns()
                 state.spoken += 1
                 state.recent_optional_transmissions.append((text, now))
                 if scheduled_activity:

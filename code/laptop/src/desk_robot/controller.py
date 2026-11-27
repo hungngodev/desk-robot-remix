@@ -35,6 +35,7 @@ from .operations import bounded_head_reply as _bounded_head_reply
 from .operations import bounded_pulse_stop as _bounded_pulse_stop
 from .operations import require_command_receipt as _require_command_receipt
 from .sensor_event_contract import fuel_sample_is_fresh, is_valid_fuel_measurement
+from .sleep_clock import continuous_monotonic, elapsed_with_sleep
 from .transport import Head, HeadError
 from .vision import Detection, Vision, validated_camera_sizes
 
@@ -206,7 +207,9 @@ class Coordinator:
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
+        self.is_quiet: Callable[[str], bool] | None = None
         self.permits: dict[str, float] = {}
+        self._permit_continuous_deadlines: dict[str, float] = {}
         self.shutdown_stop_failures: dict[str, str] = {}
         self._permit_epoch = {r.id: 0 for r in settings.robots}
         self._stop_confirmations = StopConfirmationTracker(r.id for r in settings.robots)
@@ -322,13 +325,21 @@ class Coordinator:
         )
 
     def _require_live_permit(self, robot_id: str) -> None:
-        if self.permits.get(robot_id, 0) < time.monotonic():
+        cont_deadline = getattr(self, "_permit_continuous_deadlines", {}).get(robot_id)
+        if (
+            self.permits.get(robot_id, 0) < time.monotonic()
+            or (cont_deadline is not None and cont_deadline < continuous_monotonic())
+        ):
             self.permits.pop(robot_id, None)
+            if hasattr(self, "_permit_continuous_deadlines"):
+                self._permit_continuous_deadlines.pop(robot_id, None)
             raise OperationError("Operator permit missing or expired; enable one operation first")
 
     def _retire_permit(self, robot_id: str) -> int:
         self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)
+        if hasattr(self, "_permit_continuous_deadlines"):
+            self._permit_continuous_deadlines.pop(robot_id, None)
         return self._permit_epoch[robot_id]
 
     def _record_local_fault(self, robot_id: str, body: object) -> None:
@@ -381,6 +392,7 @@ class Coordinator:
                 or self._robot_busy(robot_id)):
             raise OperationError("Operator arm superseded or robot became busy")
         self.permits[robot_id] = time.monotonic() + 30
+        self._permit_continuous_deadlines[robot_id] = continuous_monotonic() + 30
         return {
             "robot_id": robot_id,
             "operator_permit": True,
@@ -407,7 +419,9 @@ class Coordinator:
         generation = self._stop_confirmations.begin(robot_id, local_fault=local_fault)
         acknowledged = False
         try:
-            acknowledgement = await self._stop(robot_id)
+            acknowledgement = await self._stop(
+                robot_id, explicit_recovery=explicit_recovery,
+            )
             acknowledged = True
             return acknowledgement
         finally:
@@ -416,7 +430,7 @@ class Coordinator:
                 explicit_recovery=explicit_recovery,
             )
 
-    async def _stop(self, robot_id: str):
+    async def _stop(self, robot_id: str, *, explicit_recovery: bool = True):
         self.discard_deferred_motion(
             robot_id=robot_id,
             reason="STOP requested; deferred motion discarded",
@@ -478,7 +492,7 @@ class Coordinator:
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
         owner_id = getattr(self, "_fleet_motion_owner", None)
-        if stop_acknowledged and owner_id is not None:
+        if stop_acknowledged and explicit_recovery and owner_id is not None:
             owner = self.jobs.get(owner_id)
             owner_task = self.tasks.get(owner_id)
             if (owner is not None and owner_task is not None
@@ -543,6 +557,8 @@ class Coordinator:
             dispatch_task.cancel()
         self.shutdown_stop_failures.clear()  # Each close attempt owns fresh evidence.
         self.permits.clear()
+        if hasattr(self, "_permit_continuous_deadlines"):
+            self._permit_continuous_deadlines.clear()
         for robot_id in self._permit_epoch:
             self._permit_epoch[robot_id] += 1
         running = [task for task in self.tasks.values() if not task.done()]
@@ -797,10 +813,16 @@ class Coordinator:
                     req.error = "Deferred motion permit wait window expired"
                     continue
                 self.permits[req.robot_id] = time.monotonic() + 5.0
+                if hasattr(self, "_permit_continuous_deadlines"):
+                    self._permit_continuous_deadlines[req.robot_id] = (
+                        continuous_monotonic() + 5.0
+                    )
                 try:
                     job = req.submit_fn()
                 except Exception as exc:
                     self.permits.pop(req.robot_id, None)
+                    if hasattr(self, "_permit_continuous_deadlines"):
+                        self._permit_continuous_deadlines.pop(req.robot_id, None)
                     req.state = "failed"
                     req.error = str(exc) or type(exc).__name__
                     return None
@@ -1206,6 +1228,8 @@ class Coordinator:
         are necessary before enabling this on an assembled desk.
         """
         robot = self.robot(robot_id)
+        if callable(getattr(self, "is_quiet", None)) and self.is_quiet(robot_id):
+            raise OperationError("Exploration refused: quiet mode active")
         if not robot.motion_enabled:
             raise OperationError("Exploration requires motion_enabled=true")
         if self.dock_inhibited(robot_id):
@@ -1230,10 +1254,14 @@ class Coordinator:
         """
         robot = self.robot(robot_id)
         expires_at = time.monotonic() + 30 if _expires_at is None else _expires_at
+        expires_cont = (
+            continuous_monotonic() + max(0.0, expires_at - time.monotonic())
+        )
         camera_grant = (
             self.settings.camera_consent_generation if _camera_grant is None else _camera_grant
         )
         if (time.monotonic() >= expires_at
+                or continuous_monotonic() >= expires_cont
                 or self.settings.camera_consent_generation != camera_grant):
             return None
         if not robot.autonomous_low_battery_dock_enabled:
@@ -1252,7 +1280,10 @@ class Coordinator:
         if self.dock_inhibited(robot_id):
             return None
         try:
-            load_real_dock_calibration(robot.dock_calibration, robot_id=robot_id)
+            load_real_dock_calibration(
+                robot.dock_calibration, robot_id=robot_id,
+                expected_marker_id=getattr(robot, "dock_marker_id", None),
+            )
         except (OSError, ValueError) as exc:
             # Calibration paths and parser messages may contain private data.
             logging.getLogger(__name__).warning(
@@ -1309,6 +1340,8 @@ class Coordinator:
         def require_motion_authority() -> None:
             if job.id in self.jobs and job.state != "running":
                 raise OperationError("Exploration halted: job no longer owns motion")
+            if callable(getattr(self, "is_quiet", None)) and self.is_quiet(job.robot_id):
+                raise OperationError("Exploration halted: quiet mode active")
             voice_reason = self.voice_blocks_motion()
             if voice_reason is not None:
                 raise OperationError(voice_reason)
@@ -1340,7 +1373,10 @@ class Coordinator:
                         frame for frame in reversed(media.hub.frames[job.robot_id])
                         if frame.source == "proactive"
                         and frame.received_at > last_live_frame_at
-                        and 0 <= time.monotonic() - frame.received_at <= 1.0
+                        and 0 <= elapsed_with_sleep(
+                            frame.received_at,
+                            getattr(frame, "received_continuous_at", None),
+                        ) <= 1.0
                     ), None)
 
                 frame = newest()
@@ -1364,9 +1400,11 @@ class Coordinator:
                         "Hardware exploration camera frame expired or disconnected"
                     )
                 last_live_frame_at = frame.received_at
+                last_live_frame_cont = getattr(frame, "received_continuous_at", None)
                 jpeg = frame.jpeg
             else:
                 # Simulation retains its historical synthetic snapshot.
+                last_live_frame_cont = None
                 jpeg = await _bounded_head_reply(
                     head.snapshot(), seconds=2.0,
                     timeout_message="Camera snapshot timeout",
@@ -1385,7 +1423,7 @@ class Coordinator:
                 raise OperationError("Exploration camera returned invalid JPEG dimensions")
             require_camera_grant()
             if camera_grant is not None and (
-                time.monotonic() - last_live_frame_at > 1.0
+                elapsed_with_sleep(last_live_frame_at, last_live_frame_cont) > 1.0
                 or self.multimodal is not media
                 or not media.stream_owns_camera(job.robot_id)
                 or not media.status(job.robot_id)["camera_stream_connected"]
@@ -1415,7 +1453,10 @@ class Coordinator:
             steps += 1
             if len(job.events) >= 96:
                 job.events.pop(0)
-            job.events.append(f"bounded exploration pulse {steps}, stopped for reobservation")
+            job.events.append(
+                f"bounded exploration pulse {steps}, "
+                "STOP acknowledged before reobservation; physical standstill unverified"
+            )
             await observe_camera()
             # No blind reverse/turn when only one forward beam exists. Swept
             # turns need real footprint and obstacle qualification.
@@ -1453,6 +1494,7 @@ class Coordinator:
             camera, target_mm = load_real_dock_calibration(
                 robot.dock_calibration, robot_id=robot.id,
                 head_device_id=robot.device_id,
+                expected_marker_id=getattr(robot, "dock_marker_id", None),
             )
         except (OSError, ValueError, TypeError) as exc:
             raise OperationError(f"Dock calibration required: {exc}") from exc
@@ -1867,7 +1909,10 @@ class Coordinator:
                     frame for frame in reversed(media.hub.frames[robot_id])
                     if frame.source in ("proactive", "speech")
                     and frame.received_at > after
-                    and 0 <= time.monotonic() - frame.received_at <= 1.0
+                    and 0 <= elapsed_with_sleep(
+                        frame.received_at,
+                        getattr(frame, "received_continuous_at", None),
+                    ) <= 1.0
                 ), None)
 
             frame = newest()
@@ -1884,12 +1929,14 @@ class Coordinator:
                 raise OperationError("Live pickup camera stalled")
             jpeg = frame.jpeg
             jpeg_received_at = frame.received_at
+            jpeg_received_cont = getattr(frame, "received_continuous_at", None)
         else:
             jpeg = await _bounded_head_reply(
                 self.heads[robot_id].snapshot(), seconds=3.0,
                 timeout_message="Pickup camera snapshot timeout",
             )
             jpeg_received_at = time.monotonic()
+            jpeg_received_cont = None
         # A Mac receipt is NOT actual exposure time; a newer physical
         # stream frame is required for every successive grasp observation.
         try:
@@ -1900,7 +1947,7 @@ class Coordinator:
             raise OperationError("Camera resolution differs from measured calibration")
         if self.settings.mode == "hardware":
             self._pickup_live_media(robot_id, camera_grant)
-            if time.monotonic() - jpeg_received_at > 2.0:
+            if elapsed_with_sleep(jpeg_received_at, jpeg_received_cont) > 2.0:
                 raise OperationError("Pickup visual evidence expired during JPEG validation")
         async def detect_current() -> list[Detection]:
             # The queued inference may start after the operator opts out.
@@ -1923,7 +1970,7 @@ class Coordinator:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
         if self.settings.mode == "hardware":
             self._pickup_live_media(robot_id, camera_grant)
-            if time.monotonic() - jpeg_received_at > 2.0:
+            if elapsed_with_sleep(jpeg_received_at, jpeg_received_cont) > 2.0:
                 raise OperationError("Pickup visual evidence expired during inference")
         return objects[0], jpeg_received_at
 
@@ -2109,7 +2156,9 @@ class Coordinator:
         # calibrated ground area. No blind wheel movement or drop command.
         await self._assert_armed_health(job.robot_id)
         require_fresh_observation()
-        job.events.append("lift and hold visually verified; begin supervised placement")
+        job.events.append(
+            "lift and hold sampled target endpoints; uninterrupted travel visibility unverified"
+        )
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)

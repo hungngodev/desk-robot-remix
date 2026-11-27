@@ -1410,3 +1410,45 @@ def test_handling_events_invariant_under_proper_axis_remapping(axes, first_sign,
     assert observe((0, 0, 26000), (16500, 0, 0)) == ("handling_shake",)
     assert observe((0, 0, 26000), (16500, 0, 0)) == ()  # cooldown
     assert gate.reference == pytest.approx(rotate((0, 0, 1)))
+
+
+def test_stationary_gate_rejects_moving_or_malformed_servo_command_state():
+    gate = HandlingGate()
+    stamp = 100
+    now = 10.0
+
+    def sample_with_servo(servo):
+        nonlocal stamp, now
+        stamp += 25
+        now += 0.025
+        frame = canonical_wroom_sample(sample_ms=stamp)
+        frame["servo"] = servo
+        return frame
+
+    settled = {
+        "lift": 90, "grip": 40, "lift_target": 90, "grip_target": 40,
+        "attached": False, "position_source": "commanded",
+    }
+    for _ in range(8):
+        assert gate.observe(
+            sample_with_servo(settled), qualified=True, calibrated=True, now=now,
+        ) == ()
+    assert gate.reference is not None
+
+    moving_grip = dict(settled, grip_target=75)
+    assert gate.observe(
+        sample_with_servo(moving_grip), qualified=True, calibrated=True, now=now,
+    ) == ()
+    assert gate.reference is None
+
+    for _ in range(8):
+        assert gate.observe(
+            sample_with_servo(settled), qualified=True, calibrated=True, now=now,
+        ) == ()
+    assert gate.reference is not None
+
+    malformed = {"lift": "90", "grip": 40, "lift_target": 90, "grip_target": 40, "attached": False}
+    assert gate.observe(
+        sample_with_servo(malformed), qualified=True, calibrated=True, now=now,
+    ) == ()
+    assert gate.reference is None

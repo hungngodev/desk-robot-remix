@@ -108,6 +108,7 @@ class RobotConfig(BaseModel):
     # Actual AVR dock beacon is flashed per physical station. Never infer
     # an assigned dock from a pet name or from one matching IR observation.
     dock_beacon_id: int | None = Field(default=None, strict=True, ge=1, le=5)
+    dock_marker_id: int | None = Field(default=None, strict=True, ge=0, le=586)
     dock_turn_sign: int | None = Field(default=None, strict=True, ge=-1, le=1)
     dock_forward_sign: int | None = Field(default=None, strict=True, ge=-1, le=1)
     voice: str = "af_heart"
@@ -154,6 +155,7 @@ class Settings(BaseModel):
     _transcript_consent_started_at: float = PrivateAttr(default=0.0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
     _fleet_sharing_consent_generation: int = PrivateAttr(default=0)
+    _fleet_social_autonomy_generation: int = PrivateAttr(default=0)
     _fleet_auto_fanout_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
@@ -186,6 +188,7 @@ class Settings(BaseModel):
     room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     fleet_text_auto_fanout_enabled: StrictBool = True  # Keep existing broadcast behavior unless selective-only chosen.
+    vision_weights_sha256: str | None = None
     max_job_seconds: float = Field(default=45, strict=True, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
     memory_dir: Path = Path("../data/private/memory")
@@ -267,6 +270,18 @@ class Settings(BaseModel):
         docks = [r.dock_beacon_id for r in self.robots if r.dock_beacon_id is not None]
         if len(set(docks)) != len(docks):
             raise ValueError("Each physical dock beacon may be assigned to only one robot")
+        markers = [r.dock_marker_id for r in self.robots if r.dock_marker_id is not None]
+        if len(set(markers)) != len(markers):
+            raise ValueError("Each physical dock marker may be assigned to only one robot")
+        if self.vision_weights_sha256 is not None:
+            digest = self.vision_weights_sha256
+            if (
+                type(digest) is not str
+                or len(digest) != 64
+                or any(ch not in "0123456789abcdefABCDEF" for ch in digest)
+            ):
+                raise ValueError("vision_weights_sha256 must be a 64-character SHA-256 hex digest")
+            object.__setattr__(self, "vision_weights_sha256", digest.lower())
         if self.mode == "hardware" and any(
             r.dock_motion_qualified and r.dock_beacon_id is None
             for r in self.robots
@@ -283,6 +298,10 @@ class Settings(BaseModel):
         memory_was_granted = (
             name == "voice_memory_tools_enabled"
             and getattr(self, "voice_memory_tools_enabled", False) is True
+        )
+        social_was_granted = (
+            name == "fleet_social_autonomy_enabled"
+            and getattr(self, "fleet_social_autonomy_enabled", False) is True
         )
         room_was_granted = (
             name == "room_station_context_enabled"
@@ -334,6 +353,9 @@ class Settings(BaseModel):
         if sharing_was_granted and not self.fleet_text_sharing_enabled:
             # Peer relays and in-flight SQLite writes belong to the old grant.
             self._fleet_sharing_consent_generation += 1
+        if social_was_granted and not self.fleet_social_autonomy_enabled:
+            # Revoking and regranting social autonomy must not revive queued dialogue.
+            self._fleet_social_autonomy_generation += 1
         if fanout_was_granted and not self.fleet_text_auto_fanout_enabled:
             # Selective-only mode retires an older automatic peer batch.
             self._fleet_auto_fanout_consent_generation += 1
@@ -376,6 +398,10 @@ class Settings(BaseModel):
     @property
     def fleet_sharing_consent_generation(self) -> int:
         return self._fleet_sharing_consent_generation
+
+    @property
+    def fleet_social_autonomy_generation(self) -> int:
+        return self._fleet_social_autonomy_generation
 
     @property
     def fleet_auto_fanout_consent_generation(self) -> int:

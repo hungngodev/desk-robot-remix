@@ -35,10 +35,13 @@ _RUNTIME_VOICE_STOP_TIMEOUT_S = 2.5
 _RUNTIME_PET_STOP_TIMEOUT_S = 5.0
 
 
-async def _bounded_monitor_stop(coro) -> None:
+async def _bounded_monitor_stop(coro, *, on_task=None) -> None:
     """One stalled decoder cannot block the five-head monitor outage abort."""
+    task = asyncio.ensure_future(coro)
+    if callable(on_task):
+        on_task(task)
     await _bounded_head_reply(
-        coro, seconds=_MONITOR_STOP_TIMEOUT_S,
+        task, seconds=_MONITOR_STOP_TIMEOUT_S,
         timeout_message="Physical XIAO STOP unconfirmed on monitor loss",
     )
 
@@ -66,7 +69,10 @@ class Runtime:
                 r.id: HttpHead(r, self.client, strict_capture=True, require_body_protocol=True)
                 for r in settings.robots
             }
-            vision = YoloWorldVision(settings.vision_weights)
+            vision = YoloWorldVision(
+                settings.vision_weights,
+                expected_sha256=getattr(settings, "vision_weights_sha256", None),
+            )
             chat = OllamaChat(settings, self.client)
             speaker = KokoroHeadSpeaker(settings, self.client)
             scene = OllamaScene(self.client, url=settings.ollama_url, model=settings.vision_model)
@@ -76,6 +82,10 @@ class Runtime:
         )
         self.attention = AttentionLedger([r.id for r in settings.robots])
         self.coordinator = Coordinator(settings, heads, vision)
+        if callable(getattr(settings, "register_camera_revocation", None)):
+            settings.register_camera_revocation(
+                lambda _settings: self.pet.cancel_active_vision()
+            )
         self.conversation = Conversation(settings, chat, speaker, memory=self.memory)
         self.conversation.coordinator_jobs = self.coordinator.jobs
         self.conversation.attention = self.attention
@@ -87,6 +97,7 @@ class Runtime:
         )
         self.spatial = SpatialRuntime(settings, self.memory)
         self.coordinator.spatial = self.spatial
+        self.coordinator.is_quiet = self.pet.is_quiet
         self.pet.spatial = self.spatial
         # Shared read-only activity context for the pet; the Coordinator
         # still exclusively owns the job, permits and physical commands.
@@ -208,14 +219,22 @@ class Runtime:
                 self._on_room_observation(
                     observation, epoch=conn_epoch, grant_generation=grant_generation,
                 )
-            except Exception:
+            except Exception as exc:
                 # An optional context consumer must never fault the event-loop
                 # callback or prevent the next fresh USB observation arriving.
                 self.room_context_failures = getattr(self, "room_context_failures", 0) + 1
-                if self.room_context_failures == 1 or self.room_context_failures % 100 == 0:
-                    logging.getLogger(__name__).exception(
-                        "Room context consumer failed (%d total)",
+                now = time.monotonic()
+                last_log = getattr(self, "_last_room_context_error_log_at", None)
+                if (
+                    self.room_context_failures == 1
+                    or last_log is None
+                    or now - last_log >= 10.0
+                ):
+                    self._last_room_context_error_log_at = now
+                    logging.getLogger(__name__).error(
+                        "Room context consumer failed (%d total): %s",
                         self.room_context_failures,
+                        type(exc).__name__,
                     )
 
     def _queue_room_observation(self, loop, observation: RoomObservation) -> None:
@@ -325,11 +344,13 @@ class Runtime:
             self.multimodal.start_streams()
         if room_feed is not None:
             self.room_feed = room_feed
+            self.room_station_degraded = False
+            self.room_station_last_error = None
             self._room_task = asyncio.create_task(
                 room_feed.run(self._room_stop),
             )
             self._room_task.add_done_callback(
-                lambda task: self._on_service_done("Shared room USB", task)
+                lambda task: self._on_optional_room_service_done(task)
             )
         if not any(robot.device_id for robot in self.settings.robots):
             return
@@ -673,7 +694,7 @@ class Runtime:
         if not callable(stop):
             stop = getattr(speaker, "interrupt", None)
         native_stops = (
-            [_bounded_monitor_stop(stop(robot))
+            [self._start_native_monitor_stop(stop, robot)
              for robot in self.settings.robots if getattr(robot, "device_id", None)]
             if getattr(self.settings, "mode", None) == "hardware"
             and callable(stop) else []
@@ -800,6 +821,44 @@ class Runtime:
         if camera_error is not None:
             raise camera_error
 
+    def _track_native_stop(self, task: asyncio.Task) -> None:
+        stops = self.__dict__.setdefault("_unsettled_native_stops", set())
+        stops.add(task)
+        task.add_done_callback(stops.discard)
+        track_conv = getattr(getattr(self, "conversation", None), "_track_speaker_abort", None)
+        if callable(track_conv):
+            track_conv(task)
+
+    def _has_unsettled_native_stop(self) -> bool:
+        stops = getattr(self, "_unsettled_native_stops", None)
+        return bool(stops and any(not task.done() for task in stops))
+
+    def _start_native_monitor_stop(self, stop_fn, robot) -> asyncio.Task:
+        return asyncio.create_task(
+            _bounded_monitor_stop(stop_fn(robot), on_task=self._track_native_stop)
+        )
+
+    def _on_optional_room_service_done(self, task: asyncio.Task) -> None:
+        """Invalidate optional room state on permanent exit without stopping pets."""
+        if getattr(self, "_room_task", None) is task:
+            self._room_task = None
+        if getattr(self, "_closed", False):
+            return
+        cause = None if task.cancelled() else task.exception()
+        self._on_room_disconnect()
+        if getattr(self.settings, "room_station_required", False) is True:
+            self._on_service_done("Shared room USB", task)
+            return
+        self.room_station_degraded = True
+        self.room_station_last_error = (
+            "cancelled" if task.cancelled()
+            else type(cause).__name__ if cause is not None else "stopped"
+        )
+        logging.getLogger(__name__).warning(
+            "Optional room station stopped unexpectedly (%s); continuing degraded",
+            self.room_station_last_error,
+        )
+
     def _on_service_done(self, label: str, task: asyncio.Task) -> None:
         """An unexpected permanent service exit closes every runtime owner."""
         if getattr(self, "_closed", False):
@@ -831,7 +890,12 @@ class Runtime:
         self._voice_turn_generations = None
         task = getattr(self, "_close_task", None)
         fatal = getattr(self, "_fatal_service_error", None)
-        if task is None or (task.done() and fatal is None):
+        retry_failed_fatal = (
+            task is not None
+            and task.done()
+            and (task.cancelled() or task.exception() is not None)
+        )
+        if task is None or (task.done() and (fatal is None or retry_failed_fatal)):
             task = asyncio.create_task(self._close_owners())
             self._close_task = task
         return task
@@ -892,8 +956,13 @@ class Runtime:
         pending = getattr(self, "_shutdown_step_tasks", None)
         if pending is None:
             pending = self._shutdown_step_tasks = {}
+        confirmed = getattr(self, "_closed_owners", None)
+        if confirmed is None:
+            confirmed = self._closed_owners = set()
 
         async def step(label: str, operation, deadline: float) -> None:
+            if label in confirmed and label not in pending:
+                return
             task = pending.get(label)
             try:
                 # The previous close may have timed out without terminating
@@ -908,6 +977,7 @@ class Runtime:
                 if not done:
                     raise TimeoutError(f"{label} shutdown unconfirmed")
                 await task
+                confirmed.add(label)
             except asyncio.CancelledError:
                 # A child owner may cancel itself independently of shutdown.
                 # Never let that skip STOP attempts for the other four pets,
@@ -972,7 +1042,7 @@ class Runtime:
                     errors.append(RuntimeError("Native speaker shutdown STOP unavailable"))
                 else:
                     outcomes = await asyncio.gather(
-                        *(_bounded_monitor_stop(stop(robot)) for robot in robots),
+                        *(self._start_native_monitor_stop(stop, robot) for robot in robots),
                         return_exceptions=True,
                     )
                     for robot, result in zip(robots, outcomes, strict=True):
@@ -980,6 +1050,17 @@ class Runtime:
                             errors.append(RuntimeError(
                                 f"Native speaker shutdown STOP unconfirmed for {robot.id}"
                             ))
+        unsettled = [
+            task for task in getattr(self, "_unsettled_native_stops", ())
+            if not task.done()
+        ]
+        if unsettled:
+            done, _ = await asyncio.wait(unsettled, timeout=_MONITOR_STOP_TIMEOUT_S)
+            for task in done:
+                if not task.cancelled():
+                    task.exception()
+            if self._has_unsettled_native_stop():
+                errors.append(TimeoutError("Native speaker monitor STOP unconfirmed"))
 
         if self._voice_task is not None:
             task = self._voice_task
