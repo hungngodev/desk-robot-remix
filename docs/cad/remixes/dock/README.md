@@ -29,7 +29,8 @@ track pair against its 114 mm entry mouth and 100 mm straight channel,
 then update the track width and clearance parameters. It has no tag,
 backstop, contacts, or charging function; passing does not qualify docking.
 The default `part="dock_passive_fit"` still renders the full cradle.
-`code/scripts/export_fit_kit.py` exports both models.
+`code/scripts/export_fit_kit.py` exports all three dock models, including
+the IR pair position coupon described below.
 
 Source: [dock_passive_fit.scad](dock_passive_fit.scad) in the same directory. Change
 track_outer_width_mm and side_clearance_each_mm to measured values in
@@ -126,8 +127,9 @@ cd ..
 
 ID 12 is a **candidate example**, not evidence of a qualified dock.
 `tag_assignments.json` now lists one distinct candidate AprilTag 36h11 marker
-for each of the five docks. Its `dock_id` equals the independent NEC
-`dock_beacon_id`; each robot's actual `DockCalibration.marker_id` must match
+for each of the five docks. Each manifest row contains `dock_id`, `beacon_id`
+and `marker_id`; `beacon_id` equals `dock_id` and corresponds to the robot's
+configured NEC `dock_beacon_id`. Each robot's actual `DockCalibration.marker_id` must match
 the printed marker on its designated dock. The generator checks the **whole**
 five-dock assignment manifest before printing or verifying any tag, rejecting
 duplicate optical markers, duplicate beacon IDs, missing docks, and mismatched
@@ -224,8 +226,8 @@ too narrow rail channel, missing clearance or old file hash.
 This screen is only for a dummy **unpowered** gauge, not pogo pins.
 It cannot choose electrical contacts, determine polarity, accommodate real
 spring stroke, validate the robot's final approaching path, or energize
-charger rails. The result always marks `physical_contact_mate_verified`
-and `charging_authorized` false regardless of apparent envelope fit.
+charger rails. The result always marks `unpowered_contact_floor_layout.physical_contact_mate_verified`
+and top-level `charging_authorized` false regardless of apparent envelope fit.
 
 ## Spring contact travel remains a separate physical gate
 
