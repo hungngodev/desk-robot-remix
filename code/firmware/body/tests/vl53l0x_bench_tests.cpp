@@ -87,7 +87,9 @@ static void test_optical_rejection() {
   assert(ready);
   loop();
   assert(Serial.samples == 1 && Serial.valid == 1 && Wire.clears == 1);
-  Wire.interrupt_status = 0;
+  // A successful clear must consume the ready indication. Polling again
+  // without a new conversion must not publish another sample.
+  assert(Wire.interrupt_status == 0);
   next_poll();
   assert(Serial.samples == 1 && Wire.results == 1 && Wire.clears == 1);
   Wire.interrupt_status = 0x18;
@@ -97,14 +99,17 @@ static void test_optical_rejection() {
   Wire.raw_status = 4;
   next_poll();
   assert(Serial.samples == 3 && Serial.valid == 0 && ready);
+  Wire.interrupt_status = 7;
   Wire.raw_status = 11;
   Wire.signal = 31;
   next_poll();
   assert(Serial.samples == 4 && Serial.valid == 0 && ready);
+  Wire.interrupt_status = 7;
   Wire.signal = 32;
   Wire.mm = 8190;
   next_poll();
   assert(Serial.samples == 5 && Serial.valid == 0 && ready);
+  Wire.interrupt_status = 7;
   Wire.mm = 45;
   next_poll();
   assert(Serial.samples == 6 && Serial.valid == 1 && ready);
@@ -123,9 +128,19 @@ static void test_transport_faults() {
     assert(!ready && Serial.samples == 0);
     if (fault_case == 2) assert(Wire.clears == 0);
     else assert(Wire.ranges == 0);
+    if (fault_case == 1) {
+      assert(Wire.clears == 1 && Wire.interrupt_status == 7);
+    }
+    // Even a recovered bus and a new ready conversion cannot rearm the
+    // latched bench or touch the neutralized actuator harness.
+    Wire.short_result = Wire.fail_clear = Wire.hold_after_result = false;
+    Wire.mux_readback = -1;
+    Wire.interrupt_status = 7;
+    stuck_bus = false;
     const unsigned transactions = Wire.starts;
     next_poll();
-    assert(Wire.starts == transactions);
+    assert(!ready && Wire.starts == transactions && Serial.samples == 0);
+    assert_safe_harness();
   }
 }
 

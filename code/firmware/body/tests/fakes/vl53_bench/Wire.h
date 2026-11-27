@@ -45,7 +45,11 @@ struct FakeWire {
     }
     if (stop && writes_ == 2 && data_[0] == 0x0B && data_[1] == 1) {
       ++clears;
-      return fail_clear ? 4 : 0;
+      if (fail_clear) return 4;
+      // ST VL53L0X UM2039: acknowledge the interrupt after reading.
+      // The test must explicitly deliver the next conversion.
+      interrupt_status = 0;
+      return 0;
     }
     return 4;
   }
