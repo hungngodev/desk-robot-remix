@@ -1934,8 +1934,10 @@ def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
     assert source.index("UrgentStopGate::Request urgency") < source.index(
         "std::lock_guard<std::mutex> lock(uart_mutex_)"
     )
-    assert source.count("if (urgency.preempted())") == 3
-    assert source.index("if (urgency.preempted())") < source.index("uart_write_bytes(")
+    assert source.count("if (urgency.preempted())") == 4
+    write_pos = source.index("uart_write_bytes(")
+    assert source.count("if (urgency.preempted())", 0, write_pos) == 2
+    assert "body command superseded before UART write" in source
     assert "void Bridge::BodyReadTask(void* context)" in source
     assert 'xTaskCreate(BodyReadTask, "robot_body_read"' in source
     assert "httpd_req_async_handler_begin(req, &async_req)" in source

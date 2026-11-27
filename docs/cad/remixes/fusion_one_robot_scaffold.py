@@ -82,7 +82,7 @@ SOURCE_MESH_GIT_BLOBS = {
 # A metadata revision requires deliberate attribution review before repinning.
 SOURCE_ATTRIBUTION_GIT_BLOBS = {
     "docs/cad/originals/forklift/source.json":
-        "375cb8b1c2d1a7b29ec8a84d65e255ffca25f2fe",
+        "26bb136414309157b345f74e3f34982bd667eac1",
     "docs/cad/originals/gripper/source.json":
         "353fc4e91cbf35e2ef5db39af103db11e38fc279",
     "docs/cad/originals/smars-stepper/source.json":

@@ -606,6 +606,9 @@ def test_room_radar_continuous_uart_has_bounded_poll_budget(tmp_path):
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+constexpr uint32_t kRadarStaleMs = 3000;
+uint32_t clock_ms = 0;
+uint32_t millis() { return clock_ms; }
 #include "radar_data_frame_gate.h"
 class Print {
  public:
