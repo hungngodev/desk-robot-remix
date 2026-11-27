@@ -767,7 +767,8 @@ def repeated_spontaneous_line(
         return True
     return any(
         matches(item.summary) for item in recent
-        if item.kind == "own_utterance" and item.witnessed
+        if _valid_memory_record(item, now_wall)
+        and item.kind == "own_utterance" and item.witnessed is True
         and item.source_robot == item.robot_id
         and 0 <= now_wall - item.observed_at <= 3600
     )

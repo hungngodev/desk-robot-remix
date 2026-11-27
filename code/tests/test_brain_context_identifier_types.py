@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 import pytest
-from desk_robot.brain_context import compose_brain_context
+from desk_robot.brain_context import compose_brain_context, repeated_spontaneous_line
 from desk_robot.memory import CoreFact, Memory
 
 
@@ -132,3 +132,20 @@ def test_invalid_safety_source_cannot_displace_authenticated_fault(source):
     ])
     assert "WROOM reported latched safety fault (cliff)" in context.interaction
     assert "fault (invalid)" not in context.interaction
+
+
+@pytest.mark.parametrize(("field", "bad"), [
+    ("observed_at", None), ("observed_at", "999"), ("observed_at", True),
+    ("observed_at", float("nan")), ("observed_at", float("inf")),
+    ("observed_at", 10**400), ("confidence", float("nan")),
+    ("kind", _IdentifierSubclass("own_utterance")),
+    ("source_robot", _IdentifierSubclass("pet_a")), ("witnessed", 1),
+])
+def test_invalid_spoken_memory_cannot_abort_or_suppress_initiative(field, bad):
+    valid = Memory("pet_a", "evt", "pet_a", True, "own_utterance", "Want to play?", 999.0, 1.0)
+    malformed = replace(valid, **{field: bad})
+    assert not repeated_spontaneous_line(valid.summary, [malformed], now_wall=1000.0)
+    assert repeated_spontaneous_line(valid.summary, [malformed, valid], now_wall=1000.0)
+    assert repeated_spontaneous_line(
+        valid.summary, [], now_wall=1000.0, recent_transmitted=[valid.summary],
+    )
