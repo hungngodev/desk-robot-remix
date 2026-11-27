@@ -66,7 +66,7 @@ struct FakeWire {
     size_ = pos_ = 0;
     const bool pending = pending_;
     pending_ = false;
-    if (!stop || stuck_bus) return 0;
+    if (!initialized_ || !stop || stuck_bus) return 0;
     if (!pending && count == 1 && address == 0x70) {
       rx_[0] = mux_readback < 0 ? ranges : static_cast<uint8_t>(mux_readback);
       size_ = 1;

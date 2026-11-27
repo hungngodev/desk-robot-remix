@@ -144,7 +144,31 @@ static void test_transport_faults() {
   }
 }
 
+static void test_wire_read_requires_begin() {
+  FakeWire wire;
+  wire.optional_installed = true;
+  const uint8_t addresses[] = {0x70, 0x71};
+  for (uint8_t address : addresses) {
+    assert(wire.requestFrom(address, std::size_t{1}, true) == 0);
+    assert(wire.available() == 0 && wire.read() == -1);
+  }
+  wire.fail_begin = true;
+  assert(!wire.begin(21, 22, 400000));
+  for (uint8_t address : addresses) {
+    assert(wire.requestFrom(address, std::size_t{1}, true) == 0);
+    assert(wire.available() == 0 && wire.read() == -1);
+  }
+  wire.fail_begin = false;
+  assert(wire.begin(21, 22, 400000));
+  for (uint8_t address : addresses) {
+    assert(wire.requestFrom(address, std::size_t{1}, true) == 1);
+    assert(wire.available() == 1 && wire.read() == 0);
+    assert(wire.available() == 0 && wire.read() == -1);
+  }
+}
+
 int main() {
+  test_wire_read_requires_begin();
   test_startup();
   test_optical_rejection();
   test_transport_faults();
