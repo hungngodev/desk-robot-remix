@@ -1,6 +1,7 @@
 """PCM framing and transport pacing for the existing Xiaozhi Opus path."""
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 HEAD_SAMPLE_RATE = 16000
@@ -28,6 +29,8 @@ class PcmOpusFramer:
         self._resample_state = None
 
     def append(self, pcm24k: bytes) -> None:
+        if type(pcm24k) is not bytes:
+            raise ValueError("Model PCM chunk must be bytes")
         if not pcm24k:
             return
         if len(pcm24k) % 2 or len(pcm24k) > MAX_MODEL_CHUNK_BYTES:
@@ -37,7 +40,8 @@ class PcmOpusFramer:
         pcm16k, next_state = self._ratecv(
             pcm24k, 2, 1, MODEL_SAMPLE_RATE, HEAD_SAMPLE_RATE, self._resample_state
         )
-        if len(pcm16k) % 2 or len(pcm16k) > MAX_RESAMPLED_CHUNK_BYTES:
+        if (type(pcm16k) is not bytes or len(pcm16k) % 2
+                or len(pcm16k) > MAX_RESAMPLED_CHUNK_BYTES):
             raise ValueError("Malformed or oversized resampled PCM chunk")
         self._resample_state = next_state
         self._pending.extend(pcm16k)
@@ -61,4 +65,13 @@ class PcmOpusFramer:
 
 def remaining_packet_delay(started: float, now: float) -> float:
     """Charge socket send time against one frame, without catch-up debt."""
-    return max(0.0, FRAME_SECONDS - (now - started))
+    if type(started) not in (int, float) or type(now) not in (int, float):
+        raise ValueError("Invalid packet clock")
+    try:
+        elapsed = now - started
+        if not (math.isfinite(started) and math.isfinite(now)
+                and math.isfinite(elapsed) and elapsed >= 0):
+            raise ValueError("Invalid packet clock")
+    except OverflowError:
+        raise ValueError("Invalid packet clock") from None
+    return max(0.0, FRAME_SECONDS - elapsed)
