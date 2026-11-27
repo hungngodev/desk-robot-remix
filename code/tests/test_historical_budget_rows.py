@@ -94,3 +94,63 @@ def test_budget_rejects_subcent_fees_at_each_quantity(budget, robots, shipping, 
     ]}
     with pytest.raises(ValueError, match="exact USD cents"):
         budget(data, shipping, tax)
+
+
+@pytest.mark.parametrize("tax,total,remaining,over", [
+    ("0.50", 49.99, 0.01, False),
+    ("0.51", 50.00, 0.00, False),
+    ("0.52", 50.01, -0.01, True),
+])
+def test_exact_landed_cap_boundary(budget, tax, total, remaining, over):
+    data = {"cap_usd": "50", "fit_confirmed": True, "items": [
+        {"item": "sample", "quantity": 1, "price_status": "verified", "unit_usd": "48.99"},
+    ]}
+    result = budget(data, "0.50", tax)
+    assert result["quoted_total_usd"] == total
+    assert result["remaining_under_cap_usd"] == remaining
+    assert result["planning_over_cap"] is over
+    assert result["purchase_ready"] is (not over)
+
+
+@pytest.mark.parametrize("fit,checks,status,pending,unquoted,quote,ready", [
+    (True, {"electrical": True}, "verified", [], [], 10.0, True),
+    (False, {"electrical": True}, "verified", [], [], 10.0, False),
+    (True, {"electrical": False}, "verified", ["electrical"], [], 10.0, False),
+    (True, {"electrical": True}, "estimated", [], ["sample"], None, False),
+])
+def test_known_planning_cost_does_not_bypass_independent_readiness_gates(
+    budget, fit, checks, status, pending, unquoted, quote, ready,
+):
+    data = {"cap_usd": "50", "fit_confirmed": fit, "readiness_checks": checks, "items": [
+        {"item": "sample", "quantity": 2, "price_status": status, "unit_usd": "4.50"},
+    ]}
+    result = budget(data, "0.75", "0.25")
+    assert result["known_subtotal_usd"] == 9.0
+    assert result["planning_total_usd"] == 10.0
+    assert result["remaining_under_cap_usd"] == 40.0
+    assert result["planning_over_cap"] is False
+    assert result["unknown_price_items"] == []
+    assert result["unknown_landed_fees"] == []
+    assert result["pending_checks"] == pending
+    assert result["unquoted_items"] == unquoted
+    assert result["quoted_total_usd"] == quote
+    assert result["purchase_ready"] is ready
+
+
+def test_known_cost_floor_over_cap_even_with_missing_prices_and_fees(budget):
+    data = {"cap_usd": "50", "fit_confirmed": True, "items": [
+        {"item": "known", "quantity": 2, "price_status": "verified", "unit_usd": "25.00"},
+        {"item": "missing", "quantity": 1, "price_status": "verified", "unit_usd": None},
+    ]}
+    result = budget(data, "0.01", None)
+    assert result["known_subtotal_usd"] == 50.0
+    assert result["known_landed_subtotal_usd"] == 50.01
+    assert result["unknown_price_items"] == ["missing"]
+    assert result["unquoted_items"] == ["missing"]
+    assert result["unknown_landed_fees"] == ["tax"]
+    assert result["parts_estimate_usd"] is None
+    assert result["planning_total_usd"] is None
+    assert result["quoted_total_usd"] is None
+    assert result["remaining_under_cap_usd"] is None
+    assert result["planning_over_cap"] is True
+    assert result["purchase_ready"] is False
