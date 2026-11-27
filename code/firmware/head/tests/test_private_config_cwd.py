@@ -35,7 +35,12 @@ def test_private_config_credentials_follow_fleet(tmp_path, monkeypatch, capsys, 
         path.chmod(0o600)
     board = root / "firmware/head/build/xiaozhi-sense/main/boards/desk-robot/desk-robot-sense-s3"
     board.mkdir(parents=True)
-    (board / "config.json").write_text(json.dumps({"builds": [{"sdkconfig_append": []}]}))
+    stale = [
+        "CONFIG_DESK_ROBOT_AEC_DELAY_MS=0",
+        "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y",
+        "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y",
+    ]
+    (board / "config.json").write_text(json.dumps({"builds": [{"sdkconfig_append": stale}]}))
     working = tmp_path / "unrelated"
     working.mkdir()
     monkeypatch.chdir(working)
@@ -50,6 +55,13 @@ def test_private_config_credentials_follow_fleet(tmp_path, monkeypatch, capsys, 
     target = board / "config.private.json"
     settings = json.loads(target.read_text())["builds"][0]["sdkconfig_append"]
     assert f'CONFIG_DESK_ROBOT_TOKEN="{expected}"' in settings
+    for setting in (
+        "CONFIG_DESK_ROBOT_AEC_DELAY_MS=90",
+        "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=n",
+        "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=n",
+    ):
+        key = setting.split("=", 1)[0] + "="
+        assert [entry for entry in settings if entry.startswith(key)] == [setting]
     assert target.stat().st_mode & 0o777 == 0o600
     output = capsys.readouterr()
     assert expected not in output.out + output.err
