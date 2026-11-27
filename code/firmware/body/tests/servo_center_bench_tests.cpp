@@ -158,6 +158,27 @@ int main() {
   CHECK(!gate.request("", 0));
   CHECK(!gate.request("CENTER", 0));
   CHECK(!gate.request("CENTER BOTH", 0));
+  // Boundary ownership for raw microsecond rejection vs clamping:
+  // - USB bench parser (ServoCenterBenchGate::feed / request) owns command
+  //   rejection and accepts only exact "CENTER LIFT" / "CENTER GRIP" lines.
+  // - Full-body UART path (BodyControl::execute) accepts integer degrees and
+  //   enforces measured mechanical endstops; no raw-us interface exists.
+  // - ServoPulse.h owns span validation (valid_servo_pulse_span) and clamps
+  //   internal pulse_us values (499 -> min_us, 2501 -> max_us); endpoint
+  //   clamping is neither external command rejection nor fitted travel safety.
+  for (const char* rejected_raw_pulse : {
+           "CENTER LIFT 499", "CENTER LIFT 2501",
+           "CENTER GRIP 499", "CENTER GRIP 2501",
+           "PULSE 499", "PULSE 2501", "499", "2501",
+       }) {
+    Gate fed;
+    CHECK(!gate.request(rejected_raw_pulse, 0));
+    CHECK(feed_line(fed, rejected_raw_pulse, 0, true) ==
+          Gate::InputResult::Rejected);
+    CHECK(fed.active() == Gate::Channel::None);
+    CHECK(!fed.already_used(Gate::Channel::Lift));
+    CHECK(!fed.already_used(Gate::Channel::Grip));
+  }
   CHECK(!gate.request("CENTER LIFT 95", 0));
   CHECK(!gate.request("center lift", 0));
   CHECK(!gate.request("CENTER LIFT\n", 0));

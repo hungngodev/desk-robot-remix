@@ -97,12 +97,13 @@ class IrFrameQueueGate {
   }
   bool on_poll(std::uint32_t now_ms) {
     // Unsigned subtraction handles the normal millis 32-bit wraparound.
+    const bool was_started = started_;
     const std::uint32_t elapsed = now_ms - last_ms_;
     // A second poll in the same millisecond cannot establish a new
     // independently completed NEC burst; reject untimestamped backlog.
-    const bool timely = started_ && elapsed != 0U && elapsed <= 100U;
+    const bool timely = was_started && elapsed != 0U && elapsed <= 100U;
     started_ = true;
-    earliest_receipt_ms_ = last_ms_;
+    earliest_receipt_ms_ = was_started ? last_ms_ : now_ms;
     last_ms_ = now_ms;
     return timely;
   }

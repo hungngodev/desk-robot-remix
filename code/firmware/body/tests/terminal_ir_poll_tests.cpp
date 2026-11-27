@@ -252,6 +252,9 @@ esp_err_t rmt_driver_uninstall(rmt_channel_t channel) {
   q.pending.clear();
   return ESP_OK;
 }
+Queue* late_arrival_target = nullptr;
+bool late_arrival_armed = false;
+
 void* xRingbufferReceive(RingbufHandle_t ring, std::size_t* size, TickType_t wait) {
   auto& q = *static_cast<Queue*>(ring);
   CHECK(wait == 0 && q.installed && !q.borrowed);
@@ -269,6 +272,10 @@ void vRingbufferReturnItem(RingbufHandle_t ring, void* item) {
   q.borrowed = false;
   q.pending.pop_front();
   ++q.returns;
+  if (late_arrival_armed && &q != late_arrival_target) {
+    late_arrival_armed = false;
+    late_arrival_target->pending.push_back(packet());
+  }
   if (q.arrivals_remaining != 0) {
     q.pending.push_back(mixed_packet(q.next_arrival_noise));
     q.next_arrival_noise = !q.next_arrival_noise;
@@ -292,9 +299,11 @@ int main(int argc, char** argv) {
     pair(); poll(ir, 100); check_unmatched(ir); // startup only drains
     pair(); poll(ir, 200); check_matched(ir, 100); // inclusive gap
     const auto seq = ir.evidence(now).left_seq;
-    pair(); poll(ir, 301); check_unmatched(ir); // 101 ms stall
+    pair(); poll(ir, 301); check_unmatched(ir); // 101 ms stall -> quarantine
     CHECK(ir.evidence(now).left_seq == seq);
-    pair(); poll(ir, 326); check_matched(ir, 25);
+    pair(); poll(ir, 302); check_unmatched(ir); // quarantine drain-only poll
+    CHECK(ir.evidence(now).left_seq == seq);
+    pair(); poll(ir, 326); check_matched(ir, 24);
     // Saturate the left queue. Exactly eight items must be returned, not
     // an unbounded drain. Opposite valid evidence cannot revive the pair.
     const unsigned before = queues[0].returns;
@@ -325,8 +334,9 @@ int main(int argc, char** argv) {
     receive_cost = 20;
     pair(); poll(ir, 651); check_unmatched(ir); // 25 + 4 calls * 20 = 105
     receive_cost = 0;
-    poll(ir, 752); check_unmatched(ir); // establish a new baseline
-    pair(); poll(ir, 777); check_matched(ir, 25);
+    poll(ir, 752); check_unmatched(ir); // 101 ms from start -> stays quarantined
+    poll(ir, 753); check_unmatched(ir); // timely drain clears quarantine
+    pair(); poll(ir, 777); check_matched(ir, 24);
     pair(); poll(ir, 777); check_unmatched(ir); // same tick cannot refresh
     // Failed reinitialization revokes both readings and releases resources.
     failed_start = 1;
@@ -413,6 +423,43 @@ int main(int argc, char** argv) {
         check_mixed_arrivals(side, total, true);
       }
     }
+    // Late-start poll (>100 ms gap): if a frame arrives in side 0 after side 0
+    // was observed empty while side 1 is still draining, quarantine must hold
+    // through another complete drain before an independent pair refreshes.
+    reset_fixture();
+    desk_robot::TerminalIr late;
+    CHECK(late.begin(36, 39));
+    poll(late, 100);
+    pair();
+    poll(late, 125);
+    check_matched(late, 25);
+    const auto before_late_start = late.evidence(now);
+    late_arrival_target = &queues[0];
+    late_arrival_armed = true;
+    push(1);
+    poll(late, now + 150U);
+    if (late.evidence(now).left_fresh || late.evidence(now).right_fresh || late.evidence(now).same_code)
+      throw std::runtime_error("late_start step1 unmatched");
+    CHECK(!late_arrival_armed);
+    CHECK(queues[0].pending.size() == 1);
+    CHECK(late.evidence(now).left_seq == before_late_start.left_seq);
+    CHECK(late.evidence(now).right_seq == before_late_start.right_seq);
+    push(1);
+    poll(late, now + 25U);
+    if (late.evidence(now).left_fresh || late.evidence(now).right_fresh || late.evidence(now).same_code)
+      throw std::runtime_error("late_start step2 drain unmatched");
+    CHECK(queues[0].pending.empty() && queues[1].pending.empty());
+    CHECK(late.evidence(now).left_seq == before_late_start.left_seq);
+    CHECK(late.evidence(now).right_seq == before_late_start.right_seq);
+    pair();
+    poll(late, now + 25U);
+    const auto rec = late.evidence(now);
+    if (!rec.left_fresh || !rec.right_fresh || !rec.same_code)
+      throw std::runtime_error("late_start step3 match failed: lf=" + std::to_string(rec.left_fresh) + " rf=" + std::to_string(rec.right_fresh) + " sc=" + std::to_string(rec.same_code));
+    CHECK(rec.left_age_ms == 25 && rec.right_age_ms == 25);
+    CHECK(rec.left_seq == before_late_start.left_seq + 1);
+    CHECK(rec.right_seq == before_late_start.right_seq + 1);
+    CHECK(!rec.motor_authorized && !rec.charging_authorized);
     reset_fixture();
     desk_robot::TerminalIr wrap;
     CHECK(wrap.begin(36, 39));

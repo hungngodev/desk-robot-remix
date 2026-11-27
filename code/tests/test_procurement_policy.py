@@ -45,7 +45,8 @@ def test_conflicting_reviewed_sensor_identity_is_held(role, field, replacement):
 
 @pytest.mark.parametrize("field", [
     "seller", "manufacturer", "brand", "model", "name", "stock_evidence_url",
-    "vendor", "sku", "product_name", "product_url", "resolved_item", "pcb_revision",
+    "vendor", "sku", "seller_sku", "candidate_seller_sku", "product_name",
+    "product_url", "resolved_item", "pcb_revision",
 ])
 def test_new_adafruit_identity_is_held_but_owned_is_allowed(field):
     candidate = {field: "Adafruit Industries"}

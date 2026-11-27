@@ -1,4 +1,12 @@
-"""Host pulse contracts, not physical servo travel or haptic timing evidence."""
+"""Host pulse contracts, not physical servo travel or haptic timing evidence.
+
+Boundary ownership:
+- USB bench parser (`ServoCenterBenchGate`): rejects all numeric/raw-pulse strings.
+- Full-body path (`BodyControl`): commands degrees and enforces measured endstops.
+- `ServoPulse.h`: rejects invalid `[min_us, max_us]` spans (returns `0`) and clamps
+  internal `pulse_us` arguments to `[min_us, max_us]` rather than acting as a
+  raw-pulse command parser or proof of fitted travel safety.
+"""
 
 import shutil
 import subprocess

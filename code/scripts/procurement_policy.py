@@ -20,8 +20,9 @@ _REJECTED_SENSOR_IDENTITIES = {
     "xiao_sense": ("esp32c3", "c3supermini"),
 }
 _IDENTITY_FIELDS = (
-    "vendor", "seller", "manufacturer", "brand", "sku", "model", "name",
-    "product_name", "product_url", "stock_evidence_url", "resolved_item", "pcb_revision",
+    "vendor", "seller", "manufacturer", "brand", "sku", "seller_sku",
+    "candidate_seller_sku", "model", "name", "product_name", "product_url",
+    "stock_evidence_url", "resolved_item", "pcb_revision",
     "manufacturer_or_brand", "source_vendor", "source_sku", "source_url",
     "checkout_seller_candidate", "part_name", "part_number", "title",
     "manufacturer_part_number",

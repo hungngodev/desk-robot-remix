@@ -108,8 +108,9 @@ void TerminalIr::poll(std::uint32_t now_ms) {
   const std::uint32_t receipt_window_ms = millis() - earliest_ms;
   if (!window_ok || receipt_window_ms > 100U) {
     // Also discard a candidate from the opposite receiver on any stall.
-    // Quarantine lasts through a complete queue drain on both receivers.
-    if (timely_start && receipt_window_ms > 100U) queue_.quarantine();
+    // Quarantine lasts through a complete queue drain on both receivers,
+    // including late-start polls where receipt_window_ms already exceeds 100 ms.
+    if (receipt_window_ms > 100U) queue_.quarantine();
     readings_.invalidate();
     return;
   }

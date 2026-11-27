@@ -1243,8 +1243,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
 
 esp_err_t Bridge::HandleCommandBody(httpd_req_t* req) {
     const auto reject = [this, req](int status, const char* message) {
-        Json(req, status, Envelope(false, message));
         httpd_resp_set_hdr(req, "Connection", "close");
+        Json(req, status, Envelope(false, message));
         return ESP_FAIL;
     };
     std::string body(req->content_len, '\0');
