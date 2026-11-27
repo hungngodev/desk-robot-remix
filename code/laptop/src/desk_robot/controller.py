@@ -807,7 +807,6 @@ class Coordinator:
                 if job is not None:
                     return job
             return None
-        return None
 
     def _submit(self, robot_id: str, kind: str, work: Callable[[Job], Awaitable[dict]]) -> Job:
         self.robot(robot_id)

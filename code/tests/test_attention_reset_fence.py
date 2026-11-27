@@ -1,5 +1,4 @@
 import pytest
-
 from desk_robot.attention import AttentionLedger
 
 
