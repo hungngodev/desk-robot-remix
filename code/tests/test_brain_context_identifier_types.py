@@ -149,3 +149,19 @@ def test_invalid_spoken_memory_cannot_abort_or_suppress_initiative(field, bad):
     assert repeated_spontaneous_line(
         valid.summary, [], now_wall=1000.0, recent_transmitted=[valid.summary],
     )
+
+@pytest.mark.parametrize("bad", [1, 0, "false", "true", [], {}, None, float("nan"), float("inf")])
+def test_invalid_witness_flag_cannot_displace_valid_memory(bad):
+    valid = Memory("pet_a", "evt", "pet_a", True, "scene", "valid memory", 100.0, 1.0)
+    malformed = replace(valid, witnessed=bad, summary="invalid memory", observed_at=101.0)
+    result = compose_brain_context([valid, malformed], [], []).recent
+    assert result == compose_brain_context([valid], [], []).recent
+    assert "My camera model suggested: valid memory" in result
+    assert compose_brain_context([malformed], [], []).recent == ""
+
+
+def test_boolean_false_witness_remains_valid_reported_memory():
+    reported = Memory("pet_a", "evt", "pet_a", False, "scene", "reported memory", 100.0, 1.0)
+    result = compose_brain_context([reported], [], []).recent
+    assert "pet_a reported a camera model guess: reported memory" in result
+    assert "My camera model suggested" not in result

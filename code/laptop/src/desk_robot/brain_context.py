@@ -195,6 +195,7 @@ def _valid_memory_record(entry: Memory, now_wall: float) -> bool:
         all(_plain_identifier(value) for value in (
             entry.robot_id, entry.event_id, entry.source_robot, entry.kind, entry.summary,
         ))
+        and type(entry.witnessed) is bool
         and _bounded_number(entry.observed_at, now_wall + 60)
         and _bounded_number(entry.confidence, 1)
     )
