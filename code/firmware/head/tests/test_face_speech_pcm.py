@@ -27,21 +27,42 @@ def test_accepted_pcm_extrema_and_burst_envelope(tmp_path):
 #include <array>
 #include <cassert>
 #include <limits>
+#include <vector>
 using namespace desk_robot;
 
 // Isolate digital acceptance; neither I2S nor acoustic timing is simulated.
 struct SenseReferenceCodec {
     SpeechLevelWindow speech_level_;
     ReferenceDecimator reference_decimator_;
-    struct Clock { void accepted_output_frames(int) {} } reference_clock_;
-    void FillSilenceLocked(int64_t) {}
-    void PushLocked(int16_t) {}
+    struct Clock {
+        std::vector<int> chunks;
+        void accepted_output_frames(int samples) { chunks.push_back(samples); }
+    } reference_clock_;
+    std::vector<int64_t> silence_times;
+    std::vector<int16_t> reference_samples;
+    void FillSilenceLocked(int64_t now) { silence_times.push_back(now); }
+    void PushLocked(int16_t sample) { reference_samples.push_back(sample); }
     void PublishAcceptedLocked(const int32_t*, int, int64_t);
 };
 ''' + publisher + r'''
 int main() {
     constexpr auto lo = std::numeric_limits<int32_t>::min();
     constexpr auto hi = std::numeric_limits<int32_t>::max();
+    // Observe the actual publisher's reference output and clock calls, not
+    // only its cosmetic envelope. The unaccepted suffix contains loud PCM.
+    SenseReferenceCodec partial;
+    const std::array<int32_t, 3> impulse{{lo, hi, hi}};
+    const std::array<int32_t, 2> silence{{0, 0}};
+    partial.PublishAcceptedLocked(impulse.data(), 1, 10);
+    assert((partial.reference_samples == std::vector<int16_t>{-1}));
+    partial.PublishAcceptedLocked(silence.data(), 1, 41);
+    assert((partial.reference_samples == std::vector<int16_t>{-1}));
+    partial.PublishAcceptedLocked(silence.data() + 1, 1, 72);
+    assert((partial.reference_samples == std::vector<int16_t>{-1, -21}));
+    assert((partial.reference_clock_.chunks == std::vector<int>{1, 1, 1}));
+    assert((partial.silence_times == std::vector<int64_t>{10, 41, 72}));
+    assert(partial.speech_level_.Read(72).fresh);
+    assert(partial.speech_level_.Read(72).mean_abs == 0);
     SenseReferenceCodec codec;
     FaceMouthAnimator mouth;
     auto& level = codec.speech_level_;
