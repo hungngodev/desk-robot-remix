@@ -29,7 +29,6 @@ from .memory import (
     Memory,
 )
 
-
 _logger = logging.getLogger(__name__)
 
 

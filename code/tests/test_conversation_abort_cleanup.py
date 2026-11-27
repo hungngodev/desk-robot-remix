@@ -11,7 +11,10 @@ def test_cancelled_abort_observes_already_failed_interrupt():
         reports = []
         loop.set_exception_handler(lambda _loop, context: reports.append(context))
 
+        owner: asyncio.Task[object] | None = None
+
         async def interrupt(_robot):
+            assert owner is not None
             owner.cancel()
             raise RuntimeError("injected interrupt failure")
 
@@ -22,7 +25,7 @@ def test_cancelled_abort_observes_already_failed_interrupt():
             pass
         else:
             raise AssertionError("owner did not cancel")
-        del owner
+        owner = None
         for _ in range(3):
             await asyncio.sleep(0)
             gc.collect()
