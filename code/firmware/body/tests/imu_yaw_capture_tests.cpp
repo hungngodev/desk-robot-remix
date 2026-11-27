@@ -282,7 +282,47 @@ static void exact_age_and_gap_boundaries() {
   check(cap.segment() == 3);
 }
 
+// Exercise the largest allowed corrected rate, bias uncertainty, scale
+// error and acquisition gap together. The raw sample stays off the rails;
+// the corrected rate can still exceed its calibrated bound after subtraction.
+static void maximum_calibrated_arithmetic() {
+  for (const int direction : {-1, 1}) {
+    for (const int sign : {-1, 1}) {
+      ImuYawCapture cap;
+      auto c = calibration(sign, 937950U);
+      c.bias_raw = static_cast<std::int16_t>(-direction * 4096);
+      c.max_rate_raw = 32000;
+      c.bias_uncertainty_raw = 32000;
+      c.scale_error_ppm = 100000;
+      const auto raw = static_cast<std::int16_t>(direction * 27904);
+      check(cap.configure(c));
+      check(cap.observe(sample(raw, 100), 100) == Result::Baseline);
+      check(cap.observe(sample(raw, 300), 300) == Result::Delta);
+      check(cap.last_delta_urad() == direction * sign * 852680LL);
+      check(cap.yaw_urad() == direction * sign * 852680LL);
+      // The exact budget is admissible, but one more integration must latch.
+      check(cap.error_bound_urad() == 937950U);
+      check(cap.observe(sample(raw, 300), 300) == Result::Duplicate);
+      check(cap.error_bound_urad() == 937950U);
+      check(cap.observe(sample(raw, 301), 301) == Result::Invalid);
+      check(cap.drift_latched() && !cap.continuous());
+      check(cap.yaw_urad() == 0 && cap.error_bound_urad() == 0);
+
+      ImuYawCapture outside;
+      check(outside.configure(c));
+      check(outside.observe(sample(raw, 100), 100) == Result::Baseline);
+      const auto excessive = static_cast<std::int16_t>(raw + direction);
+      check(outside.observe(sample(excessive, 200), 200) == Result::Invalid);
+      check(!outside.continuous() && !outside.drift_latched());
+      check(outside.observe(sample(raw, 200), 200) == Result::Invalid);
+      check(outside.observe(sample(raw, 201), 201) == Result::Baseline);
+      check(outside.segment() == 2);
+    }
+  }
+}
+
 int main() {
+  maximum_calibrated_arithmetic();
   zero_acceleration_and_norm_edges();
   signed_half_turn_wrap();
   exact_age_and_gap_boundaries();

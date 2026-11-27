@@ -165,11 +165,16 @@ target_compile_features(wheel_pose_integrator_tests PRIVATE cxx_std_11)
 target_compile_options(wheel_pose_integrator_tests PRIVATE
   -Wall -Wextra -Wpedantic -Werror)
 
+# Exercise both exact language modes; cxx_std_11 alone only sets a minimum.
 add_executable(imu_yaw_capture_tests tests/imu_yaw_capture_tests.cpp)
-target_include_directories(imu_yaw_capture_tests PRIVATE lib/BodyControl lib/BerryImu)
-target_compile_features(imu_yaw_capture_tests PRIVATE cxx_std_11)
-target_compile_options(imu_yaw_capture_tests PRIVATE
-  -Wall -Wextra -Wpedantic -Werror)
+add_executable(imu_yaw_capture_cpp17_tests tests/imu_yaw_capture_tests.cpp)
+set_target_properties(imu_yaw_capture_tests PROPERTIES CXX_STANDARD 11)
+set_target_properties(imu_yaw_capture_cpp17_tests PROPERTIES CXX_STANDARD 17)
+foreach(target IN ITEMS imu_yaw_capture_tests imu_yaw_capture_cpp17_tests)
+  set_target_properties(${target} PROPERTIES CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
+  target_include_directories(${target} PRIVATE lib/BodyControl lib/BerryImu)
+  target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endforeach()
 
 add_executable(wheel_angle_capture_tests tests/wheel_angle_capture_tests.cpp)
 target_include_directories(wheel_angle_capture_tests PRIVATE
@@ -260,6 +265,7 @@ body_add_test(cliff_fault_policy cliff_tests)
 body_add_test(stored_cliff_calibration_corruption stored_cliff_calibration_tests)
 body_add_test(wheel_pose_math_requires_measured_origin wheel_pose_integrator_tests)
 body_add_test(imu_yaw_capture_freshness_and_bias imu_yaw_capture_tests)
+body_add_test(imu_yaw_capture_cpp17 imu_yaw_capture_cpp17_tests)
 body_add_test(wheel_angle_capture_freshness_and_wrap wheel_angle_capture_tests)
 body_add_test(body_read_only_pose_unavailable_contract pose_read_only_tests)
 body_add_test(guarded_body_integration guarded_body_tests)
