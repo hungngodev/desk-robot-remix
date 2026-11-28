@@ -544,7 +544,7 @@ static void check_cap_interrupted_recovery() {
 // A failed CAP1188 interrupt clear or read must not publish a false release.
 static void check_cap_transport_faults() {
   for (bool preferred : {false, true}) {
-    for (unsigned fault = 0; fault < 5; ++fault) {
+    for (unsigned fault = 0; fault < 6; ++fault) {
       TwoWire wire;
       wire.cap_uses_0x29 = preferred;
       const int address = preferred ? 0x29 : 0x28;
@@ -564,7 +564,8 @@ static void check_cap_transport_faults() {
         case 1: wire.next_transfer_nack_address = address; break;
         case 2: wire.next_read_timeout_address = address; break;
         case 3: wire.next_stop_timeout_address = address; break;
-        case 4: wire.next_read_nack_address = 0x70; break;
+        case 4: wire.next_read_nack_address = 0x70; break;  // range mux readback NACK
+        case 5: wire.next_read_nack_address = address; break;  // CAP1188 register read NACK
       }
       CHECK(!touch.poll(180, zones));
       CHECK(!touch.verified() && zones == 0xA5);
