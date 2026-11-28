@@ -369,3 +369,47 @@ It deliberately does not infer a mass or support position from raw STLs.
 Even a passing paper screen keeps physical mass locations, **dynamic**
 acceleration, stopping, tip, desk-edge and actual printed assembly gates
 unverified. It never approves motion, charging, printing or procurement.
+
+
+## DRX-768 MG90S assembly sweep: HOLD (DRX-1797)
+
+The Fusion scaffold imports unaligned reference components. It does not
+measure installed pivots or execute a sweep on those components. The
+standalone `mg90s_sweep_screen.py` helper is a conservative AABB rejection
+screen, not an integrated Fusion interference check or physical qualification.
+
+After aligning the actual measured robot, save an operator-supplied JSON
+record outside the repository with a nonempty `assembly_revision` identifying
+the exact saved CAD revision, and separate `lift` and `jaw` objects.
+Each object requires:
+
+* `pivot_mm`: two coordinates in its own rotation-plane XY frame.
+* `reach_mm`: positive radial centerline reach.
+* `start_deg` and `end_deg`: measured ordered travel endpoints in that frame.
+* `z_span_mm`: ordered lower and upper axial bounds.
+* `margin_mm`: positive allowance for transverse geometry, hardware,
+  measurement uncertainty, tolerances and deflection.
+* `keepouts_mm`: mapping of `tof_0` through `tof_7` (including each full
+  optical envelope), `battery_cover`, and any additional relevant obstacles
+  to their lower and upper XYZ bounds, all in that servo's same frame.
+
+Do not use the imported STL coordinates, supplier nominal dimensions or
+synthetic test fixtures as installed measurements. Preserve the exact
+assembly revision, transform and measurement method with the record.
+
+Run from the repository root:
+
+```sh
+python3 docs/cad/remixes/mg90s_sweep_screen.py /path/to/measured-assembly.json
+```
+
+Exit 0 means neither supplied bounding sweep intersects its supplied
+keepouts; exit 1 reports possible overlaps; exit 2 means invalid/missing
+input. The receipt always identifies inputs as operator-supplied and
+unverified and physical qualification as HOLD, even with exit 0. The
+screen does not verify the claimed CAD revision, frame transformations,
+combined lift/jaw motion, optical clearance or actual collision-free travel.
+Retain the manual Fusion Inspect > Interference checks over combined poses
+and unpowered real assembly measurements before any final print or motion.
+DRX-768 remains HOLD for measured assembly evidence; the standalone helper
+and its synthetic host tests do not satisfy that gate.

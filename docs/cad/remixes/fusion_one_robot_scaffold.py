@@ -281,9 +281,12 @@ def run(context):
             "Retain original CAD attribution and applicable noncommercial/share-alike "
             "terms; this import grants no commercial or redistribution approval. "
             "This is not the finished robot. Align shaft centers and gears, "
-            "validate track compatibility and inspect collisions. Use "
-            "mg90s_sweep_screen.py with measured lift and jaw geometry and all eight "
-            "ToF optical keepouts plus the battery cover; a clear screen is not fit proof. Then model "
+            "validate track compatibility and inspect collisions. "
+            "DRX-768 MG90S ASSEMBLY SWEEP HOLD: no aligned assembly sweep is run "
+            "by this importer. After alignment, export measured lift and jaw "
+            "frames with all eight ToF optical keepouts and battery cover, then "
+            "run the standalone mg90s_sweep_screen.py JSON screen. "
+            "Even a clear screen is not fit proof. Then model "
             "adapters to caliper measurements before printing.\\n"
             + power_warning + "\n" + jaw_warning
         )
