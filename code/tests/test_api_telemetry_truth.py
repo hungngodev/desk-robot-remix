@@ -135,7 +135,7 @@ def test_room_status_does_not_overwrite_body_receipt(error, expected):
     health = result.json()["health"]
     assert health["room_station"] == expected
     assert health["body"] == "status_received"
-    assert health["state"] == ("reported" if error is None else "degraded")
+    assert health["state"] == ("unverified" if error is None else "degraded")
     assert health["physical_acceptance_pass"] is False
 
 

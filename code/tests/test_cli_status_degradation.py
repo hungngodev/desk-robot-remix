@@ -10,6 +10,7 @@ from desk_robot import cli
 
 @pytest.mark.parametrize(("code", "state", "robot_id", "action", "prints_json", "exit_code"), [
     (200, "reported", "pet", "status", True, 0),
+    (200, "unverified", "pet", "status", True, 2),
     (200, "degraded", "pet", "status", True, 1),
     (503, "degraded", "pet", "status", True, 1),
     (503, "degraded", "foreign", "status", False, 1),
@@ -84,3 +85,59 @@ def test_http_failure_is_sanitized_and_not_retried(monkeypatch, capsys, error, e
     assert output.err.strip() == expected
     assert "private-marker" not in output.err
     assert calls == ["stop"]
+
+
+def test_enabled_room_station_no_receipt_reports_unverified_and_exits_2(
+    settings, tokens, monkeypatch, capsys,
+):
+    from desk_robot.api import create_app
+    from fastapi.testclient import TestClient
+
+    async def noop():
+        pass
+
+    async def status():
+        return {"robot_id": "robot-01", "armed": False}
+
+    settings.mode = "hardware"
+    settings.room_station_enabled = True
+    runtime = SimpleNamespace(
+        start=noop,
+        close=noop,
+        _closed=False,
+        coordinator=SimpleNamespace(
+            robot=lambda _rid: None,
+            heads={"robot-01": SimpleNamespace(status=status)},
+            stop_confirmations=SimpleNamespace(status=lambda _rid: None),
+        ),
+        room_feed=SimpleNamespace(last_error=None),
+    )
+    monkeypatch.setattr(cli, "load_settings", lambda _: settings)
+    monkeypatch.setattr(cli, "load_env", lambda _: None)
+    monkeypatch.setattr(sys, "argv", ["desk-robot", "status", "robot-01"])
+
+    app = create_app(settings, runtime=runtime)
+    test_client = TestClient(app)
+    with test_client:
+        def _forward(req):
+            resp = test_client.request(
+                req.method,
+                req.url.raw_path.decode(),
+                headers=req.headers,
+                content=req.content,
+            )
+            return httpx.Response(resp.status_code, content=resp.content, headers=resp.headers)
+
+        original = httpx.AsyncClient
+        monkeypatch.setattr(
+            cli.httpx,
+            "AsyncClient",
+            lambda **kwargs: original(transport=httpx.MockTransport(_forward), **kwargs),
+        )
+        with pytest.raises(SystemExit) as stopped:
+            cli.main()
+    assert stopped.value.code == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["health"]["room_station"] == "unverified"
+    assert payload["health"]["state"] == "unverified"
+    assert payload["health"]["physical_acceptance_pass"] is False

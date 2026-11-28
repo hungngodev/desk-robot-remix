@@ -1452,3 +1452,45 @@ def test_stationary_gate_rejects_moving_or_malformed_servo_command_state():
         sample_with_servo(malformed), qualified=True, calibrated=True, now=now,
     ) == ()
     assert gate.reference is None
+
+
+def test_session_reset_preserves_per_boot_low_g_high_water_without_replaying_consumed_count():
+    gate = HandlingGate()
+    calibrated(gate, 100.0)
+    assert qualified(gate, _mpu_native_low_g(3, boot_id=1), 102.0) == ()
+    assert gate.reference is None
+    assert gate.last_low_g_seq == 3
+    for i in range(8):
+        assert qualified(gate, _mpu_native_low_g(3, boot_id=1), 102.2 + i * 0.1) == ()
+    assert gate.reference is not None
+
+    # Mac session reset clears last_low_g_seq, but preserves consumed per-boot high-water.
+    gate.reset()
+    assert gate.last_low_g_seq is None
+    for i in range(8):
+        assert qualified(gate, _mpu_native_low_g(3, boot_id=1), 104.0 + i * 0.1) == ()
+        assert len(gate.startup_samples) == (i + 1 if i < 7 else 0)
+    assert gate.reference is not None
+    assert gate.last_low_g_seq == 3
+
+    # After another session reset on the same boot, a genuinely advanced counter still revokes.
+    gate.reset()
+    assert qualified(gate, _mpu_native_low_g(4, boot_id=1), 106.0) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
+    assert gate.last_low_g_seq == 4
+
+    # Backward counter after reset is rejected without lowering the high-water mark.
+    gate.reset()
+    assert qualified(gate, _mpu_native_low_g(2, boot_id=1), 107.0) == ()
+    assert gate.startup_samples == []
+    assert gate.last_low_g_seq is None
+
+    # A genuine MCU reboot (new boot_id) starts cleanly at low_g_seq=0.
+    for i in range(8):
+        assert qualified(gate, _mpu_native_low_g(0, boot_id=2), 108.0 + i * 0.1) == ()
+    assert gate.reference is not None
+    assert gate.last_low_g_seq == 0
+    assert qualified(gate, _mpu_native_low_g(1, boot_id=2), 109.0) == ()
+    assert gate.reference is None
+    assert gate.last_low_g_seq == 1

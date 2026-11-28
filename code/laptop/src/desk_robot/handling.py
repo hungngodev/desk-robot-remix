@@ -187,6 +187,7 @@ class HandlingGate:
     last_low_g_seq: int | None = None  # MPU FF interrupt counter for same boot
     native_low_g_seen: bool = False  # session-sticky telemetry capability
     retired_boot_ids: list[int] = field(default_factory=list)
+    _boot_low_g_high_water: dict[int, int] = field(default_factory=dict)
 
     @staticmethod
     def _native_low_g_snapshot(imu: dict) -> tuple[bool, object, object, object]:
@@ -204,6 +205,11 @@ class HandlingGate:
         An explicit session reset clears the cooldown by default. Telemetry
         gaps, invalid samples and qualification changes must preserve it.
         """
+        if self.last_boot_id is not None and self.last_low_g_seq is not None:
+            self._boot_low_g_high_water[self.last_boot_id] = max(
+                self.last_low_g_seq,
+                self._boot_low_g_high_water.get(self.last_boot_id, 0),
+            )
         last_shake = self.last_shake if preserve_shake_cooldown else -math.inf
         low_g_seq = self.last_low_g_seq if preserve_shake_cooldown else None
         self.startup_samples.clear()
@@ -491,18 +497,22 @@ class HandlingGate:
                 or type(seq) is not int or not 0 <= seq <= 0xffffffff
                 or (irq and not valid) or (irq and seq == 0)
             )
+            prior_seq = self.last_low_g_seq
+            if prior_seq is None and self.last_boot_id is not None:
+                prior_seq = self._boot_low_g_high_water.get(self.last_boot_id)
             new_irq = (
                 not malformed and valid
-                and (self.last_low_g_seq is None and seq > 0
-                     or self.last_low_g_seq is not None
-                     and seq > self.last_low_g_seq)
+                and (prior_seq is None and seq > 0
+                     or prior_seq is not None and seq > prior_seq)
             )
             backward = (
-                not malformed and valid and self.last_low_g_seq is not None
-                and seq < self.last_low_g_seq
+                not malformed and valid and prior_seq is not None
+                and seq < prior_seq
             )
             if not malformed and valid and not backward:
                 self.last_low_g_seq = seq
+                if self.last_boot_id is not None:
+                    self._boot_low_g_high_water[self.last_boot_id] = seq
             if malformed or not valid or irq or new_irq or backward:
                 # A failed FF status read cannot rule out an unseen fall.
                 # Keep acquisition identity and event fence, but revoke

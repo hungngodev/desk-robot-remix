@@ -419,11 +419,22 @@ def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, ob
     return result
 
 
-def _degraded_status(value: object, robot_id: str) -> bool:
+def _status_exit_code(value: object, robot_id: str) -> int:
     if not isinstance(value, dict) or value.get("robot_id") != robot_id:
-        return False
+        return 0
     health = value.get("health")
-    return isinstance(health, dict) and health.get("state") == "degraded"
+    if not isinstance(health, dict):
+        return 0
+    state = health.get("state")
+    if state == "degraded":
+        return 1
+    if state == "unverified":
+        return 2
+    return 0
+
+
+def _degraded_status(value: object, robot_id: str) -> bool:
+    return _status_exit_code(value, robot_id) == 1
 
 
 def _forward_sighup_to_sigterm(_signum: int, _frame: object) -> None:
@@ -475,8 +486,10 @@ def main() -> None:
         else:
             result = asyncio.run(request(args, settings))
         print(json.dumps(result, indent=2))
-        if args.action == "status" and _degraded_status(result, args.robot):
-            p.exit(1)
+        if args.action == "status":
+            exit_code = _status_exit_code(result, args.robot)
+            if exit_code:
+                p.exit(exit_code)
     except httpx.HTTPStatusError as exc:
         if args.action == "status" and exc.response.status_code == 503:
             try:

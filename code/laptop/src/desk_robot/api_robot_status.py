@@ -72,12 +72,18 @@ def _status_health(
 ) -> dict:
     room = _room_status(settings, request)
     blocked = isinstance(host_stop, Mapping) and host_stop.get("blocked") is True
+    if (blocked or body not in ("status_received", "simulated")
+            or room not in ("disabled", "unverified")):
+        state = "degraded"
+    elif room == "unverified":
+        state = "unverified"
+    else:
+        state = "reported"
     health = {
         "head": head,
         "body": body,
         "room_station": room,
-        "state": ("degraded" if blocked or body not in ("status_received", "simulated")
-                  or room not in ("disabled", "unverified") else "reported"),
+        "state": state,
         "physical_acceptance_pass": False,
     }
     if isinstance(host_stop, Mapping) and isinstance(host_stop.get("state"), str):
