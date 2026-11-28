@@ -155,8 +155,8 @@ def test_full_body_power_monitor_and_cutoff_are_wired_to_compiled_profiles():
 def test_bq2407x_output_path_reserves_battery_dropout_headroom(
     variant, effective_min_v, expected
 ):
-    # Pololu #2873 has a 3 V cutoff and 3.4 V restart threshold.
-    # Its raw 2 V operating rating is not its effective minimum.
+    # Pololu #2873 has a 3 V cutoff and startup minimum. Its exact restart
+    # threshold is unverified; 3.4 V above is only a hypothetical test input.
     screen = runpy.run_path(str(SRC / "scripts/power_preflight.py"))[
         "screen_bq2407x_output_path"
     ]
@@ -166,3 +166,28 @@ def test_bq2407x_output_path_reserves_battery_dropout_headroom(
     )
     assert result["regulator_covers_charger_output_on_paper"] is expected
     assert result["charger_and_5v_rail_physically_qualified"] is False
+
+
+def test_sensor_3v3_regulator_has_explicit_vin_and_aggregate_load_contract():
+    """DRX-1775: documentation cannot silently release an untested rail."""
+    register = (HW / "2026-11-16-five-pet-purchase-register.md").read_text()
+    circuit = (HW / "2026-11-17-one-pet-protected-power-circuit.md").read_text()
+    row, = (line for line in register.splitlines()
+            if line.startswith("| `sensor_3v3` |"))
+    assert "VIN from protected regulated 5V logic rail" in row
+    assert "not raw 1S/BQ24075 OUT" in row
+    assert "physical HOLD" in row
+    for token in (
+        "0.700 A of provisional 5V startup headroom",
+        "not a guaranteed VIN peak",
+        "measured worst-case VIN startup/inrush demand",
+        "measured worst-case continuous VIN draw",
+        "docked idle/charge budgets",
+        "do not add it twice",
+        "3.4 V is not a manufacturer-specified threshold",
+        "no automatic rearm after recovery",
+        "Purchase and physical HOLD remain",
+    ):
+        assert token in register
+    assert "VIN from protected regulated 5V logic rail" in circuit
+    assert "physical HOLD until rail sequencing" in circuit

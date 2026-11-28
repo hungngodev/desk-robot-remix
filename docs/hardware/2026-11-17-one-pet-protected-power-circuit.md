@@ -32,11 +32,13 @@ unknown pullups/NTC bypass without independently verifying its pinout.
 | CHARGER_INPUT_CONFIGURATION | EN2 5, EN1 6, ILIM 12 | Set real dock input limit no higher than manufacturer's **1.5A**; source model selection is not a resistor network |
 | CHARGER_TIMERS | TMR 14, ISET 16 | Exact TI calculations, termination and battery allowable charge rating require values and fault verification |
 | SYSTEM_OFF | SYSOFF 15 | Fixed default in schematic with no accidental floating logic or charger-less motor restart |
-| 3V3 expansion | External dedicated regulator | Supply both WROOM I2C muxes and all 3.3V I2C carriers; measure actual pullups across 16 lanes |
+| 3V3 expansion | Pololu #2873 candidate; VIN from protected regulated 5V logic rail | Upstream of actuator cutoff, not raw 1S/BQ24075 OUT or USB VBUS; default 3.3V output, supply both WROOM I2C muxes and all 3.3V I2C carriers; measure actual pullups across 16 lanes; physical HOLD |
 | 5V_MOTORS | Regulated 5V boost branch | Motors and dual MG90S through correct rated fuse, wire and local bulk; not powered from XIAO or raw USB VBUS |
 | 5V_AUDIO | Regulated 5V boost branch | MAX98357A local 0.1uF and 10uF decoupling; 8ohm 2W speaker differential |
 | 5V_XIAO | Boost through Schottky | External 5V to XIAO 5V via Seeed prescribed series diode; keep laptop USB from backfeeding motors |
 | INA226 readout | 0x71 mux channel 4, address 0x40 | WROOM reads signed shunt µV as **raw** pack mA, 3.3V bus, source sequence increments only after a successful acquisition |
+
+**DRX-1775 sensor rail budget (design only):** Follow the [purchase register](2026-11-16-five-pet-purchase-register.md) for the provisional 0.700 A startup headroom and measured worst-case 5V VIN startup/inrush and continuous load. The 3 V cutoff and startup minimum are published; restart hysteresis magnitude is not established. Include the branch once in aggregate 5V and docked load measurements, apply the existing sizing reserve, and keep physical HOLD until rail sequencing, backfeed, sensor-loss latch and deliberate local rearm are proven with actuator power disconnected.
 
 **Schematic omissions that are NOT allowed in production:** exact passive
 values per TI datasheet, charger capacitors and thermal copper area, battery
