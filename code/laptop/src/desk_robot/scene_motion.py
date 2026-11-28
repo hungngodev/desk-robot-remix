@@ -1,6 +1,8 @@
 """Shared exposure-compensated motion scoring for camera consumers."""
 from statistics import median
 
+import numpy as np
+
 
 def _lighting_transform(a: bytes, b: bytes) -> tuple[float, float, bool]:
     count = len(a)
@@ -48,6 +50,10 @@ def scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes:
         raise ValueError("Frame fingerprints must be immutable bytes")
     if len(a) != len(b) or len(a) != 64 * 48:
         raise ValueError("Frame fingerprints have incompatible dimensions")
+    return _exposure_change_mask(a, b, threshold)
+
+
+def _exposure_change_mask(a: bytes, b: bytes, threshold: int) -> bytes:
     count = len(a)
     gain, offset, _ = _lighting_transform(a, b)
     changed = _scene_change_mask(a, b, gain, offset, threshold)
@@ -71,6 +77,64 @@ def scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes:
         return changed
     clipped = _scene_change_mask(a, b, gain, offset, threshold, clamp=True)
     return clipped if clipped.count(0) > changed.count(0) else changed
+
+
+def registered_scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes | None:
+    """Estimate a bounded global integer translation; score only shared pixels.
+
+    Require distinctive, distributed gradient agreement rather than fitting a
+    single moving foreground object. Ambiguous or unsupported shifts return
+    None so the caller retains its ordinary exposure-only change mask. This is
+    an image registration heuristic, not calibrated camera pose or optical flow.
+    """
+    if type(threshold) is not int or not 1 <= threshold <= 255:
+        raise ValueError("Scene change threshold must be an integer in [1, 255]")
+    if type(a) is not bytes or type(b) is not bytes:
+        raise ValueError("Frame fingerprints must be immutable bytes")
+    if len(a) != 64 * 48 or len(b) != 64 * 48:
+        raise ValueError("Frame fingerprints have incompatible dimensions")
+    before = np.frombuffer(a, dtype=np.uint8).reshape(48, 64).astype(np.int16)
+    after = np.frombuffer(b, dtype=np.uint8).reshape(48, 64).astype(np.int16)
+    radius = 6
+    # Sample the same interior support for every shift. Gradient signs are
+    # insensitive to additive exposure and positive gain, unlike raw pixels.
+    yy, xx = np.mgrid[radius:48 - radius - 1:3, radius:64 - radius - 1:3]
+    y, x = yy.ravel(), xx.ravel()
+    dy, dx = np.mgrid[-radius:radius + 1, -radius:radius + 1]
+    dy, dx = dy.ravel(), dx.ravel()
+    by, bx = y[None, :] + dy[:, None], x[None, :] + dx[:, None]
+    old = np.concatenate((before[y, x + 1] - before[y, x], before[y + 1, x] - before[y, x]))
+    new = np.concatenate((after[by, bx + 1] - after[by, bx],
+                          after[by + 1, bx] - after[by, bx]), axis=1)
+    textured = np.abs(old) >= 12
+    matches = (np.sign(new) == np.sign(old)) & (np.abs(new) >= 6)
+    quadrant_scores = []
+    for top in (False, True):
+        for left in (False, True):
+            region = ((y < 24) == top) & ((x < 32) == left)
+            active = np.tile(region, 2) & textured
+            if np.count_nonzero(active) < 16:
+                return None
+            quadrant_scores.append(matches[:, active].mean(axis=1))
+    scores = np.asarray(quadrant_scores).min(axis=0)
+    best = int(np.argmax(scores))
+    zero = len(scores) // 2
+    # A nonzero winner needs support everywhere, clear improvement over no
+    # motion, and separation from alternatives (e.g. repetitive stripes).
+    if (best == zero or scores[best] < 0.85 or scores[best] - scores[zero] < 0.15
+            or scores[best] - np.partition(scores, -2)[-2] < 0.08):
+        return None
+    sy, sx = int(dy[best]), int(dx[best])
+    y0, y1 = max(0, -sy), min(48, 48 - sy)
+    x0, x1 = max(0, -sx), min(64, 64 - sx)
+    overlap_a = before[y0:y1, x0:x1].astype(np.uint8).tobytes()
+    overlap_b = after[y0 + sy:y1 + sy, x0 + sx:x1 + sx].astype(np.uint8).tobytes()
+    residual = _exposure_change_mask(overlap_a, overlap_b, threshold)
+    # Keep residuals in baseline coordinates for signed persistence. Newly
+    # exposed borders lack corresponding evidence and cannot prove motion.
+    result = np.zeros((48, 64), dtype=np.uint8)
+    result[y0:y1, x0:x1] = np.frombuffer(residual, dtype=np.uint8).reshape(y1 - y0, x1 - x0)
+    return result.tobytes()
 
 
 def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:

@@ -453,6 +453,23 @@ Status: November 10 2026. **Code committed, real XIAO mic/camera and physical au
 
 ### No human speaks: proactive camera observation
 
+**B024 / DRX-1774:** The proactive `VisualChangeGate` attempts integer image
+registration within six pixels in either axis at 64 × 48 resolution only after
+an exposure-corrected change exceeds its candidate threshold. Distributed
+signed gradients must agree across all four quadrants with a unique winner;
+residual foreground changes in the shared image area still require persistent
+signed masks. Unmatched borders cannot establish movement. A fully compensated
+shift refreshes the baseline, while small residual changes retain it. The
+existing NumPy dependency provides bounded array operations; no second camera
+pipeline or new package is added. Translation registration is a standard
+image alignment approach (see [OpenCV motion analysis](https://docs.opencv.org/4.x/d7/df3/group__imgproc__motion.html));
+no OpenCV source is copied or imported by this gate. Ambiguous or unsupported
+shifts retain exposure-only scoring. Rotation, parallax, large displacements,
+low texture, rolling shutter and real camera timing remain unqualified. This
+only affects optional proactive VLM admission, not explicit vision, continuous
+capture, consent, VAD fences, or independent WROOM safety. Physical HOLD stays
+in force until actual replay and bench measurements qualify the thresholds.
+
 * The pet's operator-enabled observation loop uses the existing 2-confirmation `VisualChangeGate` and expensive 2-photo VLM scene comparison. Only actual semantic change may become memory or a short spontaneous comment.
 * When the hub is attached to hardware, camera sample cadence defaults to about 0.3 FPS idle and speeds up after actual movement/sensor events. A valid CAP1188 pad, touch press, nearby object, APDS9960 wave, magnetic dial or WROOM safety event can request an immediate new frame.
 * Only one `_vision_lock` exists across all five robots. Human speech cancels old background inference and gets priority over a queued unsolicited comment. Per-robot voice turn and visual query epochs reject a late image model answer after another human utterance or visual question supersedes it. The Mac's existing cooldown and single speaker lease prevent five overlapping unsolicited audio sessions.

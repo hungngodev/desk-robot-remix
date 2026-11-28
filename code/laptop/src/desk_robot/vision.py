@@ -16,7 +16,7 @@ from typing import Callable, Protocol, TypeGuard
 
 from PIL import Image
 
-from .scene_motion import consistent_change_mask, scene_change_mask
+from .scene_motion import consistent_change_mask, registered_scene_change_mask, scene_change_mask
 
 
 def valid_visual_text(value: object, min_chars: int, max_chars: int) -> TypeGuard[str]:
@@ -222,8 +222,9 @@ class VisualChangeGate:
     """Cheap bounded camera change filter before a local VLM, not object recognition.
 
     Uses persistent localized changes for a one-time visual-semantic comparison.
-    Thresholds are candidates; camera movement, lighting and subtle small-object
-    change require measured calibration.
+    Compensates confident bounded image translations before signed persistence.
+    Thresholds remain candidates; physical camera motion, lighting and subtle
+    small-object change require measured calibration.
     """
 
     def __init__(self, *, min_changed_fraction: float = 0.008, confirmations: int = 2):
@@ -287,6 +288,11 @@ class VisualChangeGate:
         # exposure/lighting drift does not justify another expensive VLM
         # comparison for every camera in a five-pet fleet.
         mask = scene_change_mask(self._pixel_baseline, current, threshold=18)
+        registered = None
+        if (len(mask) - mask.count(0)) / len(mask) >= self.min_changed_fraction:
+            registered = registered_scene_change_mask(self._pixel_baseline, current, threshold=18)
+            if registered is not None:
+                mask = registered
         changed = len(mask) - mask.count(0)
         if changed / len(mask) < self.min_changed_fraction:
             self._hits = 0
@@ -295,7 +301,9 @@ class VisualChangeGate:
             # Refresh that baseline so the next real change is not compared
             # against the original dark exposure. Keep textured baselines
             # fixed to retain sensitivity to accumulated small changes.
-            if (current != self._pixel_baseline
+            # Rebase after a fully compensated translation, but preserve small
+            # residuals so an accumulating foreground change can still trigger.
+            if (registered is not None and changed == 0) or (current != self._pixel_baseline
                     and self._pixel_baseline.count(self._pixel_baseline[0]) == len(current)
                     and current.count(current[0]) == len(current)):
                 self._pixel_baseline, self._baseline = current, jpeg
