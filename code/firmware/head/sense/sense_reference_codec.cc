@@ -222,11 +222,16 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         // callback from before the current START cannot poison its window.
         const int64_t failed_read_us = esp_timer_get_time();
         {
-            std::lock_guard<std::mutex> lock(bench_mutex_);
-            bench_window_.invalidate_read(failed_read_us);
-            if (bench_window_.failed()) {
-                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-                speaker_activity_.EndWindow(bench_speaker_at_start_);
+            std::unique_lock<std::mutex> lock(bench_mutex_, std::try_to_lock);
+            if (!lock.owns_lock()) {
+                bench_contention_fault_.store(true, std::memory_order_release);
+            } else {
+                ApplyPendingBenchContentionFaultLocked(failed_read_us);
+                bench_window_.invalidate_read(failed_read_us);
+                if (bench_window_.failed()) {
+                    std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                    speaker_activity_.EndWindow(bench_speaker_at_start_);
+                }
             }
         }
 #endif
@@ -291,35 +296,40 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     {
         // One optional RAM-only calibration listener of ALREADY sampled mic
-        // and reference. No second PDM/I2S reader or audio network service.
-        std::lock_guard<std::mutex> lock(bench_mutex_);
-        if (!microphone_privacy_muted_.load(std::memory_order_acquire) &&
-            privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
-            const bool already_ready = bench_window_.ready();
-            const bool had_frames = bench_window_.frames_received() != 0;
-            if (rx_overflow_detected) {
-                bench_window_.invalidate_read(capture_end_us);
-            } else {
-                bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
-                                    static_cast<uint32_t>(frames), capture_end_us,
-                                    reference_ready);
-            }
-            if (!had_frames && bench_window_.frames_received() != 0) {
-                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-                speaker_activity_.FenceWindowStart(
-                    bench_speaker_at_start_, bench_window_.first_sample_us());
-            }
-            // Snapshot activity at the final MIC callback. Later speaker
-            // writes after raw capture completion cannot qualify this window.
-            if (!already_ready && bench_window_.ready()) {
-                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-                bench_speaker_activity_in_window_ =
-                    speaker_activity_.AdvancedSince(
-                        bench_speaker_at_start_, bench_window_.last_sample_us());
-                speaker_activity_.EndWindow(bench_speaker_at_start_);
-            } else if (bench_window_.failed()) {
-                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-                speaker_activity_.EndWindow(bench_speaker_at_start_);
+        // and reference. Never block realtime PDM audio on bench_mutex_.
+        std::unique_lock<std::mutex> lock(bench_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            bench_contention_fault_.store(true, std::memory_order_release);
+        } else {
+            ApplyPendingBenchContentionFaultLocked(capture_end_us);
+            if (!microphone_privacy_muted_.load(std::memory_order_acquire) &&
+                privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+                const bool already_ready = bench_window_.ready();
+                const bool had_frames = bench_window_.frames_received() != 0;
+                if (rx_overflow_detected) {
+                    bench_window_.invalidate_read(capture_end_us);
+                } else {
+                    bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
+                                        static_cast<uint32_t>(frames), capture_end_us,
+                                        reference_ready);
+                }
+                if (!had_frames && bench_window_.frames_received() != 0) {
+                    std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                    speaker_activity_.FenceWindowStart(
+                        bench_speaker_at_start_, bench_window_.first_sample_us());
+                }
+                // Snapshot activity at the final MIC callback. Later speaker
+                // writes after raw capture completion cannot qualify this window.
+                if (!already_ready && bench_window_.ready()) {
+                    std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                    bench_speaker_activity_in_window_ =
+                        speaker_activity_.AdvancedSince(
+                            bench_speaker_at_start_, bench_window_.last_sample_us());
+                    speaker_activity_.EndWindow(bench_speaker_at_start_);
+                } else if (bench_window_.failed()) {
+                    std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                    speaker_activity_.EndWindow(bench_speaker_at_start_);
+                }
             }
         }
     }
@@ -460,15 +470,26 @@ void SenseReferenceCodec::ReleaseBenchPcmCapture(int16_t* data) {
     heap_caps_free(data);
 }
 
+void SenseReferenceCodec::ApplyPendingBenchContentionFaultLocked(int64_t now_us) {
+    if (!bench_contention_fault_.exchange(false, std::memory_order_acq_rel)) return;
+    bench_window_.invalidate_read(now_us);
+    if (bench_window_.failed()) {
+        std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+        speaker_activity_.EndWindow(bench_speaker_at_start_);
+    }
+}
+
 void SenseReferenceCodec::BenchPcmExpiry(void* context) {
     auto* codec = static_cast<SenseReferenceCodec*>(context);
     int16_t* expired = nullptr;
     {
         std::lock_guard<std::mutex> lock(codec->bench_mutex_);
+        const int64_t now_us = esp_timer_get_time();
+        codec->ApplyPendingBenchContentionFaultLocked(now_us);
         // Check expiry and transfer ownership in ONE critical section.
         // A delayed old callback must not erase a new capture afterward.
         if (codec->bench_started_us_ == 0 ||
-            esp_timer_get_time() - codec->bench_started_us_ < 12'000'000)
+            now_us - codec->bench_started_us_ < 12'000'000)
             return;
         expired = codec->bench_window_.discard();
         {
@@ -554,6 +575,7 @@ bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) 
         return release_unpublished(bench_window_.discard());
     }
     bench_speaker_activity_in_window_ = false;
+    bench_contention_fault_.store(false, std::memory_order_release);
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
     bench_start_pending_ = false;
     return true;
@@ -562,6 +584,7 @@ bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) 
 SenseReferenceCodec::BenchCaptureProgress
 SenseReferenceCodec::GetBenchPcmProgress() {
     std::lock_guard<std::mutex> lock(bench_mutex_);
+    ApplyPendingBenchContentionFaultLocked(esp_timer_get_time());
     return {
         bench_window_.occupied() && !bench_window_.ready() && !bench_window_.failed(),
         bench_window_.ready(),
@@ -575,6 +598,7 @@ SenseReferenceCodec::GetBenchPcmProgress() {
 desk_robot::SensePcmWindow::Complete SenseReferenceCodec::TakeBenchPcmCapture(
     uint64_t expected_generation) {
     std::lock_guard<std::mutex> lock(bench_mutex_);
+    ApplyPendingBenchContentionFaultLocked(esp_timer_get_time());
     if (bench_capture_generation_.load(std::memory_order_acquire) != expected_generation ||
         microphone_privacy_muted_.load(std::memory_order_acquire))
         return {};
@@ -594,6 +618,7 @@ void SenseReferenceCodec::AbortBenchPcmCapture(bool revoke_consent) {
     int16_t* data = nullptr;
     {
         std::lock_guard<std::mutex> lock(bench_mutex_);
+        bench_contention_fault_.store(false, std::memory_order_release);
         if (revoke_consent) bench_consent_.Revoke();
         // Revoke ownership before freeing the in-codec allocation.
         // A moved HTTP buffer stays owned by the worker but its generation

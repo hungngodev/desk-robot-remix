@@ -154,6 +154,9 @@ class Settings(BaseModel):
     _voice_memory_consent_started_at: float = PrivateAttr(default=0.0)
     _transcript_consent_started_at: float = PrivateAttr(default=0.0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
+    _room_revocation_listeners: list[ReferenceType[Callable[[Settings], None]]] = PrivateAttr(
+        default_factory=list,
+    )
     _fleet_sharing_consent_generation: int = PrivateAttr(default=0)
     _fleet_social_autonomy_generation: int = PrivateAttr(default=0)
     _fleet_auto_fanout_consent_generation: int = PrivateAttr(default=0)
@@ -189,6 +192,7 @@ class Settings(BaseModel):
     room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     fleet_text_auto_fanout_enabled: StrictBool = True  # Keep broadcast unless selective-only.
+    dock_station_markers: dict[int, int] = Field(default_factory=dict)
     vision_weights_sha256: str | None = None
     max_job_seconds: float = Field(default=45, strict=True, ge=1, le=120)
     trials_file: Path = Path("../../docs/records/physical-trials.csv")
@@ -274,6 +278,36 @@ class Settings(BaseModel):
         markers = [r.dock_marker_id for r in self.robots if r.dock_marker_id is not None]
         if len(set(markers)) != len(markers):
             raise ValueError("Each physical dock marker may be assigned to only one robot")
+        if self.dock_station_markers:
+            for beacon, marker in self.dock_station_markers.items():
+                if (
+                    type(beacon) is not int or not 1 <= beacon <= 5
+                    or type(marker) is not int or not 0 <= marker <= 586
+                ):
+                    raise ValueError("Authoritative dock station map requires 1..5 to 0..586")
+            if len(set(self.dock_station_markers.values())) != len(self.dock_station_markers):
+                raise ValueError("Authoritative dock station markers must be one-to-one")
+            marker_to_beacon = {m: b for b, m in self.dock_station_markers.items()}
+            for robot in self.robots:
+                if robot.dock_beacon_id is not None:
+                    if robot.dock_beacon_id not in self.dock_station_markers:
+                        raise ValueError(
+                            "Assigned dock_beacon_id missing from dock_station_markers"
+                        )
+                    if (
+                        robot.dock_marker_id is not None
+                        and robot.dock_marker_id != self.dock_station_markers[robot.dock_beacon_id]
+                    ):
+                        raise ValueError(
+                            "Robot dock_marker_id does not match assigned dock station beacon"
+                        )
+                if (
+                    robot.dock_marker_id is not None
+                    and marker_to_beacon.get(robot.dock_marker_id) != robot.dock_beacon_id
+                ):
+                    raise ValueError(
+                        "Robot dock_marker_id belongs to a different dock station beacon"
+                    )
         if self.vision_weights_sha256 is not None:
             digest = self.vision_weights_sha256
             if (
@@ -348,6 +382,10 @@ class Settings(BaseModel):
             # Room-station text from a previous grant cannot be emitted by a
             # late Ollama plan if the operator has already opted out.
             self._room_station_consent_generation += 1
+            for listener_ref in tuple(self._room_revocation_listeners):
+                listener = listener_ref()
+                if listener is not None:
+                    listener(self)
 
         if transcript_was_granted and not self.voice_transcript_memory_enabled:
             # Immediate regrant does not revive an in-flight transcript write.

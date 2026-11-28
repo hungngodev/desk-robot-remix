@@ -316,3 +316,136 @@ def test_legacy_pose_normal_runtime_startup_and_restart(tmp_path, tokens, monkey
         ("GET", "/api/pose"), ("GET", "/api/status"), ("GET", "/api/pose"),
         ("GET", "/api/status"), ("POST", "/api/command"),
     ] * 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seed", range(12))
+async def test_seeded_pose_and_camera_replay_permutations_stay_order_safe(
+    settings, tokens, seed,
+):
+    import random
+
+    robot = settings.robots[0]
+    base_packet = {
+        "robot_id": robot.id, "v": 1, "head_boot": 77, "body_boot": 8,
+        "origin": 3, "x_mm": 10, "y_mm": 20, "yaw_mrad": 100, "quality": "valid",
+    }
+    base_now = time.monotonic()
+    # Permute non-origin-retiring faults first, then origin-retiring replay/reset
+    # histories alongside duplicate/retired camera events: none may corrupt
+    # accepted continuity or admit stale receipts on the compromised origin.
+    rng = random.Random(seed)
+    phase1_events = [
+        ("pose", "foreign", {**base_packet, "robot_id": "foreign-pet", "seq": 3,
+                             "sample_us": 1_040_000}),
+        ("pose", "malformed", {**base_packet, "seq": "bad", "sample_us": 1_040_000}),
+        ("cam", "dup_cam", (77, 1, 10_000)),
+        ("cam", "retired_boot", (76, 9, 90_000)),
+    ]
+    rng.shuffle(phase1_events)
+    phase2_events = [
+        ("pose", "stale", {**base_packet, "seq": 2, "sample_us": 1_020_000}),
+        ("pose", "duplicate", {**base_packet, "seq": 4, "sample_us": 1_060_000}),
+        ("pose", "clock_reset", {**base_packet, "seq": 6, "sample_us": 900_000}),
+        ("pose", "advancing_same_origin", {**base_packet, "seq": 5, "sample_us": 1_080_000}),
+        ("cam", "dup_cam", (77, 1, 10_000)),
+    ]
+    rng.shuffle(phase2_events)
+
+    pose_queue = [
+        {**base_packet, "seq": 1, "sample_us": 1_000_000},
+        {**base_packet, "seq": 2, "sample_us": 1_020_000},
+    ]
+
+    def handler(request):
+        assert request.method == "GET" and request.url.path == "/api/pose"
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        return httpx.Response(200, json=pose_queue.pop(0))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(robot, client)
+
+        async def forbidden_command(_command):
+            pytest.fail("Replay permutation must never emit body command")
+
+        head.command = forbidden_command
+        await head.pose_status()
+        baseline = await head.pose_status()
+        assert head.pose_fence.current(time.monotonic()).seq == baseline.seq
+        head._stream_connected = True
+        head._stream_generation = 1
+        head._stream_latest = JPEG
+        head._stream_received_at = base_now
+        head._stream_version = 1
+        head._retired_camera_boots.add(76)
+        head._accept_camera_identity((77, 1, 10_000))
+
+        # 1. Shuffled non-origin-retiring pose/camera faults fail closed.
+        for channel, _, payload in phase1_events:
+            if channel == "pose":
+                pose_queue.append(payload)
+                with pytest.raises(HeadError):
+                    await head.pose_status()
+                assert head.pose_fence.current(time.monotonic()) is None
+                assert head.pose_fence.needs_reanchor is True
+            else:
+                with pytest.raises(HeadError):
+                    head._accept_camera_identity(payload)
+                assert head._last_camera == (77, 1, 10_000)
+
+        # Two fresh monotonic pose samples re-establish continuity on (8, 3, 77).
+        pose_queue.append({**base_packet, "seq": 3, "sample_us": 1_040_000})
+        await head.pose_status()
+        assert head.pose_fence.current(time.monotonic()) is None
+        pose_queue.append({**base_packet, "seq": 4, "sample_us": 1_060_000})
+        re_established = await head.pose_status()
+        assert re_established.seq == 4
+        assert head.pose_fence.current(time.monotonic()).seq == 4
+
+        # 2. Shuffled origin-retiring replay/reset permutations taint (8, 3, 77).
+        origin_tainted = False
+        for channel, kind, payload in phase2_events:
+            if channel == "pose":
+                pose_queue.append(payload)
+                if kind == "advancing_same_origin" and not origin_tainted:
+                    advanced = await head.pose_status()
+                    assert advanced.seq == 5
+                elif kind == "advancing_same_origin":
+                    with pytest.raises(HeadError, match="Retired or failed"):
+                        await head.pose_status()
+                    assert head.pose_fence.current(time.monotonic()) is None
+                else:
+                    with pytest.raises(HeadError):
+                        await head.pose_status()
+                    origin_tainted = True
+                    assert head.pose_fence.current(time.monotonic()) is None
+            else:
+                with pytest.raises(HeadError):
+                    head._accept_camera_identity(payload)
+                assert head._last_camera == (77, 1, 10_000)
+
+        assert origin_tainted
+        pose_queue.append({**base_packet, "seq": 10, "sample_us": 1_120_000})
+        with pytest.raises(HeadError, match="Retired or failed body/head pose origin"):
+            await head.pose_status()
+        assert head.pose_fence.current(time.monotonic()) is None
+
+        # 3. Recovery requires a fresh continuous body origin and newer camera sequence.
+        new_origin = {**base_packet, "body_boot": 9, "origin": 1}
+        pose_queue.append({**new_origin, "seq": 1, "sample_us": 10_000})
+        with pytest.raises(HeadError, match="re-anchor"):
+            await head.pose_status()
+        assert head.pose_fence.current(time.monotonic()) is None
+        pose_queue.append({**new_origin, "seq": 2, "sample_us": 30_000})
+        await head.pose_status()
+        assert head.pose_fence.current(time.monotonic()) is None
+        pose_queue.append({**new_origin, "seq": 3, "sample_us": 50_000})
+        recovered = await head.pose_status()
+        assert recovered.body_boot == 9 and recovered.seq == 3
+        assert head.pose_fence.current(time.monotonic()).seq == 3
+        assert head.pose_fence.needs_reanchor is True
+        head._stream_version = 2
+        head._stream_received_at = time.monotonic()
+        head._accept_camera_identity((77, 2, 20_000))
+        frame = await head.snapshot_for_dock()
+        assert frame[0] == JPEG

@@ -102,6 +102,14 @@ def _validate_run_manifest(
         recorded_csv_sha = manifest.get("trials_csv_sha256")
         if not isinstance(recorded_csv_sha, str) or recorded_csv_sha.strip() != csv_sha256:
             raise ValueError("A5 run manifest trials_csv_sha256 disagrees with trial CSV")
+    if "elapsed_ms" in manifest:
+        elapsed = manifest["elapsed_ms"]
+        if (
+            type(elapsed) not in (int, float)
+            or not math.isfinite(elapsed)
+            or not 0 <= elapsed <= 86_400_000
+        ):
+            raise ValueError("A5 run manifest elapsed_ms must be finite and nonnegative")
     return {
         "run_id": manifest["run_id"].strip(),
         "commit_sha": manifest["commit_sha"].strip(),

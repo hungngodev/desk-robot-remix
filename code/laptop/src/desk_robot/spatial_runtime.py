@@ -441,6 +441,12 @@ class SpatialRuntime:
                     cx, cy = target_res.confirmed_floor_mm
                     chosen_goal = (cx // CELL_MM, cy // CELL_MM)
                 elif state.viewpoints:
+                    if self.settings.mode == "hardware":
+                        return (
+                            RouteResult("rejected", "camera_stationarity_unproven"),
+                            target_res,
+                            None,
+                        )
                     route_req = RouteRequest(
                         robot_id=robot_id,
                         origin_id=state.origin_id,

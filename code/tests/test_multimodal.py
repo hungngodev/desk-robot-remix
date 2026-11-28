@@ -3583,9 +3583,11 @@ def test_room_cache_does_not_cross_revoke_and_regrant():
         hub.interaction_timeline("robot-02", now + 0.1)
     )
 
-    # Revocation must immediately hide the old sample. Regrant without a
-    # new USB measurement must not resurrect it on a different pet.
+    # Revocation must immediately purge the cached sample so neither
+    # shared_room nor interaction_timeline can leak it across opt-out/regrant.
     policy.room_station_context_enabled = False
+    assert hub.shared_room is None
+    assert hub._shared_room is None
     assert "room_station" not in [
         event["channel"] for event in hub.interaction_timeline(
             "robot-01", now + 0.2
@@ -3597,13 +3599,13 @@ def test_room_cache_does_not_cross_revoke_and_regrant():
     ))
     policy.room_station_consent_generation = 8
     policy.room_station_context_enabled = True
+    assert hub.shared_room is None
     for robot_id in ("robot-01", "robot-02"):
         assert "room_station" not in [
             event["channel"] for event in hub.interaction_timeline(
                 robot_id, now + 0.3
             )
         ]
-    assert hub.shared_room == first
 
     second = RoomObservation(
         seq=3, at_ms=300, received_at=now + 0.4,

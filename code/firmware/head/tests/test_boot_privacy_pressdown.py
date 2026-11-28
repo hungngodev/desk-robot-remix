@@ -221,6 +221,7 @@ struct SenseReferenceCodec {
     std::atomic<bool> microphone_privacy_muted_{false};
     std::atomic<uint32_t> microphone_privacy_epoch_{7};
     std::atomic<uint64_t> bench_capture_generation_{0};
+    std::atomic<bool> bench_contention_fault_{false};
     desk_robot::FreshBenchPcmConsent bench_consent_;
     desk_robot::SensePcmWindow bench_window_;
     bool bench_start_pending_ = false;
@@ -232,6 +233,10 @@ struct SenseReferenceCodec {
         int BeginWindow() { return 1; }
         void EndWindow(int) {}
     } speaker_activity_;
+    void ApplyPendingBenchContentionFaultLocked(int64_t now_us) {
+        if (!bench_contention_fault_.exchange(false, std::memory_order_acq_rel)) return;
+        bench_window_.invalidate_read(now_us);
+    }
     static void BenchPcmExpiry(void*) {}
     static void ReleaseBenchPcmCapture(int16_t* p) { std::free(p); }
     void GrantBenchPcmConsent();
@@ -283,6 +288,165 @@ int main() {
     cpp = tmp_path / "bench_start.cc"
     exe = tmp_path / "bench_start"
     cpp.write_text(preamble + start + abort + exercise, encoding="utf-8")
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
+         "-I", str(head / "sense"), str(cpp), "-o", str(exe)],
+        check=True, timeout=25,
+    )
+    subprocess.run([str(exe)], check=True, timeout=5)
+
+
+def test_read_never_blocks_on_bench_mutex_contention(tmp_path):
+    """Real SenseReferenceCodec::Read must skip blocking bench_mutex_ and fail capture."""
+    compiler = shutil.which("c++")
+    if not compiler:
+        pytest.skip("native C++ compiler unavailable")
+    head = SOURCE.parents[1]
+    codec = (head / "sense/sense_reference_codec.cc").read_text()
+    read_fn = codec.split("int SenseReferenceCodec::Read(", 1)[1]
+    read_fn = "int SenseReferenceCodec::Read(" + read_fn.split(
+        "int SenseReferenceCodec::Write(", 1
+    )[0]
+    bench_methods = codec.split(
+        "void SenseReferenceCodec::ApplyPendingBenchContentionFaultLocked(", 1
+    )[1]
+    bench_methods = (
+        "void SenseReferenceCodec::ApplyPendingBenchContentionFaultLocked("
+        + bench_methods.split("desk_robot::SensePcmWindow::Complete", 1)[0]
+    )
+    cpp = tmp_path / "bench_contention.cc"
+    exe = tmp_path / "bench_contention"
+    cpp.write_text(
+        r'''
+#define CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED 1
+#define AUDIO_INPUT_SAMPLE_RATE 16000
+#define AUDIO_OUTPUT_SAMPLE_RATE 32000
+#include "sense_pcm_window.h"
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
+static std::atomic<int64_t> now_us{100};
+constexpr int ESP_OK = 0, MALLOC_CAP_SPIRAM = 1, MALLOC_CAP_8BIT = 2;
+using esp_timer_handle_t = void*;
+struct esp_timer_create_args_t {
+    void (*callback)(void*);
+    void* arg;
+    const char* name;
+};
+int64_t esp_timer_get_time() { return now_us.load(std::memory_order_acquire); }
+int esp_timer_create(const esp_timer_create_args_t*, esp_timer_handle_t* handle) {
+    *handle = reinterpret_cast<void*>(1);
+    return ESP_OK;
+}
+int esp_timer_stop(esp_timer_handle_t) { return ESP_OK; }
+int esp_timer_start_once(esp_timer_handle_t, int64_t) { return ESP_OK; }
+void* heap_caps_malloc(size_t n, int) { return std::malloc(n); }
+void heap_caps_free(void* p) { std::free(p); }
+struct NoAudioCodecSimplexPdm {
+    static int Read(int16_t* dst, int frames) {
+        std::fill_n(dst, frames, 7);
+        return frames;
+    }
+};
+struct SenseReferenceCodec {
+    static constexpr uint32_t kMicRate = 16000;
+    static constexpr int kMaxReadFrames = 2048;
+    int input_sample_rate_ = kMicRate;
+    std::atomic<bool> microphone_privacy_muted_{false};
+    std::atomic<uint32_t> microphone_privacy_epoch_{7};
+    std::atomic<uint64_t> bench_capture_generation_{0};
+    std::atomic<uint32_t> rx_queue_overflows_{0};
+    std::atomic<bool> bench_contention_fault_{false};
+    uint32_t observed_rx_queue_overflows_ = 0;
+    uint32_t microphone_frames_read_ = 0;
+    uint32_t short_input_reads_ = 0;
+    bool reference_integrity_failed_ = false;
+    std::mutex input_read_mutex_, reference_mutex_, bench_mutex_;
+    std::array<int16_t, kMaxReadFrames> microphone_frame_{};
+    std::array<int16_t, kMaxReadFrames> reference_frame_{};
+    desk_robot::FreshBenchPcmConsent bench_consent_;
+    desk_robot::SensePcmWindow bench_window_;
+    bool bench_start_pending_ = false;
+    bool bench_transfer_active_ = false;
+    bool bench_speaker_activity_in_window_ = false;
+    esp_timer_handle_t bench_expiry_timer_ = nullptr;
+    int64_t bench_started_us_ = 0;
+    int bench_speaker_at_start_ = 0;
+    struct SpeakerActivity {
+        int BeginWindow() { return 1; }
+        void FenceWindowStart(int, int64_t) {}
+        bool AdvancedSince(int, int64_t) const { return false; }
+        void EndWindow(int) {}
+    } speaker_activity_;
+    struct BenchCaptureProgress {
+        bool capturing;
+        bool ready;
+        bool failed;
+        uint32_t frames;
+        uint64_t generation;
+        bool speaker_activity_in_window;
+    };
+    void FillSilenceLocked(int64_t) {}
+    bool ReadReferenceLocked(int16_t* dst, int frames, int64_t) {
+        std::fill_n(dst, frames, 0);
+        return true;
+    }
+    static void ReleaseBenchPcmCapture(int16_t* p);
+    void ApplyPendingBenchContentionFaultLocked(int64_t now_us);
+    static void BenchPcmExpiry(void* context);
+    void GrantBenchPcmConsent();
+    bool BeginBenchPcmCapture(uint32_t expected_privacy_epoch);
+    BenchCaptureProgress GetBenchPcmProgress();
+    int Read(int16_t* dest, int samples);
+};
+void SenseReferenceCodec::ReleaseBenchPcmCapture(int16_t* p) { std::free(p); }
+'''
+        + read_fn
+        + "\n"
+        + bench_methods
+        + r'''
+int main() {
+    SenseReferenceCodec codec;
+    codec.GrantBenchPcmConsent();
+    assert(codec.BeginBenchPcmCapture(7));
+    std::atomic<bool> holder_locked{false};
+    std::atomic<bool> release_holder{false};
+    std::thread holder([&] {
+        std::lock_guard<std::mutex> lock(codec.bench_mutex_);
+        holder_locked.store(true, std::memory_order_release);
+        while (!release_holder.load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    });
+    while (!holder_locked.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    std::array<int16_t, 320> pcm{};
+    const auto t0 = std::chrono::steady_clock::now();
+    const int n = codec.Read(pcm.data(), static_cast<int>(pcm.size()));
+    const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    assert(n == static_cast<int>(pcm.size()));
+    assert(elapsed_ms < 50);
+    assert(pcm[0] == 7);
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    release_holder.store(true, std::memory_order_release);
+    holder.join();
+    auto progress = codec.GetBenchPcmProgress();
+    assert(progress.failed);
+    assert(!progress.ready);
+    assert(!progress.capturing);
+}
+''',
+        encoding="utf-8",
+    )
     subprocess.run(
         [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
          "-I", str(head / "sense"), str(cpp), "-o", str(exe)],

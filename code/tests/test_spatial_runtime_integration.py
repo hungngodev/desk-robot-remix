@@ -1735,3 +1735,41 @@ async def test_localized_pose_cell_heading_accepts_valid_yaw_tolerance_boundarie
         ) == ((2, 2), 0)
     finally:
         await rt.close()
+
+
+async def test_hardware_object_search_rejects_before_any_viewpoint_drive(settings, tmp_path):
+    from desk_robot.object_search import SearchViewpoint
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    rt = await _setup_hardware_pose_runtime(
+        settings, tmp_path, head, PlanarTransform("map", "odom", 0.0, 0.0, 0.0),
+    )
+    settings.voice_memory_tools_enabled = True
+    settings.robots[0].object_detector_qualified = True
+    try:
+        st = rt.spatial.state("robot-01")
+        rt.spatial.register_viewpoint(
+            "robot-01",
+            SearchViewpoint(
+                robot_id="robot-01",
+                origin_id=st.origin_id,
+                epoch=st.epoch,
+                anchor_id=st.anchor_id,
+                calibration_id=st.calibration_id,
+                viewpoint_id="vp-cup-1",
+                cell=(3, 2),
+                heading=0,
+                priority=1,
+                previously_reachable=True,
+                inspected_in_request=False,
+            ),
+        )
+        from desk_robot.operations import OperationError
+
+        await rt.coordinator.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="camera_stationarity_unproven"):
+            rt.coordinator.navigate("robot-01", start=(2, 2), heading=0, label="cup")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await rt.close()

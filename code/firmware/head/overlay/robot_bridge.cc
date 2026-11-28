@@ -121,6 +121,14 @@ bool StatusValid(cJSON* json) {
     for (const char* name : {"lift", "grip", "lift_target", "grip_target"})
         if (!integer(get(servo, name), 0, 180)) return false;
     if (!cJSON_IsBool(get(servo, "attached"))) return false;
+    auto settled = get(servo, "settled");
+    if (settled) {
+        if (!cJSON_IsBool(settled)) return false;
+        const bool expected_settled =
+            (get(servo, "lift")->valueint == get(servo, "lift_target")->valueint &&
+             get(servo, "grip")->valueint == get(servo, "grip_target")->valueint);
+        if (cJSON_IsTrue(settled) != expected_settled) return false;
+    }
     auto position_source = get(servo, "position_source");
     if (!cJSON_IsString(position_source) || !position_source->valuestring ||
         std::strcmp(position_source->valuestring, "commanded") != 0) return false;

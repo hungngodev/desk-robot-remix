@@ -1128,10 +1128,11 @@ void guarded_reboot_fault_matrix() {
             LineReceiver remote, local(true);
             CHECK(frame(body, local, "rearm\n", start).at(0) == "OK rearm");
             CHECK(send(body, "arm", start) == "OK arm");
-            CHECK(send(body, "lift 120", start) == "OK lift angle=120");
-            CHECK(send(body, "grip 60", start) == "OK grip angle=60");
-            if (moving)
+            if (moving) {
               CHECK(send(body, "drive 20 20 250", start).find("OK drive") == 0);
+            } else {
+              CHECK(send(body, "lift 120", start) == "OK lift angle=120");
+            }
             auto now = start;
             if (mask & 1U) {
               const auto limit = moving ? 200U : 500U;

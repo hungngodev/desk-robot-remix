@@ -421,10 +421,32 @@ def test_fixed_clock_contract():
     (_CLOCK_BODY, '// ' + _CLOCK_HEAD, {}, 'OLED clock'),
     (_CLOCK_BODY, _CLOCK_HEAD, {'accessory': 'wire_->setClock(100000);'}, 'dynamic I2C'),
     (_CLOCK_BODY + '\nwire_.setClock(100000);', _CLOCK_HEAD, {}, 'dynamic I2C'),
+    (
+        _CLOCK_BODY,
+        _CLOCK_HEAD,
+        {'lib/BerryImu/BerryImu.cpp': 'wire_->setClock(100000);'},
+        'BerryImu',
+    ),
 ])
 def test_clock_drift_rejected(body, head, clients, match):
     with pytest.raises(ValueError, match=match):
         tool.validate_clock_sources(body, head, clients)
+
+
+def test_topology_scans_berry_imu_and_body_sources(monkeypatch):
+    seen = {}
+    orig_validate = tool.validate_clock_sources
+
+    def spy_validate(body, head, clients):
+        seen["clients"] = set(clients)
+        orig_validate(body, head, clients)
+
+    monkeypatch.setattr(tool, "validate_clock_sources", spy_validate)
+    results = tool.topology()
+    assert results
+    assert "lib/BerryImu/BerryImu.cpp" in seen["clients"]
+    assert "lib/AccessorySensors/AccessorySensors.cpp" in seen["clients"]
+    assert "src/main.cpp" in seen["clients"]
 
 
 @pytest.mark.parametrize("line", ["sda", "scl"])

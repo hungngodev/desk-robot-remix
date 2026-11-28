@@ -416,6 +416,10 @@ class HardwareStatusHead(SimulatedHead):
             "robot_id": robot_id,
             "backend": "stepper_28byj48",
             "armed": False,
+            "servo": {
+                "lift": 90, "grip": 90, "lift_target": 90, "grip_target": 90,
+                "settled": True, "attached": False, "position_source": "commanded",
+            },
             "imu": {"family": 1, "gyro_id": 212, "aux_id": 73, "valid": True,
                     "acc": [0, 0, 16384], "gyro": [0, 0, 0], "age_ms": 20},
             "touch": {"active": False, "count": 0},
@@ -2481,6 +2485,7 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
     open_angle = calibration.get("grip_open", 60)
     closed_angle = calibration.get("grip_closed", 110)
     commanded_grip = open_angle
+    commanded_lift = calibration.get("lift_up", 110)
     open_command = f"grip {open_angle}"
     lift_command = f"lift {calibration.get('lift_up', 110)}"
     original_command = head.command
@@ -2492,14 +2497,20 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         head._watchdog(time.monotonic())
         result = {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1},
                   "servo": {"attached": True, "position_source": "commanded",
-                            "grip": commanded_grip, "grip_target": commanded_grip}}
+                            "lift": commanded_lift, "lift_target": commanded_lift,
+                            "grip": commanded_grip, "grip_target": commanded_grip,
+                            "settled": True}}
         if head.commands.count(open_command) == 2:
             release_polls += 1
             partial = open_angle + (4 if closed_angle > open_angle else -4)
+            grip_pos = partial if release_frozen or release_polls == 1 else open_angle
+            grip_tgt = partial if release_frozen else open_angle
             result["servo"] = {
                 "attached": True, "position_source": "commanded",
-                "grip": partial if release_frozen or release_polls == 1 else open_angle,
-                "grip_target": partial if release_frozen else open_angle,
+                "lift": commanded_lift, "lift_target": commanded_lift,
+                "grip": grip_pos,
+                "grip_target": grip_tgt,
+                "settled": grip_pos == grip_tgt,
             }
         return result
 
@@ -2521,13 +2532,15 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         }
 
     async def command(value):
-        nonlocal commanded_grip
+        nonlocal commanded_grip, commanded_lift
         if value == lift_command and head.commands.count(open_command) == 2:
             assert not release_frozen
             assert release_polls >= 2, "Lift withdrawal preceded commanded jaw opening"
         receipt = await original_command(value)
         if value.startswith("grip "):
             commanded_grip = int(value.split()[1])
+        elif value.startswith("lift "):
+            commanded_lift = int(value.split()[1])
         if value == "halt" and not halt_pending.is_set():
             halt_pending.set()
             await allow_halt.wait()
@@ -3344,3 +3357,153 @@ async def test_idle_failed_stop_exposes_host_stop_state_until_explicit_operator_
             assert "host_stop_state" not in intents.native_grounded_fact(
                 "interaction-context", clean_ctx.json(),
             )
+
+
+async def test_status_transport_delay_adds_to_ranging_freshness_at_both_gates(
+    settings, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    from desk_robot import controller as ctrl_mod
+
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["power"] = {
+        "fuel_valid": True, "cell_mv": 3800, "soc_centi": 7000,
+    }
+    clock = 100.0
+    monkeypatch.setattr(
+        ctrl_mod, "time", SimpleNamespace(monotonic=lambda: clock, sleep=time.sleep),
+    )
+
+    async def delayed_status():
+        nonlocal clock
+        clock += 0.020
+        return head.body_status
+
+    head.status = delayed_status
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        # 190 ms WROOM age + 20 ms HTTP round-trip = 210 ms > 199 ms preflight cap.
+        head.body_status["ranges"]["age_ms"] = [190, 10, 10, 10, 10]
+        with pytest.raises(OperationError, match="stale or malformed ranging"):
+            await coordinator.operator_arm("robot-01")
+        assert "robot-01" not in coordinator.permits
+        assert head.commands == []
+
+        # 140 ms WROOM age + 20 ms HTTP round-trip = 160 ms > 150 ms active cap.
+        head.body_status["armed"] = True
+        head.body_status["ranges"]["age_ms"] = [140, 10, 10, 10, 10]
+        with pytest.raises(OperationError, match="local sensor or corridor"):
+            await coordinator._assert_armed_health("robot-01")
+        assert "robot-01" not in coordinator.permits
+    finally:
+        await coordinator.close()
+
+
+@pytest.mark.parametrize("never_settles", [False, True])
+async def test_hardware_pickup_waits_for_settled_open_jaw_before_lift_down(
+    settings, tmp_path, never_settles,
+):
+    import json
+
+    calibration = json.loads(settings.robots[0].calibration.read_text())
+    calibration.update(
+        simulation_only=False, hold_seconds=3, robot_id="robot-01",
+        grip_force_delta_raw=100, grip_force_limit_raw=500,
+        pickup_floor_clearance_mm=0.25, head_device_id="xiaozhi-01",
+    )
+    measured = tmp_path / "jaw-before-lift-cal.json"
+    measured.write_text(json.dumps(calibration))
+    settings.robots[0].calibration = measured
+    settings.robots[0].device_id = "xiaozhi-01"
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.robots = [settings.robots[0]]
+
+    c, _ = make(settings)
+    head = HardwareStatusHead("robot-01")
+    head.position = [100.0, 120.0]
+    c.heads["robot-01"] = head
+    open_angle = calibration.get("grip_open", 60)
+    down_angle = calibration.get("lift_down", 60)
+    commanded_grip = 90
+    commanded_lift = calibration.get("lift_up", 110)
+    open_polls = 0
+    orig_cmd = head.command
+    orig_status = head.status
+
+    async def status():
+        nonlocal open_polls
+        body = await orig_status()
+        head._watchdog(time.monotonic())
+        settled = True
+        grip_now = commanded_grip
+        if f"grip {open_angle}" in head.commands and f"lift {down_angle}" not in head.commands:
+            open_polls += 1
+            if never_settles:
+                # Simulate frozen/unsettled jaw before timeout/rejection without burning 6s.
+                raise OperationError("Gripper commanded target not confirmed")
+            if open_polls < 3:
+                grip_now = min(120, open_angle + 4)
+                settled = False
+        body["armed"] = head.armed
+        body["servo"] = {
+            "attached": True, "position_source": "commanded",
+            "lift": commanded_lift, "lift_target": commanded_lift,
+            "grip": grip_now, "grip_target": commanded_grip, "settled": settled,
+        }
+        body["imu"] = {**body["imu"], "boot_id": 1}
+        return body
+
+    async def command(value):
+        nonlocal commanded_grip, commanded_lift
+        if value == f"lift {down_angle}":
+            assert not never_settles
+            assert open_polls >= 3, "lift down sent before settled open jaw status"
+        receipt = await orig_cmd(value)
+        if value.startswith("grip "):
+            commanded_grip = int(value.split()[1])
+        elif value.startswith("lift "):
+            commanded_lift = int(value.split()[1])
+        return receipt
+
+    frames = []
+
+    async def wait_for_frame(robot_id, after, *, timeout_s):
+        frames[:] = [SimpleNamespace(
+            source="proactive", jpeg=await head.snapshot(), received_at=time.monotonic(),
+        )]
+        return True
+
+    async def aux_status():
+        return {"robot_id": "robot-01", "force": {
+            "jaw_valid": True, "calibrated": False, "adc": [0, 350 if head.gripped else 100],
+            "jaw_seq": 1, "jaw_age_ms": 0, "boot_id": 1,
+        }}
+
+    head.status = status
+    head.command = command
+    head.aux_status = aux_status
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": frames}),
+        wait_for_proactive_frame=wait_for_frame,
+    )
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await asyncio.wait_for(c.tasks[job.id], timeout=6)
+        assert job.state == "failed"
+        if never_settles:
+            assert "commanded target not confirmed" in job.error
+            assert f"lift {down_angle}" not in head.commands
+        else:
+            assert open_polls >= 3
+            assert head.commands.index(f"grip {open_angle}") < head.commands.index(
+                f"lift {down_angle}"
+            )
+    finally:
+        await c.close()

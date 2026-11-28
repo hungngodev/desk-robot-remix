@@ -55,6 +55,7 @@ class DockCameraCalibration:
     # Signed base_link +X position (mm) of camera optical center relative to the
     # chassis dock-stop origin (+ ahead of origin, - recessed behind front edge).
     mount_forward_offset_mm: float | None = None
+    beacon_id: int | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):
@@ -125,6 +126,10 @@ class DockCameraCalibration:
                     or not _finite_number(self.mount_forward_offset_mm)
                     or not -250 <= self.mount_forward_offset_mm <= 250):
                 raise ValueError("Camera mount offset or yaw outside measured limits")
+        if self.beacon_id is not None and (
+            type(self.beacon_id) is not int or not 1 <= self.beacon_id <= 5
+        ):
+            raise ValueError("Dock calibration beacon_id out of range")
 
     def opencv_parameters(
         self,

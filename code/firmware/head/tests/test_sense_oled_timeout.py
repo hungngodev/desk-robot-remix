@@ -1,4 +1,11 @@
-"""Regression for the Sense OLED's bounded cosmetic I/O path."""
+"""Regression for the Sense OLED's bounded cosmetic I/O path.
+
+Scope boundary: verifies Sense's local 1 ms ``FaceRenderGuard`` and
+``InitializeDisplay`` I2C timeout only. Upstream Xiaozhi ``DisplayLockGuard`` /
+``OledDisplay`` methods (pinned commit ``c435f99a88066029ec2dbd2d758c8cc9d051565b``)
+that omit lock-success checks remain an explicitly open upstream issue
+(PR #17 thread ``PRRT_kwDOVlmnQ868_esy``) and are NOT claimed fixed by this test.
+"""
 
 import re
 import shutil

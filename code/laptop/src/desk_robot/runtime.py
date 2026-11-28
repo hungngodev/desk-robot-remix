@@ -321,7 +321,8 @@ class Runtime:
             # Prewarming yields: close or another start may have won ownership.
             if self._closed:
                 raise RuntimeError("Closed runtime cannot restart voice listeners")
-            if self._voice_task is not None:
+            self._cancel_deferred_voice_dispatch()
+        if self._voice_task is not None:
                 return
         # Validate opt-in room prerequisites before opening any camera transport.
         room_feed = None
@@ -608,6 +609,8 @@ class Runtime:
                         visual.voice_started(robot_id)
             recovering.clear()
         self._voice_speech_active = set(active)
+        if active:
+            self._cancel_deferred_voice_dispatch()
         coord = getattr(self, "coordinator", None)
         sync_voice = getattr(coord, "set_voice_state", None)
         if callable(sync_voice):
@@ -620,9 +623,8 @@ class Runtime:
         if (
             not self._voice_speech_active
             and not getattr(self, "_voice_stop_unconfirmed", False)
-            and callable(getattr(coord, "dispatch_next_deferred", None))
         ):
-            await coord.dispatch_next_deferred()
+            await self._schedule_deferred_voice_dispatch()
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
         if getattr(self, "_closed", False):
@@ -641,11 +643,11 @@ class Runtime:
                     monitor_ready=True,
                     voice_stop_unconfirmed=False,
                 )
-            dispatch = getattr(coord, "dispatch_next_deferred", None)
-            if callable(dispatch) and not getattr(self, "_voice_speech_active", ()):
-                await dispatch()
+            if not getattr(self, "_voice_speech_active", ()):
+                await self._schedule_deferred_voice_dispatch()
             return
         # A dead VAD monitor cannot certify a current signed tool turn.
+        self._cancel_deferred_voice_dispatch()
         self._voice_turn_generations = None
         if callable(sync_voice):
             sync_voice(monitor_enforced=True, monitor_ready=False)
@@ -669,6 +671,7 @@ class Runtime:
             self._voice_gap_generations = dict(
                 getattr(self, "_last_voice_turn_generations", {})
             )
+        self._cancel_deferred_voice_dispatch()
         self._voice_turn_generations = None
         stop_attempt = self._begin_voice_stop()
         coord = getattr(self, "coordinator", None)
@@ -751,14 +754,13 @@ class Runtime:
             visual = getattr(self, "multimodal", None)
             if visual is not None:
                 visual.voice_ended(robot_id)
-            dispatch = getattr(coord, "dispatch_next_deferred", None)
             if (
-                callable(dispatch)
-                and not speech_active
+                not speech_active
                 and not getattr(self, "_voice_stop_unconfirmed", False)
             ):
-                await dispatch()
+                await self._schedule_deferred_voice_dispatch()
             return
+        self._cancel_deferred_voice_dispatch()
         if kind == "speech_start":
             speech_active.add(robot_id)
         visual = getattr(self, "multimodal", None)
@@ -831,6 +833,49 @@ class Runtime:
             raise preempt_error
         if camera_error is not None:
             raise camera_error
+
+    def _cancel_deferred_voice_dispatch(self) -> None:
+        task = getattr(self, "_voice_deferred_dispatch_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def _schedule_deferred_voice_dispatch(self) -> None:
+        if (
+            getattr(self, "_closed", False)
+            or getattr(self, "_voice_speech_active", ())
+            or getattr(self, "_voice_stop_unconfirmed", False)
+        ):
+            return
+        coord = getattr(self, "coordinator", None)
+        schedule = getattr(coord, "schedule_deferred_dispatch", None)
+        if callable(schedule):
+            schedule()
+            await asyncio.sleep(0)
+            return
+        dispatch = getattr(coord, "dispatch_next_deferred", None)
+        if not callable(dispatch):
+            return
+        existing = getattr(self, "_voice_deferred_dispatch_task", None)
+        if existing is not None and not existing.done():
+            return
+        edge_gen = getattr(self, "_voice_edge_generation", 0)
+
+        async def _run() -> None:
+            if (
+                getattr(self, "_closed", False)
+                or getattr(self, "_voice_edge_generation", 0) != edge_gen
+                or getattr(self, "_voice_speech_active", ())
+                or getattr(self, "_voice_stop_unconfirmed", False)
+            ):
+                return
+            await dispatch()
+
+        task = asyncio.create_task(_run())
+        self._voice_deferred_dispatch_task = task
+        task.add_done_callback(
+            lambda done: None if done.cancelled() else done.exception()
+        )
+        await asyncio.sleep(0)
 
     def _track_native_stop(self, task: asyncio.Task) -> None:
         stops = self.__dict__.setdefault("_unsettled_native_stops", set())
@@ -1073,6 +1118,7 @@ class Runtime:
             if self._has_unsettled_native_stop():
                 errors.append(TimeoutError("Native speaker monitor STOP unconfirmed"))
 
+        self._cancel_deferred_voice_dispatch()
         if self._voice_task is not None:
             task = self._voice_task
             # A repeated close must not interrupt an owner's ongoing cleanup.

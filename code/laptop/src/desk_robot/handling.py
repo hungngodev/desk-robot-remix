@@ -37,10 +37,14 @@ def _stationary_servo_body(body: dict) -> bool:
     source = servo.get("position_source")
     if source is not None and source != "commanded":
         return False
-    return (
+    is_settled = (
         servo["lift"] == servo["lift_target"]
         and servo["grip"] == servo["grip_target"]
     )
+    if "settled" in servo:
+        if type(servo["settled"]) is not bool or servo["settled"] != is_settled:
+            return False
+    return is_settled
 
 
 def _stationary_body(body: object) -> bool:

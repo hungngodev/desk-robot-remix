@@ -12,6 +12,7 @@ import math
 import re
 import threading
 import time
+import weakref
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -110,7 +111,7 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     if not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9"):
         raise ValueError("Camera JPEG framing invalid")
     try:
-        with Image.open(BytesIO(jpeg)) as im:
+        with BytesIO(jpeg) as source, Image.open(source) as im:
             # Reject oversized frames BEFORE allocating the RGB raster.
             _validate_camera_raster(im)
             im.load()
@@ -118,17 +119,17 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
             # copying an already upright RGB raster before thumbnailing.
             ImageOps.exif_transpose(im, in_place=True)
             rgb = im if im.mode == "RGB" else im.convert("RGB")
+            rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
+            gray = ImageOps.grayscale(rgb).resize((64, 48))
+            fingerprint = gray.tobytes()
+            brightness = sum(fingerprint) / len(fingerprint)
+            with BytesIO() as out:
+                rgb.save(out, "JPEG", quality=78, optimize=True)
+                encoded = out.getvalue()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         # Pillow can reject a malicious raster before our size guard runs.
         # Classify it as a bad frame, not a broken continuous connection.
         raise ValueError("Camera dimensions invalid") from exc
-    rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
-    gray = ImageOps.grayscale(rgb).resize((64, 48))
-    fingerprint = gray.tobytes()
-    brightness = sum(fingerprint) / len(fingerprint)
-    out = BytesIO()
-    rgb.save(out, "JPEG", quality=78, optimize=True)
-    encoded = out.getvalue()
     if len(encoded) > 1_000_000:
         raise ValueError("VLM JPEG exceeds bounded in-memory frame")
     return encoded, fingerprint, brightness
@@ -256,10 +257,33 @@ class CameraFrameHub:
         self._shared_room_grant: int | None = None
         self._room_connection_epoch: int = 0
         self._shared_room_epoch: int | None = None
+        room_listeners = getattr(room_settings, "_room_revocation_listeners", None)
+        if isinstance(room_listeners, list):
+            hub_ref = weakref.ref(self)
+
+            def _purge_revoked_room(_settings: object, *, _hub_ref=hub_ref) -> None:
+                hub = _hub_ref()
+                if hub is not None:
+                    hub._sync_room_consent()
+
+            room_listeners.append(weakref.ref(_purge_revoked_room))
+            self._room_listener_ref = _purge_revoked_room
+
+    def _sync_room_consent(self) -> tuple[bool, int | None]:
+        """Purge cached shared room observation on consent revocation or grant turnover."""
+        allowed, grant = self._room_grant()
+        if self._shared_room is not None and (
+            not allowed or grant != self._shared_room_grant
+        ):
+            self._shared_room = None
+            self._shared_room_grant = None
+            self._shared_room_epoch = None
+        return allowed, grant
 
     @property
     def shared_room(self) -> RoomObservation | None:
         """Return a detached snapshot, never the fleet's mutable nested readings."""
+        self._sync_room_consent()
         return deepcopy(self._shared_room)
 
     def _room_grant(self) -> tuple[bool, int | None]:
@@ -304,7 +328,7 @@ class CameraFrameHub:
             epoch = getattr(self, "_room_connection_epoch", 0)
         if epoch != getattr(self, "_room_connection_epoch", 0):
             return  # Reject delayed callback from disconnected serial epoch.
-        allowed, grant = self._room_grant()
+        allowed, grant = self._sync_room_consent()
         if not allowed or (grant_generation is not None and grant_generation != grant):
             return  # Never admit a shared observation under a different grant.
         previous = self._shared_room
@@ -317,8 +341,8 @@ class CameraFrameHub:
 
     def admitted_room_stamp(self) -> tuple[float, int] | None:
         """Return (received_at, connection_epoch) for the currently valid shared room reading."""
+        allowed, grant = self._sync_room_consent()
         room = self._shared_room
-        allowed, grant = self._room_grant()
         epoch = self._shared_room_epoch
         if (
             not allowed
@@ -813,8 +837,8 @@ class CameraFrameHub:
     def _timeline_room(
         self, now: float, items: list[tuple[float, dict]],
     ) -> None:
+        allowed, grant = self._sync_room_consent()
         room = self._shared_room
-        allowed, grant = self._room_grant()
         epoch_ok = getattr(self, "_shared_room_epoch", None) == getattr(
             self, "_room_connection_epoch", 0
         )

@@ -2227,8 +2227,9 @@ def test_short_pdm_read_invalidates_the_private_pcm_window():
     )[0]
     assert "#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED" in short_read
     assert "const int64_t failed_read_us = esp_timer_get_time();" in short_read
+    assert "try_to_lock" in short_read
     assert short_read.index("failed_read_us = esp_timer_get_time()") < short_read.index(
-        "std::lock_guard<std::mutex> lock(bench_mutex_);"
+        "std::unique_lock<std::mutex> lock(bench_mutex_, std::try_to_lock);"
     )
     assert "bench_window_.invalidate_read(failed_read_us);" in short_read
     assert "std::fill_n(microphone_frame_.begin(), frames, 0);" in short_read

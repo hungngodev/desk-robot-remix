@@ -334,16 +334,17 @@ def _open_camera_jpeg(frame: bytes, *, max_bytes: int) -> Iterator[Image.Image]:
             or not frame.endswith(b"\xff\xd9")):
         raise ValueError("Bounded JPEG scene evidence required")
     try:
-        opened = (
-            Image.open(BytesIO(frame), formats=("JPEG",))
-            if Image.open is _PIL_IMAGE_OPEN
-            else Image.open(BytesIO(frame))
-        )
-        with opened as candidate:
-            if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
-                    or not 1 <= candidate.height <= 4096):
-                raise ValueError("Camera dimensions invalid")
-            yield candidate
+        with BytesIO(frame) as source:
+            opened = (
+                Image.open(source, formats=("JPEG",))
+                if Image.open is _PIL_IMAGE_OPEN
+                else Image.open(source)
+            )
+            with opened as candidate:
+                if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
+                        or not 1 <= candidate.height <= 4096):
+                    raise ValueError("Camera dimensions invalid")
+                yield candidate
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("Camera dimensions invalid") from exc
 

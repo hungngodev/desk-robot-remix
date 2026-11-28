@@ -1104,9 +1104,18 @@ void BodyControl::tick(std::uint32_t now_ms) {
   const auto steps = take_servo_steps(
       now_ms, last_servo_step_ms_, guarded_motion_profile());
   if (steps != 0) {
-    move_toward(state_.lift, state_.lift_target, steps);
-    std::uint32_t jaw_steps = steps;
-    if (grip_feedback_required_) {
+    // Command-state serialization arbitrates wheels, lift, and jaw within
+    // software control ticks only; physical rail current and thermal limits
+    // remain unqualified until measured on assembled hardware.
+    const bool wheels_active = guarded_motion_profile() &&
+        drive_remaining(now_ms) != 0 &&
+        (state_.left != 0 || state_.right != 0);
+    const bool allow_grip_step = !wheels_active;
+    const bool allow_lift_step = !wheels_active &&
+        (!guarded_motion_profile() || state_.grip == state_.grip_target);
+    if (allow_lift_step) move_toward(state_.lift, state_.lift_target, steps);
+    std::uint32_t jaw_steps = allow_grip_step ? steps : 0U;
+    if (allow_grip_step && grip_feedback_required_) {
       jaw_steps = 0;
       if (state_.grip != state_.grip_target && grip_feedback_fresh(now_ms)) {
         const auto seq = state_.accessories.force.jaw_sample_seq;
@@ -1132,12 +1141,14 @@ void BodyControl::tick(std::uint32_t now_ms) {
         }
       }
     }
-    const int previous_grip = state_.grip;
-    move_toward(state_.grip, state_.grip_target, jaw_steps);
-    if (grip_feedback_required_) {
-      const int delta = state_.grip > previous_grip ?
-          state_.grip - previous_grip : previous_grip - state_.grip;
-      jaw_sample_motion_budget_ -= static_cast<std::uint8_t>(delta);
+    if (allow_grip_step) {
+      const int previous_grip = state_.grip;
+      move_toward(state_.grip, state_.grip_target, jaw_steps);
+      if (grip_feedback_required_) {
+        const int delta = state_.grip > previous_grip ?
+            state_.grip - previous_grip : previous_grip - state_.grip;
+        jaw_sample_motion_budget_ -= static_cast<std::uint8_t>(delta);
+      }
     }
   }
 }
@@ -1672,13 +1683,15 @@ void BodyControl::execute(const char* line, std::size_t length,
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
-        "\"grip_target\":%d,\"attached\":%s,\"position_source\":\"commanded\"},"
+        "\"grip_target\":%d,\"settled\":%s,\"attached\":%s,\"position_source\":\"commanded\"},"
         "\"watchdog_ms\":%lu,\"drive_ms\":%lu,\"protocol\":2,"
         "\"backend\":\"%s\",\"touch\":{\"active\":%s,\"count\":%lu,\"tap_count\":%lu,\"double_count\":%lu,\"hold_count\":%lu},\"extras\":{\"mask\":%u,\"bumper\":%s,\"bumps\":%lu,\"reed\":%s,\"reed_count\":%lu,\"pir\":%s,\"pir_count\":%lu,\"cap\":%u,\"cap_ok\":%s,\"cap_events\":%lu},\"side_ranges\":{\"mm\":[%u,%u,%u],\"age_ms\":[%lu,%lu,%lu],\"sample_ms\":[%lu,%lu,%lu],\"boot_id\":%lu,\"present_mask\":%u,\"valid_mask\":%u,\"motion_certified\":false},\"imu\":{\"family\":%u,\"gyro_id\":%u,\"aux_id\":%u,\"valid\":%s,\"acc\":[%d,%d,%d],\"gyro\":[%d,%d,%d],\"temp_raw\":%d,\"temp_valid\":%s,\"low_g_valid\":%s,\"low_g_irq\":%s,\"low_g_seq\":%lu,\"age_ms\":%lu,\"sample_ms\":%lu,\"boot_id\":%lu},\"safety\":{\"required\":%s,\"ready\":%s,"
         "\"fault\":\"%s\",\"sensor\":%u},\"ranges\":{\"mm\":[%u,%u,%u,%u,%u],"
         "\"age_ms\":[%lu,%lu,%lu,%lu,%lu],\"present_mask\":%u,\"valid_mask\":%u}}",
         state_.armed ? "true" : "false", state_.left, state_.right,
         state_.lift, state_.grip, state_.lift_target, state_.grip_target,
+        (state_.lift == state_.lift_target && state_.grip == state_.grip_target) ?
+            "true" : "false",
         state_.servos_attached ? "true" : "false",
         static_cast<unsigned long>(watchdog_remaining(now_ms)),
         static_cast<unsigned long>(drive_remaining(now_ms)),
@@ -1978,6 +1991,10 @@ void BodyControl::execute(const char* line, std::size_t length,
   } else if (!state_.armed) {
     format_reply(reply, capacity, "ERR %s disarmed", command);
   } else {
+    const bool wheels_moving =
+        drive_remaining(now_ms) != 0 && (state_.left != 0 || state_.right != 0);
+    const bool lift_moving = state_.lift != state_.lift_target;
+    const bool grip_moving = state_.grip != state_.grip_target;
     if (drive) {
       // The installed three side/rear ToF lanes are READ-ONLY context, not
       // a qualified reverse/pivot swept-footprint safety guard. Even with
@@ -1990,6 +2007,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         stop_motion();
         format_reply(reply, capacity,
                       "ERR drive directional_clearance_unqualified");
+        return;
+      }
+      if (guarded_motion_profile() && (first != 0 || second != 0) &&
+          (lift_moving || grip_moving)) {
+        format_reply(reply, capacity, "ERR drive actuator_busy");
         return;
       }
       state_.left = limited_speed(first);
@@ -2026,6 +2048,13 @@ void BodyControl::execute(const char* line, std::size_t length,
           format_reply(reply, capacity, "ERR grip local_force_limit_or_reversal");
           return;
         }
+      }
+      if (guarded_motion_profile() &&
+          (wheels_moving || (lift ? grip_moving : lift_moving))) {
+        format_reply(reply, capacity, "ERR %s actuator_busy", command);
+        return;
+      }
+      if (grip && grip_feedback_required_) {
         // A newly accepted command requires another independent conversion.
         jaw_sample_motion_budget_ = 0;
       }

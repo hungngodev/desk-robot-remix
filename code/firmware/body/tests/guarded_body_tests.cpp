@@ -138,9 +138,8 @@ static void cpu_heartbeat_fault_is_sticky_and_holds_gripper() {
   CHECK(send(body, "arm", 0) == "OK arm");
   CHECK(send(body, "drive 40 40 250", 0) ==
         "OK drive left=40 right=40 ms=250");
-  send(body, "lift 120", 0);
-  send(body, "grip 60", 0);
   body.tick(20);
+  CHECK(body.state().left == 40 && body.state().right == 40);
   const auto grip = body.state().grip;
   const auto lift = body.state().lift;
   body.motor_watchdog_trip();
@@ -687,18 +686,18 @@ static void fault_holds_payload_and_requires_rearm() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "arm", 0) == "OK arm");
-  CHECK(send(body, "drive 40 40 250", 0) == "OK drive left=40 right=40 ms=250");
-  send(body, "lift 120", 0);
-  send(body, "grip 60", 0);
+  CHECK(send(body, "grip 60", 0) == "OK grip angle=60");
   body.tick(20);
-  CHECK(body.state().lift == 91 && body.state().grip == 89);
+  CHECK(body.state().grip == 89);
+  const auto grip = body.state().grip;
+  const auto lift = body.state().lift;
   guard.sample(3, 500, true, 21);
   body.tick(21);
   CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
   CHECK(body.state().servos_attached);
   CHECK(body.state().lift == body.state().lift_target);
   CHECK(body.state().grip == body.state().grip_target);
-  CHECK(body.state().lift == 91 && body.state().grip == 89);
+  CHECK(body.state().lift == lift && body.state().grip == grip);
   fresh(guard, 22);
   CHECK(send(body, "drive 40 40 250", 22) == "ERR drive disarmed");
   CHECK(send(body, "keepalive", 22) == "ERR keepalive disarmed");
@@ -707,7 +706,7 @@ static void fault_holds_payload_and_requires_rearm() {
   CHECK(send(body, "arm", 22) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
   body.tick(40);
-  CHECK(body.state().lift == 91 && body.state().grip == 89);
+  CHECK(body.state().lift == lift && body.state().grip == grip);
   send(body, "disarm", 40);
   CHECK(!body.state().servos_attached);
 }
@@ -1229,8 +1228,9 @@ static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "arm", 0) == "OK arm");
-  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
   CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  CHECK(send(body, "stop", 0) == "OK stop");
+  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
   body.tick(20);
   const int commanded_hold = body.state().grip;
   CHECK(body.state().left != 0 && body.state().armed);
@@ -1266,8 +1266,9 @@ static void touch_is_local_human_stop_and_requires_fresh_arm() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "arm", 0) == "OK arm");
-  CHECK(send(body, "drive 20 20 250", 0).find("OK drive") == 0);
   CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  CHECK(send(body, "stop", 0) == "OK stop");
+  CHECK(send(body, "drive 20 20 250", 0).find("OK drive") == 0);
   body.tick(20);
   const int held = body.state().grip;
   CHECK(body.state().left != 0 && body.state().armed);
@@ -2984,10 +2985,15 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   body.sample_optional_inputs(1U, false, false, false); // event baseline
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "arm", 0) == "OK arm");
-  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
   CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  CHECK(body.state().grip == 91);
+  CHECK(send(body, "drive 30 30 250", 20) == "ERR drive actuator_busy");
+  CHECK(send(body, "stop", 20) == "OK stop");
+  CHECK(body.state().grip == 91 && body.state().grip_target == 91);
+  CHECK(send(body, "drive 30 30 250", 20).find("OK drive") == 0);
   desk_robot::StepperDrive left_motor, right_motor;
-  for (std::uint32_t ms = 0; ms <= 20; ++ms) {
+  for (std::uint32_t ms = 20; ms <= 40; ++ms) {
     body.tick(ms);
     left_motor.update(ms * 1000, body.state().left, body.state().armed);
     right_motor.update(ms * 1000, body.state().right, body.state().armed);
@@ -3000,8 +3006,8 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0);
   // Same timestamp: the local fault must bypass both acceleration ramps.
-  CHECK(left_motor.update(20000, body.state().left, body.state().armed) == 0);
-  CHECK(right_motor.update(20000, body.state().right, body.state().armed) == 0);
+  CHECK(left_motor.update(40000, body.state().left, body.state().armed) == 0);
+  CHECK(right_motor.update(40000, body.state().right, body.state().armed) == 0);
   CHECK(left_motor.rate_milli_steps_per_second() == 0);
   CHECK(right_motor.rate_milli_steps_per_second() == 0);
   CHECK(body.state().servos_attached &&
@@ -3009,25 +3015,25 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
         body.state().grip_target == held_grip);
   CHECK(body.state().bumper_raw && !body.state().bumper_active &&
         body.state().bumper_events == 0);
-  CHECK(send(body, "arm", 21) == "ERR arm bumper_latched");
+  CHECK(send(body, "arm", 41) == "ERR arm bumper_latched");
   body.sample_bumper_input(false);
   CHECK(!body.state().armed); // no automatic travel after the contact clears
   for (bool local : {false, true}) {
-    CHECK(send(body, "drive 30 30 250", 22, local) == "ERR drive disarmed");
-    CHECK(left_motor.update(22000, body.state().left, body.state().armed) == 0);
-    CHECK(right_motor.update(22000, body.state().right, body.state().armed) == 0);
+    CHECK(send(body, "drive 30 30 250", 42, local) == "ERR drive disarmed");
+    CHECK(left_motor.update(42000, body.state().left, body.state().armed) == 0);
+    CHECK(right_motor.update(42000, body.state().right, body.state().armed) == 0);
   }
-  CHECK(send(body, "arm", 22) == "ERR arm bumper_latched");
-  CHECK(send(body, "status", 22).find("\"fault\":\"bumper_latched\"") !=
+  CHECK(send(body, "arm", 42) == "ERR arm bumper_latched");
+  CHECK(send(body, "status", 42).find("\"fault\":\"bumper_latched\"") !=
         std::string::npos);
-  CHECK(send(body, "status", 22).find("\"ready\":false") !=
+  CHECK(send(body, "status", 42).find("\"ready\":false") !=
         std::string::npos);
-  CHECK(send(body, "rearm", 22) == "ERR rearm local_only");
-  CHECK(send(body, "rearm", 22, true) == "OK rearm");
-  CHECK(send(body, "arm", 22) == "OK arm");
+  CHECK(send(body, "rearm", 42) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 42, true) == "OK rearm");
+  CHECK(send(body, "arm", 42) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
-  CHECK(left_motor.update(22000, body.state().left, body.state().armed) == 0);
-  CHECK(right_motor.update(22000, body.state().right, body.state().armed) == 0);
+  CHECK(left_motor.update(42000, body.state().left, body.state().armed) == 0);
+  CHECK(right_motor.update(42000, body.state().right, body.state().armed) == 0);
 
   // The raw local interlock must also work before the first 25 ms
   // classifier sample sets the optional-input mask after boot.
@@ -3573,9 +3579,9 @@ static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
   CHECK(send(body, "rearm", 102) == "ERR rearm local_only");
   CHECK(send(body, "rearm", 102, true) == "OK rearm");
   CHECK(send(body, "arm", 102) == "OK arm");
-  CHECK(send(body, "drive 30 30 200", 102).find("OK drive") == 0);
   CHECK(send(body, "grip 110", 102) == "OK grip angle=110");
-  body.tick(103);
+  CHECK(send(body, "stop", 103) == "OK stop");
+  CHECK(send(body, "drive 30 30 200", 103).find("OK drive") == 0);
   const int held = body.state().grip;
 
   readings.gauge.fuel_valid = false;
@@ -4449,12 +4455,12 @@ static void mpu_handling_latch_freezes_active_lift_and_grip_both_profiles() {
       fresh(guard, 100);
       CHECK(send(body, "rearm", 100, true) == "OK rearm");
       CHECK(send(body, "arm", 100) == "OK arm");
-      CHECK(send(body, "lift 105", 100) == "OK lift angle=105");
       CHECK(send(body, "grip 75", 100) == "OK grip angle=75");
-      CHECK(send(body, "drive 40 40 250", 100) == "OK drive left=40 right=40 ms=250");
+      CHECK(send(body, "lift 105", 100) == "ERR lift actuator_busy");
+      CHECK(send(body, "drive 40 40 250", 100) == "ERR drive actuator_busy");
       CHECK(body.state().armed && body.state().servos_attached);
-      CHECK(body.state().lift_target == 105 && body.state().grip_target == 75);
-      // Let servos step partly toward their commanded targets before the latch.
+      CHECK(body.state().lift_target == 90 && body.state().grip_target == 75);
+      // Let jaw step partly toward its commanded target before the latch.
       body.tick(110);
 
       // Inject unsafe sustained static tilt (2 consecutive fresh samples) or low-g IRQ.
@@ -4478,7 +4484,7 @@ static void mpu_handling_latch_freezes_active_lift_and_grip_both_profiles() {
       CHECK(body.state().left == 0 && body.state().right == 0);
       CHECK(body.state().servos_attached);
       CHECK(body.state().lift_target == held_lift && body.state().grip_target == held_grip);
-      CHECK(held_lift < 105 && held_grip > 75); // target frozen, no continuation
+      CHECK(held_grip > 75); // target frozen, no continuation
 
       // Fresh putdown (level, no low-g) and replayed delayed commands must stay rejected.
       imu.low_g_irq = false;
@@ -4504,8 +4510,17 @@ static void mpu_handling_latch_freezes_active_lift_and_grip_both_profiles() {
       CHECK(!body.state().armed);
       CHECK(send(body, "arm", 240) == "OK arm");
       CHECK(send(body, "lift 95", 240) == "OK lift angle=95");
-      CHECK(send(body, "drive 40 40 250", 240) == "OK drive left=40 right=40 ms=250");
-      CHECK(body.state().left == 40 && body.state().lift_target == 95);
+      CHECK(send(body, "drive 40 40 250", 240) == "ERR drive actuator_busy");
+      CHECK(body.state().left == 0 && body.state().lift_target == 95);
+      for (std::uint32_t ms = 260; ms <= 360; ms += 20) {
+        fresh(guard, ms);
+        imu.at_ms = ms;
+        body.set_imu(imu);
+        body.tick(ms);
+      }
+      CHECK(body.state().lift == 95);
+      CHECK(send(body, "drive 40 40 250", 360) == "OK drive left=40 right=40 ms=250");
+      CHECK(body.state().left == 40);
     }
   }
 }
@@ -4566,6 +4581,56 @@ static void uart_integrity_quiet_and_paw_consent_regressions() {
   body.set_paw_raw_consent(false);
   CHECK(!body.paw_raw_consent());
   CHECK(!body.state().paw_pulse.valid && body.state().paw_pulse.red == 0U);
+}
+
+static void guarded_actuator_arbitration_serializes_drive_lift_and_jaw() {
+  for (const auto profile : {
+           desk_robot::BodyProfile::StepperGuarded,
+           desk_robot::BodyProfile::DcGuarded,
+       }) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 100);
+    desk_robot::BodyControl body(profile, &guard);
+    CHECK(send(body, "rearm", 100, true) == "OK rearm");
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "status", 100).find("\"settled\":true") != std::string::npos);
+
+    // 1. Jaw motion settles before lift or wheel drive is admitted.
+    CHECK(send(body, "grip 85", 100) == "OK grip angle=85");
+    CHECK(send(body, "status", 100).find("\"settled\":false") != std::string::npos);
+    CHECK(send(body, "lift 100", 120) == "ERR lift actuator_busy");
+    CHECK(send(body, "drive 20 20 100", 120) == "ERR drive actuator_busy");
+    CHECK(body.watchdog_remaining(120) == 480);
+    CHECK(body.state().lift == 90 && body.state().lift_target == 90);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    for (std::uint32_t ms = 140; ms <= 220; ms += 20) {
+      fresh(guard, ms);
+      body.tick(ms);
+    }
+    CHECK(body.state().grip == 85 && body.state().lift == 90);
+    CHECK(send(body, "status", 220).find("\"settled\":true") != std::string::npos);
+
+    // 2. Lift motion settles before jaw or wheel drive is admitted.
+    CHECK(send(body, "lift 95", 220) == "OK lift angle=95");
+    CHECK(send(body, "status", 220).find("\"settled\":false") != std::string::npos);
+    CHECK(send(body, "grip 75", 240) == "ERR grip actuator_busy");
+    CHECK(send(body, "drive 20 20 100", 240) == "ERR drive actuator_busy");
+    CHECK(body.state().grip == 85 && body.state().grip_target == 85);
+    for (std::uint32_t ms = 260; ms <= 340; ms += 20) {
+      fresh(guard, ms);
+      body.tick(ms);
+    }
+    CHECK(body.state().lift == 95);
+    CHECK(send(body, "status", 340).find("\"settled\":true") != std::string::npos);
+
+    // 3. Active wheel drive rejects lift/grip until STOP or completion.
+    CHECK(send(body, "drive 20 20 100", 340) == "OK drive left=20 right=20 ms=100");
+    CHECK(send(body, "lift 90", 360) == "ERR lift actuator_busy");
+    CHECK(send(body, "grip 80", 360) == "ERR grip actuator_busy");
+    CHECK(send(body, "stop", 380) == "OK stop");
+    CHECK(send(body, "grip 80", 380) == "OK grip angle=80");
+  }
 }
 
 int main() {
@@ -4688,6 +4753,8 @@ int main() {
     std::cout << "PASS handling latch freezes lift/grip across both profiles\n";
     uart_integrity_quiet_and_paw_consent_regressions();
     std::cout << "PASS UART integrity mutations, quiet haptic, and paw consent\n";
+    guarded_actuator_arbitration_serializes_drive_lift_and_jaw();
+    std::cout << "PASS guarded actuator arbitration serializes drive, lift, and jaw\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
     return 1;

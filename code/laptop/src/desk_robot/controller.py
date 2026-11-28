@@ -26,7 +26,12 @@ from .dock_runtime import (
 )
 from .dock_timing import dock_time_remaining
 from .dock_vision import assess_dock
-from .grasp_feedback import await_commanded_jaw_target, guarded_grasp, verify_grasp_hold
+from .grasp_feedback import (
+    await_commanded_jaw_target,
+    await_commanded_lift_target,
+    guarded_grasp,
+    verify_grasp_hold,
+)
 from .motion_authority import HostStopState, StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
@@ -34,7 +39,11 @@ from .operations import OperationError, dispatch_job_command, require_active_ope
 from .operations import bounded_head_reply as _bounded_head_reply
 from .operations import bounded_pulse_stop as _bounded_pulse_stop
 from .operations import require_command_receipt as _require_command_receipt
-from .sensor_event_contract import fuel_sample_is_fresh, is_valid_fuel_measurement
+from .sensor_event_contract import (
+    fuel_sample_is_fresh,
+    is_finite_number,
+    is_valid_fuel_measurement,
+)
 from .sleep_clock import continuous_monotonic, elapsed_with_sleep
 from .transport import Head, HeadError
 from .vision import Detection, Vision, validated_camera_sizes
@@ -71,13 +80,24 @@ async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
 
 
 def _valid_ranging_samples(
-    readings: object, ages: object, *, max_age_inclusive: int,
+    readings: object,
+    ages: object,
+    *,
+    max_age_inclusive: int | float,
+    request_elapsed_ms: float = 0.0,
 ) -> bool:
     """Validate all five ToF lanes, enforcing >30 mm on forward obstacle lane 4."""
+    if not is_finite_number(request_elapsed_ms) or request_elapsed_ms < 0:
+        return False
     return (
         isinstance(ages, list) and len(ages) == 5
         and isinstance(readings, list) and len(readings) == 5
-        and all(type(age) is int and 0 <= age <= max_age_inclusive for age in ages)
+        and all(
+            type(age) is int
+            and 0 <= age <= max_age_inclusive
+            and age + request_elapsed_ms <= max_age_inclusive
+            for age in ages
+        )
         and all(
             type(mm) is int and (31 if lane == 4 else 30) <= mm <= 1300
             for lane, mm in enumerate(readings)
@@ -260,10 +280,12 @@ class Coordinator:
             raise OperationError(
                 "Hardware preflight: verified motor backend is not configured"
             )
+        status_started_at = time.monotonic()
         status = await _bounded_head_reply(
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM preflight status timeout",
         )
+        status_elapsed_ms = max(0.0, (time.monotonic() - status_started_at) * 1000.0)
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
         self._record_local_fault(robot_id, status)
@@ -297,7 +319,7 @@ class Coordinator:
             or imu["family"] not in (1, 2, 3, 4)
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
-            or not 0 <= imu["age_ms"] <= 200
+            or not 0 <= imu["age_ms"] + status_elapsed_ms <= 200.0
             or any(
                 not isinstance(imu.get(axis), list)
                 or len(imu[axis]) != 3
@@ -319,7 +341,10 @@ class Coordinator:
             raise OperationError("Hardware preflight: missing or invalid ToF channels")
         ages = ranges.get("age_ms")
         readings = ranges.get("mm")
-        if not _valid_ranging_samples(readings, ages, max_age_inclusive=199):
+        if not _valid_ranging_samples(
+            readings, ages, max_age_inclusive=199,
+            request_elapsed_ms=status_elapsed_ms,
+        ):
             raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
         _require_safe_fuel_sample(
             status.get("power"), min_cell_mv=3350, min_soc_centi=500,
@@ -634,6 +659,8 @@ class Coordinator:
             self._deferred_voice_generation = 0
         if not hasattr(self, "_deferred_robot_generation"):
             self._deferred_robot_generation = {}
+        if not hasattr(self, "_voice_block_generation"):
+            self._voice_block_generation = 0
         if getattr(self, "_deferred_dispatch_lock", None) is None:
             self._deferred_dispatch_lock = asyncio.Lock()
 
@@ -665,6 +692,11 @@ class Coordinator:
             self._voice_monitor_ready = bool(monitor_ready)
         if voice_stop_unconfirmed is not None:
             self._voice_stop_unconfirmed = bool(voice_stop_unconfirmed)
+        if self.voice_blocks_motion() is not None:
+            self._voice_block_generation += 1
+            dispatch_task = getattr(self, "_deferred_dispatch_task", None)
+            if dispatch_task is not None and not dispatch_task.done():
+                dispatch_task.cancel()
         if self._voice_stop_unconfirmed or (
             self._voice_monitor_enforced and not self._voice_monitor_ready
         ):
@@ -754,7 +786,32 @@ class Coordinator:
         self._deferred_requests[request.id] = request
         return request
 
-    async def dispatch_next_deferred(self) -> Job | None:
+    def schedule_deferred_dispatch(self) -> asyncio.Task | None:
+        """Schedule deferred-motion preflight off synchronous/voice listener callbacks."""
+        self._ensure_voice_gate()
+        if (
+            self.closed
+            or not self._deferred_voice_queue
+            or self._fleet_motion_owner is not None
+            or self.voice_blocks_motion() is not None
+        ):
+            return None
+        existing = getattr(self, "_deferred_dispatch_task", None)
+        if existing is not None and not existing.done():
+            return existing
+        voice_gen = getattr(self, "_voice_block_generation", 0)
+        task = asyncio.create_task(
+            self.dispatch_next_deferred(expected_voice_generation=voice_gen)
+        )
+        self._deferred_dispatch_task = task
+        task.add_done_callback(
+            lambda done: None if done.cancelled() else done.exception()
+        )
+        return task
+
+    async def dispatch_next_deferred(
+        self, *, expected_voice_generation: int | None = None,
+    ) -> Job | None:
         self._ensure_voice_gate()
         assert self._deferred_dispatch_lock is not None
         async with self._deferred_dispatch_lock:
@@ -764,6 +821,13 @@ class Coordinator:
                     or self._fleet_motion_owner is not None
                     or self.voice_blocks_motion() is not None
                 ):
+                    return None
+                voice_gen = (
+                    getattr(self, "_voice_block_generation", 0)
+                    if expected_voice_generation is None
+                    else expected_voice_generation
+                )
+                if getattr(self, "_voice_block_generation", 0) != voice_gen:
                     return None
                 req = self._deferred_voice_queue[0]
                 if (
@@ -821,7 +885,10 @@ class Coordinator:
                     return None
                 if not _check_deferred_consent(req):
                     return None
-                if self.voice_blocks_motion() is not None:
+                if (
+                    self.voice_blocks_motion() is not None
+                    or getattr(self, "_voice_block_generation", 0) != voice_gen
+                ):
                     # Human spoke again during preflight: discard instead of replaying.
                     req.state = "discarded"
                     req.error = "New human voice or monitor loss interrupted deferred dispatch"
@@ -1117,13 +1184,7 @@ class Coordinator:
                             and getattr(self, "_deferred_voice_queue", None)
                             and self.voice_blocks_motion() is None
                         ):
-                            existing = getattr(self, "_deferred_dispatch_task", None)
-                            if existing is None or existing.done():
-                                task = asyncio.create_task(self.dispatch_next_deferred())
-                                self._deferred_dispatch_task = task
-                                task.add_done_callback(
-                                    lambda done: None if done.cancelled() else done.exception()
-                                )
+                            self.schedule_deferred_dispatch()
 
     def manual(self, robot_id: str, command: str) -> Job:
         """Start an operator-permitted manual drive, lift, or grip command.
@@ -1161,10 +1222,12 @@ class Coordinator:
         """
         # Exploration has no overall job deadline. An alternate head adapter
         # holding this status request must not keep the WROOM armed forever.
+        body_started_at = time.monotonic()
         body = await _bounded_head_reply(
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM active health status timeout",
         )
+        body_elapsed_ms = max(0.0, (time.monotonic() - body_started_at) * 1000.0)
         if self.settings.mode == "hardware":
             self._record_local_fault(robot_id, body)
         active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
@@ -1202,12 +1265,13 @@ class Coordinator:
             or len(ranges["age_ms"]) != 5
             or not _valid_ranging_samples(
                 ranges["mm"], ranges["age_ms"], max_age_inclusive=150,
+                request_elapsed_ms=body_elapsed_ms,
             )
             or (require_front_clearance and ranges["mm"][4] <= 250)
             or not isinstance(imu, dict)
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
-            or not 0 <= imu["age_ms"] <= 200
+            or not 0 <= imu["age_ms"] + body_elapsed_ms <= 200.0
             or not isinstance(touch, dict)
             or touch.get("active") is not False
         ):
@@ -1541,14 +1605,34 @@ class Coordinator:
             raise OperationError("Dock turn and forward motor polarity are not measured")
         if robot.dock_forward_sign != 1:
             raise OperationError("Dock reverse direction clearance unqualified")
+        expected_beacon = robot.dock_beacon_id
+        station_markers = getattr(self.settings, "dock_station_markers", None) or {}
+        expected_marker = getattr(robot, "dock_marker_id", None)
+        if station_markers and expected_beacon is not None:
+            if expected_beacon not in station_markers:
+                raise OperationError(
+                    "Dock approach requires authoritative station marker-beacon assignment"
+                )
+            authoritative_marker = station_markers[expected_beacon]
+            if expected_marker is not None and expected_marker != authoritative_marker:
+                raise OperationError(
+                    "Dock marker_id and dock_beacon_id belong to different stations"
+                )
+            expected_marker = authoritative_marker
         try:
             camera, target_mm = load_real_dock_calibration(
                 robot.dock_calibration, robot_id=robot.id,
                 head_device_id=robot.device_id,
-                expected_marker_id=getattr(robot, "dock_marker_id", None),
+                expected_marker_id=expected_marker,
+                expected_beacon_id=expected_beacon,
             )
         except (OSError, ValueError, TypeError) as exc:
             raise OperationError(f"Dock calibration required: {exc}") from exc
+        if (
+            robot.dock_marker_id is not None
+            and camera.marker_id != robot.dock_marker_id
+        ):
+            raise OperationError("Dock calibration marker differs from robot assignment")
         # Read-only AprilTag diagnostics may retain legacy zero-distortion
         # assumptions. Physically permitted docking must not assume that
         # an unmeasured XIAO lens has zero distortion.
@@ -1570,8 +1654,18 @@ class Coordinator:
             raise OperationError(
                 "Dock motion requires recorded actual camera sensor PID"
             )
-        if robot.dock_beacon_id is None:
+        if expected_beacon is None:
             raise OperationError("Dock approach needs the assigned physical NEC beacon")
+        if station_markers:
+            if expected_beacon not in station_markers:
+                raise OperationError(
+                    "Dock approach requires authoritative station marker-beacon assignment"
+                )
+            if (
+                camera.beacon_id is None
+                and station_markers.get(expected_beacon) != camera.marker_id
+            ):
+                raise OperationError("Dock calibration marker differs from station beacon")
         camera_grant = self._camera_motion_grant()
         return self._submit(
             robot_id, "dock_approach",
@@ -2079,11 +2173,27 @@ class Coordinator:
                 raise OperationError(
                     "Pickup refused: guarded WROOM profile prohibits differential turn or reverse"
                 )
+        async def grasp_health() -> dict:
+            self._require_job_motion(job)
+            body = await self._assert_armed_health(job.robot_id)
+            self._require_job_motion(job)
+            self._pickup_live_media(job.robot_id, camera_grant)
+            servo = body.get("servo")
+            if not isinstance(servo, dict) or type(servo.get("settled")) is not bool:
+                raise OperationError("Pickup requires WROOM commanded servo telemetry")
+            return body
+
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"grip {c.grip_open}")
-        await self._assert_armed_health(job.robot_id)
+        if self.settings.mode == "hardware":
+            # Confirm WROOM-reported jaw settlement before commanding lift down.
+            await await_commanded_jaw_target(grasp_health, c.grip_open)
+        else:
+            await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_down}")
+        if self.settings.mode == "hardware":
+            await await_commanded_lift_target(grasp_health, c.lift_down)
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         initial = None
@@ -2134,15 +2244,6 @@ class Coordinator:
             raise OperationError("Alignment attempt limit reached")
         await self._assert_armed_health(job.robot_id)
         require_fresh_observation()
-        async def grasp_health() -> dict:
-            self._require_job_motion(job)
-            body = await self._assert_armed_health(job.robot_id)
-            self._require_job_motion(job)
-            self._pickup_live_media(job.robot_id, camera_grant)
-            if not isinstance(body.get("servo"), dict):
-                raise OperationError("Pickup requires WROOM commanded servo telemetry")
-            return body
-
         tactile = None
 
         async def check_hold() -> None:
@@ -2176,6 +2277,8 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_up}")
+        if self.settings.mode == "hardware":
+            await await_commanded_lift_target(grasp_health, c.lift_up)
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
@@ -2218,6 +2321,8 @@ class Coordinator:
         )
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_down}")
+        if self.settings.mode == "hardware":
+            await await_commanded_lift_target(grasp_health, c.lift_down)
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         lowered, _ = await observe()
@@ -2249,6 +2354,8 @@ class Coordinator:
             await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_up}")
+        if self.settings.mode == "hardware":
+            await await_commanded_lift_target(grasp_health, c.lift_up)
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         placed_positions = []

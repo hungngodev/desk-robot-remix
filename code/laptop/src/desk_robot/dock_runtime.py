@@ -31,7 +31,7 @@ def _reject_calibration_json_constant(token: str) -> None:
 
 def load_real_dock_calibration(
     path, *, robot_id: str | None = None, head_device_id: str | None = None,
-    expected_marker_id: int | None = None,
+    expected_marker_id: int | None = None, expected_beacon_id: int | None = None,
 ) -> tuple[DockCameraCalibration, float]:
     if path is None:
         raise ValueError("No dock calibration configured")
@@ -77,12 +77,19 @@ def load_real_dock_calibration(
         mount_lateral_offset_mm=data.get("mount_lateral_offset_mm"),
         mount_yaw_deg=data.get("mount_yaw_deg"),
         mount_forward_offset_mm=data.get("mount_forward_offset_mm"),
+        beacon_id=data.get("beacon_id"),
     )
     target = data.get("target_distance_mm")
     if type(target) not in (float, int) or not 50 <= target <= 500 or not math.isfinite(target):
         raise ValueError("Dock stopping distance is not calibrated")
     if expected_marker_id is not None and calibration.marker_id != expected_marker_id:
         raise ValueError("Dock calibration marker_id does not match assigned robot dock marker")
+    if (
+        expected_beacon_id is not None
+        and calibration.beacon_id is not None
+        and calibration.beacon_id != expected_beacon_id
+    ):
+        raise ValueError("Dock calibration beacon_id does not match assigned robot dock beacon")
     return calibration, float(target)
 
 

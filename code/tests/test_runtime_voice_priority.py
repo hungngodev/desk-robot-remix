@@ -2353,3 +2353,111 @@ async def test_idle_voice_stop_failure_keeps_coordinator_latched_after_audio_suc
         assert host_stop_timeline(coordinator, robot.id) == []
     finally:
         await coordinator.close()
+
+
+@pytest.mark.parametrize("trigger", ["snapshot", "speech_end"])
+@pytest.mark.parametrize("swallow_cancel", [False, True])
+async def test_deferred_dispatch_off_listener_lets_vad_preempt_open_preflight(
+    settings, monkeypatch, trigger, swallow_cancel,
+):
+    from desk_robot.controller import Coordinator
+    from desk_robot.conversation import Conversation
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.simulator import (
+        SimulatedChat,
+        SimulatedHead,
+        SimulatedSpeaker,
+        SimulationVision,
+    )
+    from desk_robot.sleep_clock import continuous_monotonic
+
+    robot = settings.robot("robot-01")
+    robot.motion_enabled = True
+    head = SimulatedHead(robot.id)
+    coordinator = Coordinator(settings, {robot.id: head}, SimulationVision())
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+
+    class Pet:
+        voice_monitor_ready = True
+
+        def is_quiet(self, robot_id):
+            return False
+
+        async def interrupt(self, robot_id):
+            return None
+
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    runtime.coordinator = coordinator
+    runtime.multimodal = SimpleNamespace(
+        hub=CameraFrameHub([r.id for r in settings.robots]),
+        voice_started=lambda *_: None,
+        voice_ended=lambda *_: None,
+    )
+    preflight_entered = asyncio.Event()
+    release_preflight = asyncio.Event()
+    submitted = []
+
+    async def held_preflight(_robot_id):
+        preflight_entered.set()
+        try:
+            await asyncio.wait_for(release_preflight.wait(), timeout=2.0)
+        except asyncio.CancelledError:
+            if not swallow_cancel:
+                raise
+            await asyncio.wait_for(release_preflight.wait(), timeout=2.0)
+
+    monkeypatch.setattr(coordinator, "_hardware_preflight", held_preflight)
+    try:
+        # Start the original voice turn first, then queue deferred motion with a live permit.
+        await asyncio.wait_for(
+            runtime._on_voice_interrupt(robot.id, "speech_start"), timeout=0.5,
+        )
+        coordinator.permits[robot.id] = time.monotonic() + 30.0
+        coordinator._permit_continuous_deadlines[robot.id] = continuous_monotonic() + 30.0
+        req = coordinator.defer_motion(
+            robot.id,
+            "manual",
+            submit_fn=lambda: (
+                submitted.append("ran") or coordinator.manual(robot.id, "grip 90")
+            ),
+        )
+        if trigger == "snapshot":
+            await asyncio.wait_for(runtime._on_voice_snapshot(frozenset()), timeout=0.5)
+        else:
+            await asyncio.wait_for(
+                runtime._on_voice_interrupt(robot.id, "speech_end"), timeout=0.5,
+            )
+        await asyncio.wait_for(preflight_entered.wait(), timeout=0.5)
+        assert not release_preflight.is_set()
+
+        # While WROOM preflight is open, a new VAD start must execute promptly.
+        await asyncio.wait_for(
+            runtime._on_voice_interrupt(robot.id, "speech_start"), timeout=0.5,
+        )
+        assert robot.id in runtime._voice_speech_active
+        assert coordinator.voice_blocks_motion() is not None
+
+        release_preflight.set()
+        dispatch_task = coordinator._deferred_dispatch_task
+        if dispatch_task is not None:
+            await asyncio.wait_for(
+                asyncio.gather(dispatch_task, return_exceptions=True), timeout=1.0,
+            )
+        assert submitted == []
+        assert req.state == "discarded"
+        assert not coordinator.jobs
+
+        # Ending the new turn must not replay the superseded deferred request.
+        await asyncio.wait_for(
+            runtime._on_voice_interrupt(robot.id, "speech_end"), timeout=0.5,
+        )
+        if coordinator._deferred_dispatch_task is not None:
+            await asyncio.wait_for(
+                asyncio.gather(coordinator._deferred_dispatch_task, return_exceptions=True),
+                timeout=1.0,
+            )
+        assert submitted == []
+        assert not coordinator.jobs
+    finally:
+        release_preflight.set()
+        await coordinator.close()

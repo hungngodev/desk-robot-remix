@@ -158,6 +158,7 @@ private:
     std::mutex bench_mutex_;
     desk_robot::FreshBenchPcmConsent bench_consent_{};
     std::atomic<uint64_t> bench_capture_generation_{0};
+    std::atomic<bool> bench_contention_fault_{false};
     bool bench_start_pending_ = false;  // reserved across unlocked allocation/wipe
     bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};
@@ -165,6 +166,7 @@ private:
     bool bench_speaker_activity_in_window_ = false;
     esp_timer_handle_t bench_expiry_timer_ = nullptr;
     int64_t bench_started_us_ = 0;
+    void ApplyPendingBenchContentionFaultLocked(int64_t now_us);
     static void BenchPcmExpiry(void* context);
 #endif
     std::array<int16_t, kRingSize> reference_{};

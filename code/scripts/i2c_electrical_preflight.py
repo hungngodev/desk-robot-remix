@@ -98,16 +98,21 @@ def topology(plan: dict | None = None) -> list[dict]:
     # Generic carriers remain unqualified. Do not slow the cliff bus to hide
     # electrical problems or switch clocks inside a repeated-START exchange.
     body_root = ROOT / "code/firmware/body"
-    client_paths = (
-        "lib/AccessorySensors/AccessorySensors.cpp",
-        "lib/ExpansionTouch/ExpansionTouch.cpp",
-        "lib/PulsePad/PulsePad.cpp",
-        "src/main.cpp",
+    client_files = sorted(
+        file
+        for folder in (body_root / "src", body_root / "lib")
+        for file in folder.rglob("*")
+        if file.is_file()
+        and file.suffix in {".cpp", ".h"}
+        and file.resolve() != TOF.resolve()
     )
     validate_clock_sources(
         TOF.read_text(encoding="utf-8"),
         (ROOT / "code/firmware/head/sense/desk_robot_sense.cc").read_text(encoding="utf-8"),
-        {path: (body_root / path).read_text(encoding="utf-8") for path in client_paths},
+        {
+            file.relative_to(body_root).as_posix(): file.read_text(encoding="utf-8")
+            for file in client_files
+        },
     )
 
     results = []

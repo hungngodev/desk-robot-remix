@@ -585,6 +585,10 @@ def test_a5_accepts_real_numeric_measurements():
     '"elapsed_ms": Infinity, ',
     '"elapsed_ms": -Infinity, ',
     '"elapsed_ms": 1e309, ',
+    '"elapsed_ms": -1, ',
+    '"elapsed_ms": -0.001, ',
+    '"elapsed_ms": true, ',
+    '"elapsed_ms": "10", ',
 ])
 def test_a5_cli_rejects_ambiguous_manifest_json(tmp_path, invalid_prefix):
     import hashlib

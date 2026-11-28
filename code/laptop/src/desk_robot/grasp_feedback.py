@@ -54,10 +54,28 @@ class GraspLimitation(OperationError):
         )
 
 
+def _servo_targets_settled(servo: dict) -> bool:
+    """Return True iff explicit servo settled flags (and lift counters if present) agree."""
+    if "settled" in servo:
+        if type(servo["settled"]) is not bool:
+            raise OperationError("Servo settled status invalid")
+        if not servo["settled"]:
+            return False
+    if "lift" in servo or "lift_target" in servo:
+        if (type(servo.get("lift")) is not int
+                or type(servo.get("lift_target")) is not int
+                or not 60 <= servo["lift"] <= 120
+                or not 60 <= servo["lift_target"] <= 120):
+            raise OperationError("Servo lift telemetry invalid")
+        if servo["lift"] != servo["lift_target"]:
+            return False
+    return True
+
+
 async def await_commanded_jaw_target(
     health: Callable[[], Awaitable[dict]], target: int,
 ) -> None:
-    """Wait for commanded opening, never infer measured position or force."""
+    """Wait for commanded jaw settlement; does not prove rail current or physical pose."""
     async with asyncio.timeout(_RELIEF_WAIT_S):
         while True:
             status = await health()
@@ -70,7 +88,37 @@ async def await_commanded_jaw_target(
                     or type(servo.get("grip")) is not int
                     or not 60 <= servo["grip"] <= 120):
                 raise OperationError("Gripper commanded target not confirmed")
-            if servo["grip"] == target:
+            if _servo_targets_settled(servo) and servo["grip"] == target:
+                return
+            await asyncio.sleep(_RELIEF_POLL_INTERVAL_S)
+
+
+async def await_commanded_lift_target(
+    health: Callable[[], Awaitable[dict]], target: int,
+) -> None:
+    """Wait for commanded lift settlement; does not measure torque, current, or pose."""
+    async with asyncio.timeout(_RELIEF_WAIT_S):
+        while True:
+            status = await health()
+            servo = status.get("servo")
+            if (not isinstance(servo, dict)
+                    or servo.get("attached") is not True
+                    or servo.get("position_source") != "commanded"
+                    or type(servo.get("lift_target")) is not int
+                    or servo["lift_target"] != target
+                    or type(servo.get("lift")) is not int
+                    or not 60 <= servo["lift"] <= 120):
+                raise OperationError("Lift commanded target not confirmed")
+            if "grip" in servo or "grip_target" in servo:
+                if (type(servo.get("grip")) is not int
+                        or type(servo.get("grip_target")) is not int
+                        or not 60 <= servo["grip"] <= 120
+                        or not 60 <= servo["grip_target"] <= 120):
+                    raise OperationError("Lift servo grip telemetry invalid")
+                if servo["grip"] != servo["grip_target"]:
+                    await asyncio.sleep(_RELIEF_POLL_INTERVAL_S)
+                    continue
+            if _servo_targets_settled(servo) and servo["lift"] == target:
                 return
             await asyncio.sleep(_RELIEF_POLL_INTERVAL_S)
 
@@ -278,7 +326,10 @@ async def guarded_grasp(
                     or servo["grip_target"] != expected_target
                     or type(servo.get("grip")) is not int
                     or not 60 <= servo["grip"] <= 120
-                    or (settled and servo["grip"] != expected_target)):
+                    or (settled and (
+                servo["grip"] != expected_target
+                or servo.get("settled") is False
+            ))):
                 raise OperationError("Gripper commanded closing target not confirmed")
         return status
 

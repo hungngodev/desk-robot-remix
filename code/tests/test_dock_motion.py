@@ -654,12 +654,15 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
             self.reads = 0
             self.commands = []
 
+        async def snapshot_for_dock(self):
+            return (b"marker-frame", time.monotonic() - 0.14, (1234, 1, 1), 1)
+
         async def status(self):
             self.reads += 1
             if self.reads == 2:
-                # WROOM is healthy, but its response came after old image
-                # geometry was already outside the 200 ms marker age policy.
-                await asyncio.sleep(0.26)
+                # WROOM range age + request delay stays within 150 ms, yet pushes
+                # earlier camera marker geometry past the 200 ms marker age limit.
+                await asyncio.sleep(0.10)
             return {
                 "robot_id": "robot-01",
                 "armed": True,
@@ -1879,3 +1882,75 @@ async def test_dock_rejects_missing_forward_offset_and_missing_ir_receiver_codes
         assert not any(cmd.startswith("drive ") for cmd in head.commands)
     finally:
         await controller.close()
+
+
+async def test_mismatched_dock_marker_beacon_pair_refuses_before_drive(settings, tmp_path):
+    """Authoritative station map and calibration beacon/marker pair must match with zero drives."""
+    from desk_robot.config import Settings
+
+    raw = settings.model_dump()
+    raw["mode"] = "hardware"
+    raw["voice_vision_tools_enabled"] = True
+    raw["dock_station_markers"] = {1: 12, 2: 13}
+    for index, entry in enumerate(raw["robots"], start=1):
+        entry["head_url"] = f"http://192.168.1.{140 + index}:8081"
+        entry["voice"] = f"voice_{index}"
+    raw["robots"][0]["device_id"] = "xiaozhi-01"
+    raw["robots"][0]["motion_enabled"] = True
+    raw["robots"][0]["dock_motion_qualified"] = True
+    raw["robots"][0]["dock_beacon_id"] = 1
+    raw["robots"][0]["dock_marker_id"] = 13  # Station 2's marker paired with station 1's beacon.
+    raw["robots"][0]["dock_turn_sign"] = 1
+    raw["robots"][0]["dock_forward_sign"] = 1
+    with pytest.raises(ValueError, match="dock station beacon"):
+        Settings.model_validate(raw)
+
+    raw["robots"][0]["dock_marker_id"] = 12
+    cal_path = tmp_path / "mismatched-station.json"
+    cal_path.write_text(json.dumps({
+        "schema_version": 1, "measured": True,
+        "robot_id": "robot-01", "head_device_id": "xiaozhi-01",
+        "camera_sensor_pid": "OV5640",
+        "fx": 410.0, "fy": 410.0, "cx": 320.0, "cy": 240.0,
+        "tag_side_mm": 60.0, "marker_id": 13, "beacon_id": 2,
+        "target_distance_mm": 120.0,
+        "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "image_width_px": 640, "image_height_px": 480,
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+        "mount_forward_offset_mm": 10.0,
+    }), encoding="utf-8")
+    raw["robots"][0]["dock_calibration"] = cal_path
+    cfg = Settings.model_validate(raw)
+    coordinator, head = make(cfg)
+    try:
+        with pytest.raises(OperationError, match="Dock calibration required"):
+            coordinator.dock("robot-01")
+        assert not coordinator.jobs
+        assert head.commands == []
+
+        # Even if marker_id matches 12, calibration binding beacon_id=2 to station 2 must reject.
+        cal_path.write_text(json.dumps({
+            "schema_version": 1, "measured": True,
+            "robot_id": "robot-01", "head_device_id": "xiaozhi-01",
+            "camera_sensor_pid": "OV5640",
+            "fx": 410.0, "fy": 410.0, "cx": 320.0, "cy": 240.0,
+            "tag_side_mm": 60.0, "marker_id": 12, "beacon_id": 2,
+            "target_distance_mm": 120.0,
+            "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+            "image_width_px": 640, "image_height_px": 480,
+            "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+            "mount_forward_offset_mm": 10.0,
+        }), encoding="utf-8")
+        with pytest.raises(OperationError, match="beacon_id"):
+            coordinator.dock("robot-01")
+        assert not coordinator.jobs
+        assert head.commands == []
+
+        # Runtime mutation of robot.dock_marker_id off the station map also fails before drives.
+        cfg.robots[0].dock_marker_id = 13
+        with pytest.raises(OperationError, match="different stations"):
+            coordinator.dock("robot-01")
+        assert not coordinator.jobs
+        assert head.commands == []
+    finally:
+        await coordinator.close()
