@@ -1,0 +1,1113 @@
+"""Read-only physical dock diagnostics cannot masquerade as verified charging."""
+import copy
+
+import pytest
+from desk_robot.dock_evidence import DockContactInhibit, classify_dock, observe_dock_evidence
+
+
+def payload():
+    return {
+        "robot_id": "robot-01",
+        "pulse": {"present": False, "valid": False, "part_id": 0,
+                  "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
+        "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                   "valid_mask": 0, "magnet": [0, 0, 0]},
+        "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
+                  "calibrated": False, "boot_id": 17},
+        "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+        "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0, "shunt_uv": 0,
+                  "fuel_valid": False, "monitor_valid": False,
+                  "current_calibrated": False},
+        "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                      "gesture_events": 0, "physically_qualified": False,
+                      "boot_id": 17},
+        "dock": {
+            "present": True, "valid": True, "left_seated": True,
+            "right_seated": True, "input_good": True,
+            "charge_indicated": True, "charging_verified": False,
+            "seq": 1, "age_ms": 35,
+        },
+    }
+
+
+def fresh_samples(count=3):
+    readings = [payload() for _ in range(count)]
+    for seq, sample in enumerate(readings, 1):
+        sample["dock"]["seq"] = seq
+    return readings
+
+
+class FakeHead:
+    def __init__(self, samples):
+        self.samples = iter(samples)
+        self.commands = []
+
+    async def aux_status(self):
+        return next(self.samples)
+
+    async def command(self, command):
+        self.commands.append(command)
+
+
+async def test_three_stable_charger_indications_are_not_battery_proof(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    head = FakeHead(fresh_samples())
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "charger_reports_active"
+    assert result["stable_three_samples"] is True
+    assert result["source"] == "wroom_mcp23017_dock_status_pins_unqualified"
+    assert "bq24074" not in result["source"].lower()
+    assert "bq24075" not in result["source"].lower()
+    assert result["charging_verified"] is False
+    assert result["battery_current_measured"] is False
+    assert result["charger_electrically_qualified"] is False
+    assert result["motor_authorized"] is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize(("transport_ms", "source_age_ms", "expected_stable"), [
+    (1200, 35, False),
+    (20, 35, True),
+    (10, 499, False),
+])
+async def test_dock_gpio_consumer_age_includes_http_transport(
+    monkeypatch, transport_ms, source_age_ms, expected_stable,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [100.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", fast)
+    samples = fresh_samples()
+    for record in samples:
+        record["dock"]["age_ms"] = source_age_ms
+
+    class TimedHead(FakeHead):
+        async def aux_status(self):
+            # Different genuine WROOM acquisitions may still arrive too late.
+            now[0] += transport_ms / 1000.0
+            return await super().aux_status()
+
+    head = TimedHead(samples)
+    report = await observe_dock_evidence(head, "robot-01")
+    assert report["stable_three_samples"] is expected_stable
+    assert report["state"] == (
+        "charger_reports_active" if expected_stable
+        else "dock_telemetry_stale_at_consumer"
+    )
+    assert not report["charging_verified"]
+    assert not report["motor_authorized"]
+    assert not report["charging_authorized"]
+    assert head.commands == []
+
+
+async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    asym = payload()
+    asym["dock"]["right_seated"] = False
+    asym_frames = [copy.deepcopy(asym) for _ in range(3)]
+    for seq, frame in enumerate(asym_frames, 1):
+        frame["dock"]["seq"] = seq
+    head = FakeHead(asym_frames)
+    assert (await observe_dock_evidence(head, "robot-01"))["state"] == "asymmetric_seat_or_fault"
+    changed = payload()
+    changed["dock"]["charge_indicated"] = False
+    first = payload()
+    second = copy.deepcopy(changed)
+    third = copy.deepcopy(changed)
+    second["dock"]["seq"], third["dock"]["seq"] = 2, 3
+    head = FakeHead([first, second, third])
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "dock_evidence_changed"
+    assert result["stable_three_samples"] is False
+
+
+@pytest.mark.parametrize(("left", "right", "good", "charging", "state"), [
+    (False, False, False, False, "not_seated"),
+    (False, False, False, True, "charge_signal_without_input_fault"),
+    (False, False, True, False, "charger_input_without_seat"),
+    (False, False, True, True, "charge_signal_without_seat_fault"),
+    (False, True, False, False, "asymmetric_seat_or_fault"),
+    (False, True, False, True, "charge_signal_without_input_fault"),
+    (False, True, True, False, "asymmetric_seat_or_fault"),
+    (False, True, True, True, "asymmetric_seat_or_fault"),
+    (True, False, False, False, "asymmetric_seat_or_fault"),
+    (True, False, False, True, "charge_signal_without_input_fault"),
+    (True, False, True, False, "asymmetric_seat_or_fault"),
+    (True, False, True, True, "asymmetric_seat_or_fault"),
+    (True, True, False, False, "seated_but_unpowered"),
+    (True, True, False, True, "charge_signal_without_input_fault"),
+    (True, True, True, False, "input_present_not_charging"),
+    (True, True, True, True, "charger_reports_active"),
+])
+def test_independent_input_truth_table(left, right, good, charging, state):
+    dock = payload()["dock"]
+    dock.update(left_seated=left, right_seated=right,
+                input_good=good, charge_indicated=charging)
+    assert classify_dock(dock) == state
+
+
+@pytest.mark.parametrize(("left", "right"), [(True, False), (False, True)])
+@pytest.mark.parametrize("charging", [False, True])
+async def test_asymmetric_seat_both_orientations_refuse_charge_and_motion(
+    monkeypatch, left, right, charging,
+):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for frame in samples:
+        frame["dock"].update(
+            left_seated=left, right_seated=right,
+            input_good=True, charge_indicated=charging,
+        )
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "asymmetric_seat_or_fault"
+    assert result["stable_three_samples"] is True
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+    assert result["motor_authorized"] is False
+    assert result["raw_pack_direction"] == "not_available"
+    assert head.commands == []
+
+
+
+async def test_real_aux_path_preserves_chg_without_pgood_as_read_only_fault(monkeypatch):
+    # CHG and PGOOD are independent active-low hardware signals.
+    # A contradictory acquisition is a fault to surface, not an
+    # exception that prevents the Mac's diagnostic from reaching the user.
+    from desk_robot.aux import validate_aux
+
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for frame in samples:
+        frame["dock"].update(input_good=False, charge_indicated=True)
+        assert validate_aux(frame, "robot-01")["dock"]["charge_indicated"]
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "charge_signal_without_input_fault"
+    assert result["stable_three_samples"]
+    assert not result["charger_electrically_qualified"]
+    assert not result["charging_verified"]
+    assert not result["motor_authorized"]
+    assert not result["charging_authorized"]
+    assert head.commands == []
+
+
+async def test_active_charger_with_no_seat_is_fault_not_routine_input(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for record in samples:
+        record["dock"]["left_seated"] = False
+        record["dock"]["right_seated"] = False
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "charge_signal_without_seat_fault"
+    assert result["stable_three_samples"] is True
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+    assert result["motor_authorized"] is False
+    assert head.commands == []
+
+
+async def test_dock_evidence_refuses_forged_battery_charge_and_robot_identity():
+    bad = payload()
+    bad["dock"]["charging_verified"] = True
+    head = FakeHead([bad])
+    with pytest.raises(ValueError):
+        await observe_dock_evidence(head, "robot-01")
+    head = FakeHead([payload()])
+    with pytest.raises(ValueError):
+        await observe_dock_evidence(head, "robot-02")
+
+
+@pytest.mark.parametrize("missing_group", ["force", "proximity"])
+async def test_dock_legacy_missing_boot_epoch_is_never_stable(
+    monkeypatch, missing_group,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for sample in samples:
+        sample[missing_group].pop("boot_id")
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_epoch_unverified_or_changed"
+    assert result["stable_three_samples"] is False
+    assert result["raw_pack_direction"] == "not_available"
+    assert not result["charging_authorized"] and not result["motor_authorized"]
+
+
+async def test_reboot_with_monotonic_dock_and_pack_sequences_is_not_stable(
+    monkeypatch,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, sample in enumerate(samples):
+        sample["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=index + 40, pack_age_ms=35, monitor_valid=True,
+        )
+    # A restarted WROOM may produce different monotonic GPIO and INA226
+    # sequences. Require one boot epoch rather than trusting those counts.
+    for sample in samples[1:]:
+        sample["force"]["boot_id"] = 18
+        sample["proximity"]["boot_id"] = 18
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_epoch_unverified_or_changed"
+    assert not result["stable_three_samples"]
+    assert result["raw_pack_direction"] == "not_available"
+    assert not result["raw_pack_samples_fresh"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
+
+
+async def test_replayed_cached_dock_status_is_not_independent_physical_evidence(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    same = payload()
+    result = await observe_dock_evidence(
+        FakeHead([copy.deepcopy(same) for _ in range(3)]), "robot-01",
+    )
+    assert result["state"] == "dock_sample_replayed_or_reset"
+    assert result["stable_three_samples"] is False
+    assert result["charging_verified"] is False
+
+
+async def test_out_of_order_or_rebooted_dock_sequence_fails_closed(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    samples[1]["dock"]["seq"] = 9
+    samples[2]["dock"]["seq"] = 1
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "dock_sample_replayed_or_reset"
+    assert not result["stable_three_samples"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("seq", 0), ("seq", "1"), ("seq", True), ("age_ms", 500),
+    ("age_ms", -1), ("age_ms", 0.5),
+])
+async def test_dock_status_cannot_claim_valid_without_fresh_hardware_sample(
+    field, value,
+):
+    bad = payload()
+    bad["dock"][field] = value
+    with pytest.raises(ValueError):
+        await observe_dock_evidence(FakeHead([bad]), "robot-01")
+
+
+@pytest.mark.parametrize(("sequences", "expected_stable"), [
+    ((0xffffffff, 1, 2), True),
+    ((1, 0xfffffffe, 2), False),
+    ((0xfffffffe, 0xfffffffe, 1), False),
+])
+async def test_dock_gpio_sequence_rollover_matches_wroom_half_range_rule(
+    monkeypatch, sequences, expected_stable,
+):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for sample, sequence in zip(samples, sequences, strict=True):
+        sample["dock"]["seq"] = sequence
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"] is expected_stable
+    assert result["state"] == (
+        "charger_reports_active" if expected_stable
+        else "dock_sample_replayed_or_reset"
+    )
+    assert result["charging_verified"] is False
+    assert result["motor_authorized"] is False
+
+
+
+
+async def test_uncooperative_dock_evidence_read_times_out_without_charge_claim(
+    monkeypatch,
+):
+    """A stuck authenticated GPIO poller cannot invent stable charge evidence."""
+    import asyncio
+
+    import desk_robot.dock_evidence as evidence
+
+    monkeypatch.setattr(evidence, "_DOCK_READ_TIMEOUT_S", 0.04)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class StubbornHead(FakeHead):
+        async def aux_status(self):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return await super().aux_status()
+
+    head = StubbornHead(fresh_samples())
+    try:
+        with pytest.raises(TimeoutError, match="Dock GPIO evidence read timed out"):
+            await asyncio.wait_for(
+                observe_dock_evidence(head, "robot-01"), timeout=0.5,
+            )
+        assert entered.is_set()
+        assert head.commands == []
+    finally:
+        release.set()
+        await asyncio.sleep(0)
+    assert head.commands == []
+
+
+@pytest.mark.parametrize(("raw_ma", "expected"), [
+    (30, "into_pack_unqualified"),
+    (-30, "out_of_pack_unqualified"),
+    (0, "indeterminate"),
+])
+async def test_new_ina226_current_receipts_report_direction_without_charger_authority(
+    monkeypatch, raw_ma, expected,
+):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, data in enumerate(samples):
+        data["power"].update(
+            shunt_uv=raw_ma * 5,
+            pack_ma=raw_ma,
+            pack_valid=True,
+            pack_seq=index + 19,
+            pack_age_ms=35,
+            monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["state"] == "charger_reports_active"
+    assert result["stable_three_samples"]
+    assert result["raw_pack_direction"] == expected
+    assert result["charger_indicator_net_discharge_conflict"] is (
+        raw_ma < -20)
+    assert result["raw_pack_samples_fresh"] is True
+    assert result["raw_pack_ma"] == [raw_ma] * 3
+    assert result["battery_current_measured"] is False
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+
+
+async def test_raw_pack_replay_cannot_forge_three_current_conversions(monkeypatch):
+    async def fast(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for data in samples:
+        data["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=9, pack_age_ms=35, monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"]  # independent dock pin samples pass
+    assert result["raw_pack_direction"] == "acquisition_replay"
+    assert result["raw_pack_samples_fresh"] is False
+    assert result["raw_pack_ma"] == []
+    assert result["charging_verified"] is False
+
+
+@pytest.mark.parametrize(("source_age_ms", "transport_ms", "fresh"), [
+    (35, 20, True),
+    (480, 100, False),
+    (499, 2, False),
+])
+async def test_pack_current_consumer_age_is_independent_of_dock_pin_age(
+    monkeypatch, source_age_ms, transport_ms, fresh,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [200.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", fast)
+
+    class TimedHead(FakeHead):
+        async def aux_status(self):
+            now[0] += transport_ms / 1000.0
+            return await super().aux_status()
+
+    samples = fresh_samples()
+    for index, record in enumerate(samples):
+        record["dock"]["age_ms"] = 10
+        record["power"].update(
+            shunt_uv=-150, pack_ma=-30, pack_valid=True,
+            pack_seq=index + 1, monitor_valid=True,
+            pack_age_ms=source_age_ms,
+        )
+    head = TimedHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["stable_three_samples"]
+    assert result["state"] == "charger_reports_active"
+    assert result["raw_pack_samples_fresh"] is fresh
+    assert result["raw_pack_direction"] == (
+        "out_of_pack_unqualified" if fresh
+        else "current_sample_stale_or_age_unverified"
+    )
+    assert result["raw_pack_ma"] == ([-30] * 3 if fresh else [])
+    assert result["charger_indicator_net_discharge_conflict"] is fresh
+    assert not result["battery_current_measured"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
+    assert head.commands == []
+
+
+async def test_old_pack_telemetry_without_age_cannot_claim_fresh_current(monkeypatch):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, record in enumerate(samples):
+        record["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=index + 9, monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"]
+    assert not result["raw_pack_samples_fresh"]
+    assert result["raw_pack_direction"] == "current_sample_stale_or_age_unverified"
+    assert not result["charging_verified"] and not result["charging_authorized"]
+
+
+@pytest.mark.parametrize("invalid", [True, -1, 0.5, 500, 0xffffffff + 1])
+def test_pack_age_source_contract_rejects_unqualified_timestamp(invalid):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(
+        shunt_uv=150, pack_ma=30, pack_valid=True, pack_seq=1,
+        monitor_valid=True, pack_age_ms=invalid,
+    )
+    with pytest.raises(ValueError, match="INA226 pack"):
+        validate_aux(frame, "robot-01")
+
+
+def test_wroom_pack_age_field_uses_real_monitor_sample_clock():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    assert r'"pack_age_ms":%lu' not in source  # source escapes JSON in C++
+    assert r'\"pack_age_ms\":%lu' in source
+    assert "now_ms - a.gauge.monitor_at_ms" in source
+    assert "a.gauge.monitor_sample_seq != 0U" in source
+
+
+@pytest.mark.parametrize("pause_after", [1, 2])
+async def test_dock_observation_expires_after_scheduling_pause_and_retry_is_fresh(
+    monkeypatch, pause_after,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [100.0]
+    sleep_calls = [0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def delayed_sleep(seconds):
+        sleep_calls[0] += 1
+        now[0] += seconds + (2.0 if sleep_calls[0] == pause_after else 0.05)
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", delayed_sleep)
+    head = FakeHead(fresh_samples(pause_after + 3))
+
+    expired = await observe_dock_evidence(head, "robot-01")
+    assert expired["state"] == "dock_observation_window_expired"
+    assert not expired["stable_three_samples"]
+    assert not expired["raw_pack_samples_fresh"]
+    assert not expired["charging_authorized"]
+    assert not expired["motor_authorized"]
+
+    # A subsequent request must read three new samples, not use the
+    # aborted attempt's partial observations.
+    retry = await observe_dock_evidence(head, "robot-01")
+    assert retry["state"] == "charger_reports_active"
+    assert retry["stable_three_samples"]
+    assert not retry["charging_verified"]
+    assert not retry["charging_authorized"]
+    assert not retry["motor_authorized"]
+    assert head.commands == []
+
+
+def dock_pin_sample(seq, *, asserted_pin=None, asserted=False, age=5):
+    pin = asserted_pin or ("left_seated" if asserted else None)
+    return dict(
+        present=True, valid=True, charging_verified=False, seq=seq, age_ms=age,
+        left_seated=(pin == "left_seated"),
+        right_seated=(pin == "right_seated"),
+        input_good=(pin == "input_good"),
+        charge_indicated=(pin == "charge_indicated"),
+    )
+
+
+@pytest.mark.parametrize(
+    "pin_name",
+    ["left_seated", "right_seated", "input_good", "charge_indicated"],
+)
+def test_dock_inhibit_one_hot_pins_and_streak_reset(pin_name):
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted_pin=pin_name), 17)
+    assert guard.inhibited
+    # Two consecutive fresh all-clear packets must not release yet.
+    assert guard.observe(dock_pin_sample(2), 17)
+    assert guard.inhibited
+    assert guard.observe(dock_pin_sample(3), 17)
+    assert guard.inhibited
+    # A newly asserted pin resets the clear streak so clear #1/#2 must restart.
+    assert guard.observe(dock_pin_sample(4, asserted_pin=pin_name), 17)
+    assert guard.inhibited
+    for seq in (5, 6):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    # Only the third consecutive fresh all-clear releases.
+    assert guard.observe(dock_pin_sample(7), 17)
+    assert not guard.inhibited
+
+
+@pytest.mark.parametrize(
+    "pin_name",
+    ["left_seated", "right_seated", "input_good", "charge_indicated"],
+)
+async def test_mac_aux_telemetry_ingestion_inhibits_for_each_one_hot_pin(
+    tmp_path, pin_name,
+):
+    from pathlib import Path
+
+    from desk_robot.config import load_settings
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController, SceneChange
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    class NoScene:
+        async def compare(self, *_a, **_kw):
+            return SceneChange("none", "", 0.0)
+
+    root = Path(__file__).resolve().parents[2]
+    settings = load_settings(root / "code/config/fleet.simulation.toml")
+    settings.mode = "hardware"
+    memory = MemoryStore(tmp_path, [r.id for r in settings.robots])
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    inhibit_events = []
+    pet = PetController(
+        settings, {}, conversation, memory, NoScene(),
+        on_dock_inhibit_changed=lambda rid, flag: inhibit_events.append((rid, flag)),
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 1
+
+    def make_aux(seq: int, asserted: str | None = None) -> dict:
+        frame = payload()
+        frame["dock"] = dock_pin_sample(seq, asserted_pin=asserted)
+        return frame
+
+    try:
+        await pet._observe_aux(
+            "robot-01", 1, make_aux(1, asserted=pin_name), request_elapsed_ms=5.0,
+        )
+        assert pet.is_dock_charging_inhibited("robot-01") is True
+        assert inhibit_events == [("robot-01", True)]
+        await pet._observe_aux("robot-01", 1, make_aux(2), request_elapsed_ms=5.0)
+        await pet._observe_aux("robot-01", 1, make_aux(3), request_elapsed_ms=5.0)
+        assert pet.is_dock_charging_inhibited("robot-01") is True
+        await pet._observe_aux("robot-01", 1, make_aux(4), request_elapsed_ms=5.0)
+        assert pet.is_dock_charging_inhibited("robot-01") is False
+        assert inhibit_events == [("robot-01", True), ("robot-01", False)]
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+def test_dock_inhibit_missing_replayed_and_legacy_cannot_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(5, asserted=True), 17)
+    assert guard.inhibited
+    assert not guard.observe(None, 17)
+    guard.invalidate()
+    assert not guard.observe(dock_pin_sample(4), 17)
+    assert not guard.observe(dock_pin_sample(5), 17)
+    assert guard.observe(dock_pin_sample(6), None)
+    assert guard.inhibited
+    for seq in (6, 7):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    assert guard.observe(dock_pin_sample(8), 17)
+    assert not guard.inhibited
+
+
+def test_dock_inhibit_reboot_and_retired_epoch_do_not_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(100, asserted=True), 17)
+    assert guard.observe(dock_pin_sample(1), 18)
+    assert guard.inhibited
+    assert not guard.observe(dock_pin_sample(101), 17)
+    assert guard.inhibited
+    for seq in (2, 3, 4):
+        assert guard.observe(dock_pin_sample(seq), 18)
+    assert not guard.inhibited
+
+
+@pytest.mark.parametrize("elapsed", [495, float("nan"), float("inf"), -1, True])
+def test_dock_inhibit_invalid_or_expired_never_releases(elapsed):
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted=True), 17)
+    assert not guard.observe(dock_pin_sample(2), 17, elapsed)
+    assert guard.inhibited
+
+
+def test_dock_inhibit_rollover_and_replay_break_confirmation():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(0xfffffffe, asserted=True), 17)
+    assert guard.observe(dock_pin_sample(0xffffffff), 17)
+    assert guard.observe(dock_pin_sample(1), 17)
+    assert not guard.observe(dock_pin_sample(1), 17)
+    for seq in (2, 3):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    assert guard.observe(dock_pin_sample(4), 17)
+    assert not guard.inhibited
+
+
+def test_dock_inhibit_huge_age_cannot_raise_or_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted=True), 17)
+    assert not guard.observe(dock_pin_sample(2, age=10**1000), 17, 0.5)
+    assert guard.inhibited
+
+
+@pytest.mark.parametrize("shunt", [-81920, -81919, -81918, 81916, 81917, 81918, 81919, 81920])
+@pytest.mark.parametrize("include_pack", [False, True])
+def test_saturated_shunt_cannot_be_valid_telemetry(shunt, include_pack):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(shunt_uv=shunt, monitor_valid=True)
+    if include_pack:
+        frame["power"].update(
+            pack_ma=int(shunt / 5), pack_valid=True, pack_seq=1, pack_age_ms=35,
+        )
+    with pytest.raises(ValueError, match="INA226 saturated shunt"):
+        validate_aux(frame, "robot-01")
+
+
+@pytest.mark.parametrize("shunt", [-81917, -81915, 0, 81915])
+@pytest.mark.parametrize("include_pack", [False, True])
+def test_unsaturated_shunt_wire_boundaries_remain_valid(shunt, include_pack):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(shunt_uv=shunt, monitor_valid=True)
+    if include_pack:
+        frame["power"].update(
+            pack_ma=int(shunt / 5), pack_valid=True, pack_seq=1, pack_age_ms=35,
+        )
+    assert validate_aux(frame, "robot-01")["power"]["monitor_valid"]
+
+
+@pytest.mark.parametrize("shunt", [-81920, 81917])
+def test_invalid_shunt_diagnostic_does_not_invalidate_other_sensors(shunt):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(
+        shunt_uv=shunt, monitor_valid=False, pack_valid=False,
+        pack_ma=0, pack_seq=1, pack_age_ms=35,
+    )
+    result = validate_aux(frame, "robot-01")
+    assert result["power"]["monitor_valid"] is False
+    assert result["dock"]["valid"] is True
+
+
+@pytest.mark.parametrize(("readings", "expected"), [
+    (((-81917, -16383),) * 3, "out_of_pack_unqualified"),
+    (((81915, 16383),) * 3, "into_pack_unqualified"),
+    (((-105, -21), (0, 0), (105, 21)), "indeterminate"),
+    (((-5, -1), (-2, 0), (2, 0)), "indeterminate"),
+    (((-105, -21), (-100, -20), (-105, -21)), "indeterminate"),
+    (((105, 21), (100, 20), (105, 21)), "indeterminate"),
+    (((-105, -21), (105, 21), (105, 21)), "indeterminate"),
+])
+async def test_ina226_signed_boundaries_and_mixed_dock_direction(
+    monkeypatch, readings, expected,
+):
+    """Signed nonrail readings survive JSON without inventing net charging."""
+    import json
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, (sample, (uv, ma)) in enumerate(zip(samples, readings, strict=True)):
+        sample["power"].update(
+            shunt_uv=uv, pack_ma=ma, pack_valid=True, monitor_valid=True,
+            pack_seq=index + 1, pack_age_ms=35,
+        )
+    head = FakeHead(json.loads(json.dumps(samples)))
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["stable_three_samples"]
+    assert result["raw_pack_samples_fresh"]
+    assert result["raw_pack_ma"] == [ma for _, ma in readings]
+    assert result["raw_pack_direction"] == expected
+    assert result["charger_indicator_net_discharge_conflict"] is (
+        expected == "out_of_pack_unqualified"
+    )
+    assert not result["battery_current_measured"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
+    assert not result["motor_authorized"]
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("seated", [False, True])
+async def test_positive_current_burst_then_zero_crossings_never_verify_charge(
+    monkeypatch, seated,
+):
+    import desk_robot.dock_evidence as evidence
+
+    clock = [100.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: clock[0])
+
+    async def advance(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", advance)
+    windows = ((120, 120, 120), (21, 0, -21), (20, -20, 20))
+    samples = fresh_samples(9)
+    for index, (sample, ma) in enumerate(
+        zip(samples, (ma for window in windows for ma in window), strict=True), 1,
+    ):
+        sample["dock"].update(
+            left_seated=seated, right_seated=seated,
+            input_good=seated, charge_indicated=seated,
+        )
+        sample["power"].update(
+            shunt_uv=ma * 5, pack_ma=ma, pack_valid=True,
+            pack_seq=index, pack_age_ms=0, monitor_valid=True,
+        )
+    head = FakeHead(samples)
+    for expected, window in zip(
+        ("into_pack_unqualified", "indeterminate", "indeterminate"),
+        windows, strict=True,
+    ):
+        start = clock[0]
+        report = await observe_dock_evidence(head, "robot-01")
+        assert clock[0] - start == pytest.approx(0.6)
+        assert report["state"] == ("charger_reports_active" if seated else "not_seated")
+        assert report["stable_three_samples"] is True
+        assert report["raw_pack_samples_fresh"] is True
+        assert report["raw_pack_ma"] == list(window)
+        assert report["raw_pack_direction"] == expected
+        assert report["charger_indicator_net_discharge_conflict"] is False
+        assert report["battery_current_measured"] is False
+        assert report["charging_verified"] is False
+        assert report["charging_authorized"] is False
+        assert report["motor_authorized"] is False
+        assert report.get("charging", False) is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("seated", [False, True])
+@pytest.mark.parametrize("raw_ma", [None, -30, 0, 30])
+async def test_pgood_alone_never_confirms_pack_charging(monkeypatch, seated, raw_ma):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, sample in enumerate(samples, 1):
+        sample["dock"].update(
+            left_seated=seated, right_seated=seated,
+            input_good=True, charge_indicated=False,
+        )
+        if raw_ma is not None:
+            sample["power"].update(
+                shunt_uv=raw_ma * 5, pack_ma=raw_ma, pack_valid=True,
+                pack_seq=index, pack_age_ms=35, monitor_valid=True,
+            )
+    head = FakeHead(samples)
+    report = await observe_dock_evidence(head, "robot-01")
+    assert report["state"] == (
+        "input_present_not_charging" if seated else "charger_input_without_seat"
+    )
+    assert report["stable_three_samples"] is True
+    assert report["raw_pack_samples_fresh"] is (raw_ma is not None)
+    assert report["raw_pack_direction"] == {
+        None: "not_available", -30: "out_of_pack_unqualified",
+        0: "indeterminate", 30: "into_pack_unqualified",
+    }[raw_ma]
+    for flag in ("battery_current_measured", "charging_verified",
+                 "charging_authorized", "motor_authorized"):
+        assert report[flag] is False
+    assert report.get("charged", False) is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("cell_mv", [4200, 3300])
+async def test_full_gauge_taper_and_chg_deassertion_never_verify_completion(
+    monkeypatch, cell_mv,
+):
+    """Even fresh full SOC, tapered current and inactive CHG are not charge proof."""
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    windows = ((120, 60, 30), (20, 10, 0))
+    samples = fresh_samples(6)
+    currents = [ma for window in windows for ma in window]
+    for index, (sample, ma) in enumerate(zip(samples, currents, strict=True), 1):
+        sample["dock"]["charge_indicated"] = index <= 3
+        sample["power"].update(
+            cell_mv=cell_mv, soc_centi=10000, fuel_valid=True,
+            fuel_seq=index, fuel_age_ms=0, monitor_valid=True,
+            shunt_uv=ma * 5, pack_ma=ma, pack_valid=True,
+            pack_seq=index, pack_age_ms=0,
+        )
+    head = FakeHead(samples)
+    for state, direction, window in zip(
+        ("charger_reports_active", "input_present_not_charging"),
+        ("into_pack_unqualified", "indeterminate"), windows, strict=True,
+    ):
+        report = await observe_dock_evidence(head, "robot-01")
+        assert report["state"] == state
+        assert report["stable_three_samples"] is True
+        assert report["raw_pack_samples_fresh"] is True
+        assert report["raw_pack_ma"] == list(window)
+        assert report["raw_pack_direction"] == direction
+        for flag in ("battery_current_measured", "charger_electrically_qualified",
+                     "charging_verified", "charging_authorized", "motor_authorized"):
+            assert report[flag] is False
+        assert report.get("charging_complete", False) is False
+        assert report.get("battery_healthy", False) is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize(("pin", "bounce"), [
+    (None, False),
+    ("left_seated", True), ("right_seated", True),
+    ("input_good", True), ("charge_indicated", True),
+    ("left_seated", False), ("right_seated", False),
+    ("input_good", False), ("charge_indicated", False),
+])
+@pytest.mark.parametrize(("currents", "clock_fault"), [
+    ((21, 30, 40), None),
+    ((30, 20, 30), None),
+    ((30, 0, 30), None),
+    ((30, -30, 30), None),
+    ((-30, -30, -30), None),
+    ((30, 30, 30), "replay"),
+    ((30, 30, 30), "missing_age"),
+    ((30, 30, 30), "invalid"),
+])
+async def test_raw_seat_current_agreement_requires_both_independent_evidence_streams(
+    monkeypatch, pin, bounce, currents, clock_fault,
+):
+    """A positive current cannot substitute for stable seat/charger pins, or vice versa."""
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, (sample, ma) in enumerate(zip(samples, currents, strict=True), 1):
+        if pin is not None and (not bounce or index == 2):
+            sample["dock"][pin] = False
+        valid = clock_fault != "invalid" or index != 2
+        sample["power"].update(
+            shunt_uv=ma * 5 if valid else 0, pack_ma=ma if valid else 0,
+            pack_valid=valid, monitor_valid=valid,
+            pack_seq=1 if clock_fault == "replay" else index, pack_age_ms=35,
+        )
+        if clock_fault == "missing_age" and index == 2:
+            del sample["power"]["pack_age_ms"]
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    expected = pin is None and clock_fault is None and all(ma > 20 for ma in currents)
+    assert result["raw_seat_current_agreement"] is expected
+    assert result["stable_three_samples"] is not bounce
+    if bounce:
+        assert result["state"] == "dock_evidence_changed"
+        assert result["raw_pack_ma"] == []
+        assert result["raw_pack_samples_fresh"] is False
+    for flag in ("physical_contact_verified", "battery_current_measured",
+                 "charger_electrically_qualified", "charging_verified",
+                 "charging_authorized", "motor_authorized"):
+        assert result[flag] is False
+    assert head.commands == []
+
+
+def _dwell_sample(
+    dock_seq: int,
+    pack_seq: int,
+    *,
+    boot_id: int = 11,
+    dock_age_ms: int = 20,
+    pack_age_ms: int = 25,
+    pack_ma: int = 180,
+    pack_valid: bool = True,
+    left_seated: bool = True,
+    right_seated: bool = True,
+    input_good: bool = True,
+    charge_indicated: bool = True,
+) -> dict:
+    base = fresh_samples()[0]
+    base["force"]["boot_id"] = boot_id
+    base["proximity"]["boot_id"] = boot_id
+    base["dock"].update(
+        present=True,
+        valid=True,
+        left_seated=left_seated,
+        right_seated=right_seated,
+        input_good=input_good,
+        charge_indicated=charge_indicated,
+        seq=dock_seq,
+        age_ms=dock_age_ms,
+    )
+    base["power"].update(
+        shunt_uv=pack_ma * 5 if pack_valid else 0,
+        pack_ma=pack_ma if pack_valid else 0,
+        pack_valid=pack_valid,
+        monitor_valid=pack_valid,
+        pack_seq=pack_seq,
+        pack_age_ms=pack_age_ms,
+    )
+    return base
+
+
+async def test_continuous_two_second_charging_dwell_confirms_without_granting_authority(
+    monkeypatch,
+):
+    clock = [100.0]
+
+    async def advance_sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", advance_sleep)
+    samples = [_dwell_sample(i, i, pack_ma=150) for i in range(1, 10)]
+    head = FakeHead(samples)
+    report = await observe_dock_evidence(
+        head, "robot-01", gap=0.30, dwell_s=2.0, clock=lambda: clock[0],
+    )
+    assert report["software_charging_confirmed"] is True
+    assert report["state"] == "software_charging_dwell_confirmed"
+    assert report["dwell_elapsed_s"] >= 2.0
+    assert report["charging_authorized"] is False
+    assert report["charger_electrically_qualified"] is False
+    assert report["charging_verified"] is False
+    assert report["motor_authorized"] is False
+    assert head.commands == []
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "stale_dock",
+        "stale_pack",
+        "replay_dock",
+        "replay_pack",
+        "invalid_pack",
+        "pin_left_open",
+        "pin_pgood_lost",
+        "pin_chg_off",
+        "epoch_changed",
+        "zero_current",
+        "negative_current",
+    ],
+)
+def test_charging_dwell_resets_on_every_continuity_fault_and_requires_full_rewindow(fault):
+    from desk_robot.dock_evidence import DockChargingDwell
+
+    dwell = DockChargingDwell(required_dwell_s=2.0, max_gap_s=0.5)
+    # Build up 1.6 s of clean charging dwell across 5 samples (0.0 -> 1.6 s).
+    for idx in range(5):
+        res = dwell.observe_sample(
+            _dwell_sample(idx + 1, idx + 1), "robot-01", received_at=10.0 + idx * 0.4,
+        )
+        assert res["software_charging_confirmed"] is False
+    assert dwell.dwell_started_at == pytest.approx(10.0)
+
+    # Inject the continuity fault at t = 11.9 s (just before 2.0 s would elapse).
+    bad = _dwell_sample(6, 6)
+    if fault == "stale_dock":
+        bad["dock"]["age_ms"] = 500
+    elif fault == "stale_pack":
+        bad["power"]["pack_age_ms"] = 500
+    elif fault == "replay_dock":
+        bad["dock"]["seq"] = 5
+    elif fault == "replay_pack":
+        bad["power"]["pack_seq"] = 5
+    elif fault == "invalid_pack":
+        bad["power"]["pack_valid"] = False
+    elif fault == "pin_left_open":
+        bad["dock"]["left_seated"] = False
+    elif fault == "pin_pgood_lost":
+        bad["dock"]["input_good"] = False
+        bad["dock"]["charge_indicated"] = False
+    elif fault == "pin_chg_off":
+        bad["dock"]["charge_indicated"] = False
+    elif fault == "epoch_changed":
+        bad["force"]["boot_id"] = 12
+        bad["proximity"]["boot_id"] = 12
+    elif fault == "zero_current":
+        bad["power"]["pack_ma"] = 0
+        bad["power"]["shunt_uv"] = 0
+    elif fault == "negative_current":
+        bad["power"]["pack_ma"] = -45
+        bad["power"]["shunt_uv"] = -225
+
+    failed = dwell.observe_sample(bad, "robot-01", received_at=11.9)
+    assert failed["software_charging_confirmed"] is False
+    assert failed["dwell_elapsed_s"] == 0.0
+    assert dwell.dwell_started_at is None
+
+    # Next healthy sample at t = 12.1 s (>= 2.0 s since 10.0, only 0.0 s since recovery)
+    # MUST NOT confirm until another full 2.0 s window completes at t = 14.1 s.
+    boot = 12 if fault == "epoch_changed" else 11
+    seq_base = 1 if fault == "epoch_changed" else 10
+    restarted = dwell.observe_sample(
+        _dwell_sample(seq_base, seq_base, boot_id=boot), "robot-01", received_at=12.1,
+    )
+    assert restarted["software_charging_confirmed"] is False
+    assert restarted["dwell_elapsed_s"] == 0.0
+
+    for step in range(1, 5):
+        mid = dwell.observe_sample(
+            _dwell_sample(seq_base + step, seq_base + step, boot_id=boot),
+            "robot-01",
+            received_at=12.1 + step * 0.4,
+        )
+        assert mid["software_charging_confirmed"] is False
+
+    confirmed = dwell.observe_sample(
+        _dwell_sample(seq_base + 5, seq_base + 5, boot_id=boot),
+        "robot-01",
+        received_at=14.1,
+    )
+    assert confirmed["software_charging_confirmed"] is True
+    assert confirmed["dwell_elapsed_s"] == pytest.approx(2.0)
+    assert confirmed["charging_authorized"] is False
+    assert confirmed["charger_electrically_qualified"] is False
+    assert confirmed["charging_verified"] is False

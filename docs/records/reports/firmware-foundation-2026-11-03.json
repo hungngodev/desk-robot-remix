@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "checked_at": "2026-11-03",
   "scope": "Compiled and host-tested firmware foundation, not complete robot or physical edge protection",
   "checks": {

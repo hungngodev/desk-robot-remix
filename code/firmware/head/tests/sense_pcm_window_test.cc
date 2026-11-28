@@ -1,0 +1,419 @@
+#include "sense_pcm_window.h"
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <limits>
+using desk_robot::SensePcmWindow;
+
+// Exercise the real capture window with mixed callback sizes, simulated
+// source clocks and Nyquist-frequency PCM. This is not an acoustic AEC test.
+static void stress_capture_clock(std::uint32_t source_rate, int stall_us) {
+  constexpr std::size_t guard = 8;
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2 + guard * 2> storage;
+  std::array<std::int16_t, 2048> mic{}, ref{};
+  storage.fill(sentinel);
+  auto* data = storage.data() + guard;
+  SensePcmWindow capture;
+  constexpr std::int64_t start = 1000000;
+  assert(capture.begin(data, start));
+  std::uint32_t total = 0;
+  const bool valid = source_rate == SensePcmWindow::kSampleRate && stall_us == 0;
+  for (int i = 0; i < 200; ++i) {
+    const std::uint32_t frames = 480 * (1 + (i * 7) % 4);
+    for (std::uint32_t n = 0; n < frames; ++n) {
+      mic[n] = ((total + n) % 2) ? INT16_MIN : INT16_MAX;
+      ref[n] = ((total + n) % 4 < 2) ? -23456 : 23456;
+    }
+    total += frames;
+    const auto jitter = i == 0 ? 0 : ((i % 3) - 1) * 1000;
+    const auto end = start + std::int64_t{total} * 1000000 / source_rate
+        + jitter + (i >= 5 ? stall_us : 0);
+    const auto before = capture.frames_received();
+    const bool terminal = capture.failed() || capture.ready();
+    capture.offer(mic.data(), ref.data(), frames, end, true);
+    assert(capture.frames_received() <= SensePcmWindow::kFrames);
+    assert(capture.frames_received() >= before);
+    if (terminal) assert(capture.frames_received() == before);
+    for (std::size_t n = 0; n < guard; ++n) {
+      assert(storage[n] == sentinel);
+      assert(storage[storage.size() - 1 - n] == sentinel);
+    }
+  }
+  if (valid) {
+    assert(capture.ready() && !capture.failed());
+    const auto result = capture.take();
+    assert(result.interleaved == data && result.frames == SensePcmWindow::kFrames);
+    assert(result.first_sample_us == start);
+    assert(result.last_sample_us >= start + 3999000);
+    assert(result.last_sample_us <= start + 4001000);
+    for (std::uint32_t n = 0; n < result.frames; ++n) {
+      assert(data[2 * n] == (n % 2 ? INT16_MIN : INT16_MAX));
+      assert(data[2 * n + 1] == (n % 4 < 2 ? -23456 : 23456));
+    }
+  } else {
+    assert(capture.failed() && !capture.ready());
+    assert(capture.take().interleaved == nullptr);
+    // Unaccepted space stays untouched even after repeated callbacks.
+    for (std::uint32_t n = capture.frames_received() * 2;
+         n < SensePcmWindow::kFrames * 2; ++n) {
+      assert(data[n] == sentinel);
+    }
+    assert(capture.discard() == data);
+  }
+  assert(!capture.occupied());
+}
+
+// Several JPEG scheduling stalls can accumulate a large phase excursion,
+// then fast callbacks can hide it by the end of the four-second window.
+static void jpeg_burst_phase_recovery() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage{};
+  std::array<std::int16_t, 320> mic{}, ref{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  SensePcmWindow capture;
+  constexpr std::int64_t start = 1000000;
+  assert(capture.begin(storage.data(), start));
+  for (int i = 1; i <= 200; ++i) {
+    const auto phase = i <= 6 ? (i - 1) * 20000 :
+        std::max(0, 100000 - (i - 6) * 1000);
+    capture.offer(mic.data(), ref.data(), 320, start + i * 20000 + phase, true);
+    if (i == 5) assert(!capture.failed() && capture.frames_received() == 1600);
+    if (i >= 6) assert(capture.failed() && capture.frames_received() == 1600);
+  }
+  assert(!capture.ready() && capture.take().interleaved == nullptr);
+  assert(capture.discard() == storage.data());
+}
+
+// A lapped reference is reported by the codec as invalid even if the
+// callback timing is perfect. Recovery must not qualify the same window.
+static void reference_lap_invalidates_capture() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 320> mic{}, ref{}, invalid{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  constexpr std::int64_t start = 1000000;
+  constexpr std::int16_t sentinel = 3210;
+  for (int fault : {2, 100, 200}) {
+    storage.fill(sentinel);
+    SensePcmWindow capture;
+    assert(capture.begin(storage.data(), start));
+    for (int i = 1; i <= 200; ++i) {
+      const bool valid = i != fault;
+      capture.offer(mic.data(), valid ? ref.data() : invalid.data(), 320,
+                    start + i * 20000, valid);
+      if (i < fault) {
+        assert(!capture.failed());
+        assert(capture.frames_received() == static_cast<unsigned>(i) * 320);
+      } else {
+        assert(capture.failed() && !capture.ready());
+        assert(capture.frames_received() == static_cast<unsigned>(fault - 1) * 320);
+      }
+    }
+    assert(capture.take().interleaved == nullptr);
+    assert(capture.occupied());
+    for (std::size_t i = capture.frames_received() * 2; i < storage.size(); ++i)
+      assert(storage[i] == sentinel);
+    assert(capture.discard() == storage.data());
+    assert(!capture.occupied());
+    assert(capture.begin(storage.data(), start + 5000000));
+    for (int i = 1; i <= 200; ++i)
+      capture.offer(mic.data(), ref.data(), 320, start + 5000000 + i * 20000, true);
+    assert(capture.ready() && !capture.failed());
+    assert(capture.take().frames == SensePcmWindow::kFrames);
+  }
+}
+
+static void callback_overlap_boundary() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 320> mic{}, ref{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  for (std::int64_t overlap : {1999, 2000, 2001}) {
+    storage.fill(3210);
+    SensePcmWindow capture;
+    assert(capture.begin(storage.data(), 1000000));
+    capture.offer(mic.data(), ref.data(), 320, 1020000, true);
+    capture.offer(mic.data(), ref.data(), 320, 1040000 - overlap, true);
+    const bool accepted = overlap <= 2000;
+    assert(capture.failed() == !accepted);
+    assert(capture.frames_received() == (accepted ? 640U : 320U));
+    assert(capture.last_sample_us() == (accepted ? 1040000 - overlap : 1020000));
+    assert(storage[640] == (accepted ? 1234 : 3210));
+    assert(storage[641] == (accepted ? -5678 : 3210));
+    assert(!capture.ready());
+    assert(capture.discard() == storage.data());
+  }
+}
+
+// Use an absolute sample clock: rounding each odd callback independently
+// would introduce artificial drift. Check both channel strides and the tail.
+static void capture_stride_boundary(std::uint32_t stride, std::int64_t start) {
+  constexpr std::size_t guard = 8;
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2 + 2 * guard> storage;
+  storage.fill(sentinel);
+  auto* data = storage.data() + guard;
+  std::array<std::int16_t, 2048> mic{}, ref{};
+  const auto mic_sample = [](std::uint32_t n) { return n % 3 ? INT16_MIN : INT16_MAX; };
+  const auto ref_sample = [](std::uint32_t n) { return n % 5 ? 23456 : -23456; };
+  SensePcmWindow capture;
+  assert(capture.begin(data, start));
+  const auto duration = [](std::uint32_t n) { return std::int64_t{n} * 125 / 2; };
+  // An odd callback ending one microsecond before its consent boundary
+  // must not leave even one sample behind.
+  mic.fill(INT16_MIN);
+  ref.fill(INT16_MAX);
+  capture.offer(mic.data(), ref.data(), stride, start + duration(stride) - 1, true);
+  assert(!capture.failed() && capture.frames_received() == 0 && data[0] == sentinel);
+  for (std::uint32_t total = 0; total < SensePcmWindow::kFrames; total += stride) {
+    for (std::uint32_t n = 0; n < stride; ++n) {
+      mic[n] = mic_sample(total + n);
+      ref[n] = ref_sample(total + n);
+    }
+    capture.offer(mic.data(), ref.data(), stride, start + duration(total + stride), true);
+    const auto accepted = std::min(total + stride, SensePcmWindow::kFrames);
+    assert(!capture.failed() && capture.frames_received() == accepted);
+    assert(capture.ready() == (accepted == SensePcmWindow::kFrames));
+    assert(data[2 * accepted] == sentinel);
+  }
+  // Terminal callbacks cannot alter the completed window or its timestamp.
+  capture.offer(mic.data(), ref.data(), stride, std::numeric_limits<std::int64_t>::min(), true);
+  const auto result = capture.take();
+  assert(result.interleaved == data && result.frames == SensePcmWindow::kFrames);
+  assert(result.first_sample_us == start && result.last_sample_us == start + 4000000);
+  assert(!capture.occupied());
+  for (std::uint32_t n = 0; n < result.frames; ++n) {
+    assert(data[2 * n] == mic_sample(n));
+    assert(data[2 * n + 1] == ref_sample(n));
+  }
+  for (std::size_t n = 0; n < guard; ++n) {
+    assert(storage[n] == sentinel && storage[storage.size() - 1 - n] == sentinel);
+  }
+}
+
+static void rejected_frame_count_and_clock_boundaries() {
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 3> mic{INT16_MIN, INT16_MAX, -1}, ref{1, -2, 3};
+  constexpr auto clock_max = std::numeric_limits<std::int64_t>::max();
+  constexpr auto clock_min = std::numeric_limits<std::int64_t>::min();
+  for (auto frames : {0U, 2049U, 2148U, std::numeric_limits<std::uint32_t>::max(), 3U}) {
+    for (auto end : {clock_min, clock_max, std::int64_t{128250}}) {
+      if (frames == 3 && end == 128250) continue;
+      storage.fill(sentinel);
+      SensePcmWindow capture;
+      assert(capture.begin(storage.data(), 1));
+      capture.offer(mic.data(), ref.data(), 3, 188, true);
+      assert(!capture.failed() && capture.frames_received() == 3);
+      // Invalid counts must be rejected before reading the short inputs;
+      // a positive but impossibly late clock must also fail closed.
+      capture.offer(mic.data(), ref.data(), frames, end, true);
+      assert(capture.failed() && !capture.ready() && capture.frames_received() == 3);
+      assert(capture.last_sample_us() == 188);
+      assert(capture.take().interleaved == nullptr);
+      assert(std::all_of(storage.begin() + 6, storage.end(),
+                         [](std::int16_t value) { return value == sentinel; }));
+      assert(capture.discard() == storage.data());
+    }
+  }
+}
+
+int main() {
+  for (auto stride : {1U, 3U, 127U, 319U, 1023U, 2047U, 2048U}) {
+    capture_stride_boundary(stride, 1);
+    capture_stride_boundary(stride, std::numeric_limits<std::int64_t>::max() - 4200000);
+  }
+  rejected_frame_count_and_clock_boundaries();
+  callback_overlap_boundary();
+  reference_lap_invalidates_capture();
+  jpeg_burst_phase_recovery();
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};
+  assert(SensePcmWindow::kBytes == 256000);
+  SensePcmWindow capture;
+  assert(!capture.ready());
+  assert(capture.begin(data.data(), 1000000));
+  assert(!capture.begin(data.data(), 1000001));
+  std::array<std::int16_t, 320> mic{};
+  std::array<std::int16_t, 320> ref{};
+  mic.fill(1234); ref.fill(-5678);
+  for (int i=1; i<=200; ++i) capture.offer(mic.data(), ref.data(), 320, 1000000 + i * 20000, true);
+  assert(capture.ready());
+  assert(capture.frames_received()==SensePcmWindow::kFrames);
+  auto result=capture.take();
+  assert(result.frames==64000 && result.interleaved == data.data());
+  assert(result.first_sample_us == 1000000);
+  assert(result.last_sample_us == 5000000);
+  assert(result.interleaved[0]==1234 && result.interleaved[1]==-5678);
+  assert(result.interleaved[127998]==1234 && result.interleaved[127999]==-5678);
+  assert(!capture.ready() && !capture.occupied());
+  // Accepted I2S frames are not proof of a usable acoustic stimulus.
+  // A full, correctly timestamped capture of digital silence must fail.
+  SensePcmWindow silent_reference;
+  std::array<std::int16_t, 320> quiet{};
+  assert(silent_reference.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    silent_reference.offer(mic.data(), quiet.data(), 320,
+                           1000000 + i * 20000, true);
+  assert(silent_reference.frames_received() == SensePcmWindow::kFrames);
+  assert(silent_reference.failed() && !silent_reference.ready());
+  assert(silent_reference.take().interleaved == nullptr);
+  assert(silent_reference.discard() == data.data());
+  assert(!silent_reference.occupied());
+  // A full mic frame count may likewise be all zero after a PDM fault.
+  // Calibration requires actual nonzero evidence in BOTH source channels.
+  SensePcmWindow silent_microphone;
+  assert(silent_microphone.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    silent_microphone.offer(quiet.data(), ref.data(), 320,
+                            1000000 + i * 20000, true);
+  assert(silent_microphone.frames_received() == SensePcmWindow::kFrames);
+  assert(silent_microphone.failed() && !silent_microphone.ready());
+  assert(silent_microphone.take().interleaved == nullptr);
+  assert(silent_microphone.discard() == data.data());
+  assert(!silent_microphone.occupied());
+  assert(capture.begin(data.data(), 1000000));
+  capture.offer(mic.data(), ref.data(), 320, 1020000, false);
+  assert(capture.failed() && !capture.ready());
+  assert(capture.take().interleaved == nullptr);
+  assert(capture.discard() == data.data());
+  assert(capture.begin(data.data(), 1000000));
+  capture.offer(mic.data(), ref.data(), 320, 1700000, true);
+  assert(capture.failed());
+  assert(capture.discard() == data.data());
+  assert(capture.begin(data.data(), 1000000));
+  capture.offer(mic.data(), ref.data(), 320, 1020000, true);
+  capture.offer(mic.data(), ref.data(), 320, 1020000, true);
+  assert(capture.failed());
+  assert(capture.discard() == data.data());
+  // A blocking microphone callback could start before the operator
+  // enabled private capture, then return after START. Its preceding PCM
+  // must never be saved in the authenticated recording.
+  SensePcmWindow consent_edge;
+  assert(consent_edge.begin(data.data(), 1000000));
+  consent_edge.offer(mic.data(), ref.data(), 320, 1001000, true);
+  assert(consent_edge.frames_received() == 0);
+  assert(!consent_edge.failed() && !consent_edge.ready());
+  for (int i = 1; i <= 200; ++i)
+    consent_edge.offer(mic.data(), ref.data(), 320,
+                       1001000 + i * 20000, true);
+  assert(consent_edge.ready());
+  auto after_consent = consent_edge.take();
+  assert(after_consent.frames == 64000);
+  assert(after_consent.first_sample_us == 1001000);
+  assert(after_consent.last_sample_us == 5001000);
+  // A final PDM read can overrun a four-second window. The last
+  // timestamp must describe the last RECORDED sample, not the later
+  // unrecorded samples in the tail of that same hardware read.
+  SensePcmWindow partial;
+  assert(partial.begin(data.data(), 1000000));
+  for (int i = 1; i <= 199; ++i)
+    partial.offer(mic.data(), ref.data(), 320, 1000000 + i * 20000, true);
+  partial.offer(mic.data(), ref.data(), 220, 4993750, true);
+  assert(partial.frames_received() == 63900 && !partial.ready());
+  partial.offer(mic.data(), ref.data(), 320, 5013750, true);
+  assert(partial.ready());
+  const auto clipped = partial.take();
+  assert(clipped.frames == 64000);
+  assert(clipped.first_sample_us == 1000000);
+  assert(clipped.last_sample_us == 5000000);
+  assert(clipped.last_sample_us - clipped.first_sample_us == 4000000);
+  assert(clipped.interleaved[127999] == -5678);
+  assert(!partial.occupied());
+  // A 180 ms stall between 20 ms microphone callbacks is not continuous
+  // source timing, although the older 250 ms permissive gap accepted it.
+  SensePcmWindow missing;
+  assert(missing.begin(data.data(), 1000000));
+  missing.offer(mic.data(), ref.data(), 320, 1020000, true);
+  missing.offer(mic.data(), ref.data(), 320, 1200000, true);
+  assert(missing.failed());
+  assert(!missing.ready());
+  assert(missing.discard() == data.data());
+  // Small irregular gaps can accumulate and invalidate a full 64,000-frame
+  // window without exceeding the callback-level jitter threshold.
+  SensePcmWindow drifted;
+  assert(drifted.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i)
+    drifted.offer(mic.data(), ref.data(), 320,
+                  1000000 + i * 20500, true);
+  assert(drifted.frames_received() == 161 * 320);
+  assert(drifted.failed() && !drifted.ready());
+  assert(drifted.take().interleaved == nullptr);
+  assert(drifted.discard() == data.data());
+  // Monotonic callback END timestamps alone cannot show that the inferred
+  // 20 ms source intervals do not overlap. Repeated source samples would
+  // corrupt A2 acoustic lag/drift calibration even when 64k frames arrive.
+  SensePcmWindow overlap;
+  assert(overlap.begin(data.data(), 1000000));
+  overlap.offer(mic.data(), ref.data(), 320, 1020000, true);
+  overlap.offer(mic.data(), ref.data(), 320, 1030000, true);
+  assert(overlap.failed() && !overlap.ready());
+  assert(overlap.frames_received() == 320);
+  assert(overlap.discard() == data.data());
+  // A 3 ms overlap still exceeds the bounded scheduler jitter allowance.
+  assert(overlap.begin(data.data(), 1000000));
+  overlap.offer(mic.data(), ref.data(), 320, 1020000, true);
+  overlap.offer(mic.data(), ref.data(), 320, 1037000, true);
+  assert(overlap.failed() && overlap.frames_received() == 320);
+  assert(overlap.discard() == data.data());
+  // A small 1 ms callback scheduling variation remains permissible.
+  SensePcmWindow jitter;
+  assert(jitter.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i) {
+    jitter.offer(mic.data(), ref.data(), 320,
+                 1000000 + i * 20000 - (i > 1 ? 1000 : 0), true);
+  }
+  assert(jitter.ready() && !jitter.failed());
+  assert(jitter.take().frames == SensePcmWindow::kFrames);
+  // A dropped PDM callback can fit both timing tolerances, so explicit
+  // failure notification must invalidate the active window immediately.
+  SensePcmWindow short_read;
+  short_read.invalidate_read(1000000);
+  assert(!short_read.failed());
+  assert(short_read.begin(data.data(), 1000000));
+  short_read.invalidate_read(999999);
+  assert(!short_read.failed());
+  short_read.offer(mic.data(), ref.data(), 320, 1020000, true);
+  short_read.invalidate_read(1040000);
+  for (int i = 2; i <= 200; ++i)
+    short_read.offer(mic.data(), ref.data(), 320,
+                     1000000 + (i + 1) * 20000, true);
+  assert(short_read.failed() && !short_read.ready());
+  assert(short_read.frames_received() == 320);
+  assert(short_read.take().interleaved == nullptr);
+  assert(short_read.discard() == data.data());
+  assert(short_read.begin(data.data(), 6000000));
+  short_read.invalidate_read(6000000);
+  assert(short_read.failed());
+  assert(short_read.discard() == data.data());
+  assert(short_read.begin(data.data(), 7000000));
+  short_read.invalidate_read(6000001);
+  for (int i = 1; i <= 200; ++i)
+    short_read.offer(mic.data(), ref.data(), 320, 7000000 + i * 20000, true);
+  assert(short_read.ready());
+  short_read.invalidate_read(11020000);
+  assert(short_read.ready() && !short_read.failed());
+  assert(short_read.take().frames == SensePcmWindow::kFrames);
+  // Reject invalid clock values before subtracting callback duration.
+  SensePcmWindow edge;
+  for (auto end_us : {std::numeric_limits<std::int64_t>::min(), std::int64_t{0}}) {
+    assert(edge.begin(data.data(), 1000000));
+    edge.offer(mic.data(), ref.data(), 320, end_us, true);
+    assert(edge.failed() && edge.frames_received() == 0 && !edge.ready());
+    assert(edge.discard() == data.data());
+  }
+  // A valid short callback near the clock's upper limit must not overflow
+  // while applying the allowed scheduling-overlap tolerance.
+  const auto clock_max = std::numeric_limits<std::int64_t>::max();
+  assert(edge.begin(data.data(), clock_max - 5000));
+  edge.offer(mic.data(), ref.data(), 16, clock_max - 1000, true);
+  edge.offer(mic.data(), ref.data(), 16, clock_max, true);
+  assert(!edge.failed() && edge.frames_received() == 32);
+  assert(edge.discard() == data.data());
+  for (auto rate : {8000U, 12000U, 16000U, 24000U, 32000U, 44100U, 48000U}) {
+    stress_capture_clock(rate, 0);
+  }
+  stress_capture_clock(16000, 180000);
+  stress_capture_clock(16000, -10000);
+  return 0;
+}

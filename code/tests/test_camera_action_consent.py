@@ -1,0 +1,187 @@
+"""Motion from live camera evidence must retain its original consent grant."""
+
+import asyncio
+import time
+from types import SimpleNamespace
+
+import pytest
+from desk_robot import controller as controller_module
+from desk_robot.controller import Coordinator, Job, OperationError
+from desk_robot.simulator import SimulatedHead, SimulationVision
+
+
+def make_controller(settings):
+    head = SimulatedHead("robot-01")
+    return Coordinator(settings, {"robot-01": head}, SimulationVision()), head
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+def test_camera_motion_grant_rejects_revocation(settings, regrant):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    controller, _ = make_controller(settings)
+    grant = controller._camera_motion_grant()
+    controller._require_camera_motion_grant(grant)
+    settings.voice_vision_tools_enabled = False
+    if regrant:
+        settings.voice_vision_tools_enabled = True
+    with pytest.raises(OperationError, match="Camera consent revoked"):
+        controller._require_camera_motion_grant(grant)
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_dock_camera_revoked_during_snapshot_never_drives(settings, regrant):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    controller, head = make_controller(settings)
+    grant = controller._camera_motion_grant()
+
+    async def healthy(*args, **kwargs):
+        return {}
+
+    async def changing_snapshot():
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        return b"camera-frame", time.monotonic()
+
+    controller._assert_armed_health = healthy
+    head.snapshot_for_dock = changing_snapshot
+    camera = SimpleNamespace(camera_sensor_pid=None)
+    try:
+        with pytest.raises(OperationError, match="Camera consent revoked"):
+            await controller._dock_approach(
+                Job("dock-consent", "robot-01", "dock_approach"),
+                camera, 200, 1, 1, camera_grant=grant,
+            )
+        assert head.commands == []
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("motor_backend", ["stepper_28byj48", "differential"])
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_pickup_revocation_during_observe_never_grasps(
+    settings, motor_backend, regrant,
+):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.robots[0].motor_backend = motor_backend
+    controller, head = make_controller(settings)
+    grant = controller._camera_motion_grant()
+    await head.command("arm")
+    head.commands.clear()
+    controller.multimodal = SimpleNamespace(
+        stream_owns_camera=lambda robot_id: True,
+        status=lambda robot_id: {"camera_stream_connected": True},
+    )
+
+    async def healthy(*args, **kwargs):
+        return {}
+
+    async def observe(*args, **kwargs):
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        return SimpleNamespace(center=(0, 0)), time.monotonic()
+
+    controller._assert_armed_health = healthy
+    controller._observe = observe
+    calibration = SimpleNamespace(
+        grip_open=70, lift_down=80, servo_settle_seconds=0,
+        ground=lambda center: (0, 0), within=lambda position: True,
+        has_pickup_floor_clearance=lambda: True,
+        grip_ground_mm=(0, 0), alignment_tolerance_mm=1,
+    )
+    try:
+        with pytest.raises(OperationError, match="Camera consent revoked"):
+            await controller._pickup(
+                Job("pickup-consent", "robot-01", "pickup"),
+                "key", calibration, camera_grant=grant,
+            )
+        expected = [] if motor_backend == "stepper_28byj48" else ["grip 70", "lift 80"]
+        assert head.commands == expected
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("stage", ["health", "dispatch"])
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_dock_revocation_before_snapshot_dispatch(settings, stage, regrant):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    controller, head = make_controller(settings)
+    grant = controller._camera_motion_grant()
+    calls = []
+
+    def revoke():
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+
+    async def healthy(*args, **kwargs):
+        if stage == "health":
+            revoke()
+        else:
+            asyncio.get_running_loop().call_soon(revoke)
+        return {}
+
+    async def snapshot():
+        calls.append("snapshot")
+        return b"camera-frame", time.monotonic()
+
+    controller._assert_armed_health = healthy
+    head.snapshot_for_dock = snapshot
+    try:
+        with pytest.raises(OperationError, match="Camera consent revoked"):
+            await controller._dock_approach(
+                Job("dock-consent-dispatch", "robot-01", "dock_approach"),
+                SimpleNamespace(camera_sensor_pid=None), 200, 1, 1, camera_grant=grant,
+            )
+        assert not calls
+        assert not head.commands
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_pickup_revocation_before_detector_dispatch(settings, monkeypatch, regrant):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    controller, head = make_controller(settings)
+    grant = controller._camera_motion_grant()
+    calls = []
+    frame = SimpleNamespace(
+        source="proactive", received_at=time.monotonic(), jpeg=b"private-frame",
+    )
+    controller.multimodal = SimpleNamespace(
+        stream_owns_camera=lambda robot_id: True,
+        status=lambda robot_id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={"robot-01": [frame]}),
+    )
+
+    def revoke():
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+
+    async def validated_sizes(_frames, *, max_bytes):
+        asyncio.get_running_loop().call_soon(revoke)
+        return ((20, 20),)
+
+    async def detect(*args):
+        calls.append("detect")
+        return [SimpleNamespace(label="key", confidence=1.0, box=(0, 0, 10, 10))]
+
+    monkeypatch.setattr(controller_module, "validated_camera_sizes", validated_sizes)
+    controller.vision = SimpleNamespace(detect=detect)
+    calibration = SimpleNamespace(image_width=20, image_height=20, min_confidence=0.8)
+    try:
+        with pytest.raises(OperationError, match="Camera consent revoked"):
+            await controller._observe(
+                "robot-01", "key", calibration, camera_grant=grant,
+            )
+        assert not calls
+        assert not head.commands
+    finally:
+        await controller.close()

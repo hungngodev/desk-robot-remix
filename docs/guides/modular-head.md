@@ -1,17 +1,26 @@
-# Small-component head — purchased Sense
+# Small-component head — paid Sense, inspection pending
 
-Updated 2026-11-06. Reuse the owned **0.96-inch SSD1306 OLED**. User chose a rounder
-existing head: [Sparky v0.1.0](../cad/originals/sparky-head/README.md) is the current
-fit-check candidate; EVA remains a historical source.
-User reports buying a **XIAO ESP32S3 Sense camera/microphone bundle**, with a
-displayed price of **$18.87**. Quantity, receipt charges, arrival and revision
-remain unconfirmed. Keep this board for the voice-interruption work. The speaker
-baseline uses one MAX98357A I²S amplifier. The photographed HiLetgo PAM8403
-is a possible analog path if a suitable DAC is available. See the [parts list](../hardware/parts.md).
-The earlier **$21.11 head subtotal** came from the reported Sense price and
-historical amplifier and speaker prices before charges and mounts. See the
+Updated 2026-11-23 from the original 2026-11-06 fit study. Reuse the reported
+**0.96-inch SSD1306 OLED** after inspecting the actual board and glass. Compare
+[Cozmars packaging](../product-definition.md) first for the accepted rounded
+retro-TV head; the saved [Sparky v0.1.0](../cad/originals/sparky-head/README.md)
+remains an unprinted fallback fit study, not a fitted head. EVA is historical.
+
+One **XIAO ESP32S3 Sense camera/microphone bundle** is confirmed **$13.67 paid**
+by a seller order and independent payment receipt on November 3, 2026. The
+carrier reported delivery on November 7, but the actual board, camera, PDM
+microphone, included accessories, revision and condition remain **uninspected**.
+The older **$18.87** displayed listing was not the paid amount, and the earlier
+**$21.11 head subtotal** combined historical listing prices before shipping,
+tax, mounts, power and the rest of the robot. Neither is a qualified current
+checkout total. Consult the [canonical first-unit builder and buying route](one-complete-robot.md)
+and the [paid receipt reconciliation](../hardware/bom.json).
+Keep the Sense for voice and continuous video. The selected digital playback
+uses one MAX98357A I²S amplifier and a separately qualified speaker; the
+photographed HiLetgo PAM8403 is an analog spare, not a direct I²S substitute.
+See the [parts list](../hardware/parts.md) and historical
 [supplier comparison](../research/2026-11-03-head-budget.md).
-Confirm the delivery contains the full Sense kit with camera and microphone.
+Inspect the complete actual Sense kit before making mounts or audio connections.
 
 ## Reuse drivers, change the board configuration
 
@@ -25,45 +34,110 @@ components. A **separate Sense board target**, pin map and 8 MB partition/asset 
 are now implemented and compiled. See [actual pins/build](../../code/firmware/head/sense/README.md)
 and [verification](firmware-foundation.md). The existing modular build is Freenove 16 MB + SH1106 +
 INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
-incompatible. The Sense build passes; no physical Sense test has happened.
+incompatible. The early Sense target compiled at the recorded source snapshot; this is not a claim that the current PR head has five successful required CI jobs. No fitted Sense trial has been recorded.
 
-**Ordinary-speech interruption is required in the first build.** The compiled
-Sense baseline has no playback reference/AEC and does not yet meet it. Reuse
-[RIO's exact-Sense software AEC and cancellation](../research/2026-11-03-sense-realtime-reuse.md),
-then qualify the final acoustics. RIO's speaker pins differ from ours, and its
-Arduino source is not a drop-in ESP-IDF binary. Its camera captures requested
-stills; Google's/Pipecat's live-session examples supply the next integration
-pattern for paced camera frames and idle observations. See
-[audio acceptance](audio-barge-in.md). An echo gate that mutes the microphone
-during playback cannot pass the interruption requirement.
+**Ordinary-speech interruption is required in the first build.** The early
+Sense baseline lacked playback reference/AEC; the current pinned
+`SenseReferenceCodec` is now integrated and supplies microphone and
+playback-reference PCM to the selected ESP-IDF AFE source path. That is software
+integration, **not** evidence of fitted-speaker AEC alignment, audible stopping,
+or preservation of a human's first words. The exact board, enclosure and
+firmware must still pass the [physical audio acceptance](audio-barge-in.md)
+at both speaking distances. Reuse the documented
+[RIO exact-Sense AEC and cancellation work](../research/2026-11-03-sense-realtime-reuse.md)
+and [Sense AEC port procedure](sense-aec-port.md); RIO's speaker pins differ
+from ours and its Arduino code is not a drop-in ESP-IDF binary. RIO captured
+requested stills, whereas the current Sense uses consented continuous
+authenticated MJPEG, with Mac frame selection and stale-frame rejection
+described below. Google's and Pipecat's session designs remain research
+references, not evidence of a second active voice stack. An echo gate that
+mutes the microphone during playback cannot pass the interruption requirement.
 
 Implemented, physically unqualified header budget: OLED2 + amplifier3 + UART2 = seven signals, with
 camera/PDM internally connected. The allocation was checked against official documentation and compiled; it is
 not physically qualified. OLED5/6, amplifier4/7/8 and UART2/1 preserve nativeUSB,
-camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot empty. Do not copy video GPIO1/2
+camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot
+empty. Before attaching the amplifier on GPIO7/8 or the optional, disabled
+GPIO9 RGB heart, follow the actual Sense expansion revision's J3 isolation
+procedure in the [Sense wiring guide](../../code/firmware/head/sense/README.md#pin-source-and-allocation).
+Software SD disable is not electrical isolation. Do not copy video GPIO1/2
 sensor wiring or the old Freenove UART pin numbers blindly. The body owns all
 cliff sensors; the head owns OLED, so no shared two-master bus is required.
 
-The new Sense app is 2,503,664 bytes and passes the 0x2f0000-byte OTA-slot check;
-assets fit at 0x600000 in the 8 MB layout. The earlier Freenove merged image is
-not a Sense image; never truncate or substitute it. Firmware installation/private/build scripts now accept `--board sense`, using
-a separate ignored `xiaozhi-sense` copy.
+At the November 6 firmware snapshot, the Sense app measured 2,503,664 bytes
+and passed its 0x2f0000-byte OTA slot check, with assets beginning at 0x600000
+in the documented 8 MB layout. These are historical size and offset observations,
+not a compile report for the current PR head. Recheck the exact current ESP-IDF
+6.1 source job, generated partition table, image size and actual board identity
+before flashing. The earlier Freenove merged image is not a Sense image; never
+truncate or substitute it. Firmware installation/private/build scripts accept
+`--board sense`, using a separate ignored `xiaozhi-sense` copy.
 [Implementation milestone](../plans/2026-11-03-active-desk-pet.md#milestone-4--sense-head-and-original-face).
 
 ## Face and interaction
 
-The OLED is monochrome, not a color LCD. Begin with original blink/gaze/listening/
-speaking/rest/blocked expressions. [RoboEyes](https://github.com/FluxGarage/RoboEyes)
-is a strong **GPL-3.0** candidate, with an Arduino/GFX graphics layer; a small
-ESP-IDF drawing/timing adapter is needed. Tech Talkies' custom-face fork is also
-GPL-3.0. Neither is integrated; resolve dependency/notices/source obligations
-before copying. Do not mark a combined GPL firmware MIT-only.
+The OLED is monochrome, not a color LCD. The selected Sense firmware
+already integrates the **MIT-licensed Stackchan-agent hierarchical behavior
+machine**, pinned at `bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613`,
+into `overlay/stackchan_behavior.hpp` and the existing local
+`DeskRobotSenseBoard::FaceTask`. Preserve its source license notice.
+It handles blink, gaze, listening/speaking transitions, idle/rest and
+bounded contextual face cues. Its motion suggestions are **never** sent
+to the WROOM motor or gripper. The Mac may request cosmetic mood cues,
+but cannot override deterministic body safety; body faults display a
+local safety status and neutral face before ordinary idle expressions.
+[RoboEyes](https://github.com/FluxGarage/RoboEyes) and the Tech Talkies
+face fork remain **GPL-3.0 research options, not integrated dependencies**.
+Do not copy their code into this MIT source without a separate license review.
 
-One task should own OLED updates; animation must yield and never delay audio,
-UART stop or camera handling. Blink/idle behavior can continue locally while the
-Mac provides higher-level character state. Prototype head touch uses the owned
-Adafruit #1374, pending mounting and response checks.
-Head patting does not locate the user or navigate back to them.
+Only the existing local face task owns OLED updates. The WROOM status poll
+uses a separate task so an interrupted UART read cannot stall blink timing,
+Xiaozhi audio or emergency STOP. The OLED remains available during
+continuous listening as well as idle; status and mood owners are separate.
+The selected inexpensive generic AT42QT1010 head-touch input belongs to the
+WROOM body, not an extra Sense GPIO. It needs actual through-case placement
+and bounce tests. Touch is evidence for the Mac's contextual decision, not an
+unconditional local expression. Reuse any genuinely owned compatible
+sensor rather than ordering a new Adafruit module. Head patting does not
+locate the user or navigate back to them.
+
+The consented camera is **one authenticated continuous MJPEG producer** on
+`/api/camera.mjpg`, not a recurring snapshot request. The Mac
+`HttpHead.stream_frames()` verifies each JPEG's per-robot boot, sequence
+and device capture-completion receipt and selects the newest frame in
+coalesced network reads. It rejects same-boot backlog when
+the relative Mac arrival interval exceeds the device capture-completion
+interval by more than 500 ms, about two ordinary 4 FPS frame periods.
+Delayed frames are not relabeled as fresh simply because the network
+reader woke up later. This is a
+**relative backlog check**, not clock synchronization or proof of image
+exposure latency. Mac and ESP32 clocks cannot be compared absolutely.
+A real A9 trial still needs measured camera-to-Mac latency, object freshness,
+concurrent voice and consent/offline recovery. A physical camera bench can no
+longer pass through legacy snapshot polling. With explicit video consent,
+run this read-only test against the actual provisioned head, with its motors
+disconnected or safely on a stand:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_camera.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --stream --score-motion --require-audio-activity \
+  --report data/private/head_camera_trial.json
+```
+
+For this **combined audio and camera** run, begin a consented Xiaozhi
+microphone session and ordinary audible speaker test during the camera window.
+The additional flag requires microphone and digital speaker reference activity
+while MJPEG and WROOM status are being sampled. Without it, the CLI remains a
+streaming-only camera and telemetry diagnostic rather than a simultaneous
+audio/video trial. The report measures persistent stream interarrival, device
+capture-completion deltas, concurrent WROOM status and matched Mac-clock AEC
+counter progress. One post-run audio status snapshot does not prove simultaneous
+activity; the bench now polls the actual existing audio diagnostics in parallel. It does **not** qualify
+true optical exposure timing, image interpretation, gripper reach, audible
+playback, motor safety or A9 physical behavior. No motor command or still
+snapshot is sent by this bench command.
 
 ## Existing case and small changes
 
@@ -93,9 +167,12 @@ and active design before touching geometry.
 ## Power/audio and staged bring-up
 
 - Logic stays 3.3 V. Verify amplifier variant/pins and supply per its documentation.
-  Speaker connects **SPK+ to SPK−**, neither output to GND. Limit output for the
-  8 Ω / 1 W speaker; check acoustic port and cavity fit.
-- Use a qualified power bank and separate rated actuator branches. Do not route
+  Speaker connects **SPK+ to SPK−**, neither output to GND. The selected
+  Challenge CS20-02P110-04-1X is an **8 Ω, 2 W** rectangular speaker
+  candidate, not the superseded 1 W round speaker. Limit output to its
+  measured installed acoustic/thermal rating and check enclosure port,
+  MAX98357A gain, distortion and cavity fit.
+- Use the final **qualified matched rechargeable 1S cell, charger/protection and regulated 5V distribution system**, with separately rated actuator branches. An unidentified owned power bank may only be used for isolated bench testing after verifying its output; it is not the selected permanent power architecture. Do not route
   motor current through head/body regulators or laptop USB.
 - On USB with motors absent, verify screen, fresh camera capture, PDM recording,
   speaker/listening transition and head identity before joining UART TX/RX/GND.

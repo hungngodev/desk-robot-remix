@@ -1,7 +1,9 @@
 # Sense echo-cancellation port: reuse the existing audio engine
 
-Source review, 2026-11-03. **Feasible integration direction, not implemented or
-physically qualified.** Keep the purchased Sense and its existing pins. Reuse
+Original source review, 2026-11-03. **Reference PCM adapter is now implemented
+and firmware compiled in the selected Sense overlay, but microphone and
+speaker acoustics are NOT physically qualified.** Keep the purchased Sense
+and its existing pins. Reuse
 RIO's playback-reference/delay-calibration approach; let Xiaozhi's existing
 ESP-IDF audio front end perform cancellation. Do not stack RIO's entire AEC,
 noise suppressor, voice detector and residual gate on top of the existing engine.
@@ -12,19 +14,25 @@ Known source paths below refer to those revisions. [Source record](../hardware/r
 
 ## Existing seams
 
+The active Sense pin contract (`code/firmware/head/sense/config.h`, checked by
+`code/firmware/head/tests/test_sense.py`) uses onboard PDM clock GPIO42 and data
+GPIO41 at 16 kHz; MAX98357A I2S BCLK GPIO4, LRCK GPIO7 and DOUT GPIO8 at
+32 kHz. The initial 24 kHz Opus decoder rate is not the amplifier clock.
+No MCU-controlled amplifier SD_MODE or switched supply is wired (`GPIO_NUM_NC`).
+
 | File / symbol | Relevant contract |
 | --- | --- |
 | `main/audio/engines/afe_audio_engine.cc`, `AfeAudioEngine::Initialize` / `Feed` | Existing engine selects `MR` for two input channels with a reference. Input is interleaved signed 16-bit PCM at 16 kHz: mic, reference, mic, reference. Query its actual feed chunk size. |
 | `main/audio/audio_service.cc`, `ReadAudioData` / `AudioInputTask` | Requests 160 frames per 10 ms; two channels require 320 sample values. Processed output remains mono. |
 | `main/audio/codecs/no_audio_codec.cc`, `NoAudioCodecSimplexPdm::Read` | Current Sense input is mono 16 kHz PDM-demodulated PCM on I²S0. |
-| Same file, `NoAudioCodec::Write` | Takes 24 kHz output PCM, applies squared software volume/clamping, writes 32-bit mono I²S on I²S1. A tap before this method misses the effective speaker gain/clipping. |
+| Same file, `NoAudioCodec::Write` | Takes 32 kHz output PCM after XiaoZhi resamples its usual 24 kHz Opus stream, applies squared software volume/clamping, writes 32-bit mono I²S on I²S1. The MAX98357A excludes 24 kHz LRCLK; a tap before this method misses the effective speaker gain/clipping. |
 | `firmware/head/sense/desk_robot_sense.cc`, `GetAudioCodec` | Isolated place to select a Sense-only reference codec without changing camera, OLED, UART or amplifier pins. |
-| `firmware/head/install_overlay.py`, `planned_files` | Copies Sense board sources. A future opt-in must also extend the upstream device-AEC whitelist narrowly and reversibly. |
+| `firmware/head/install_overlay.py`, `planned_files` | Copies Sense board sources and extends the upstream device-AEC whitelist narrowly for the Sense profile. |
 
 ## Smallest substantive port
 
 Add a Sense-only codec adapter and bounded playback-reference helper, keeping the
-current baseline available for comparison. The writer owns one stateful 24-to-16
+current baseline available for comparison. The writer owns one stateful 32-to-16
 kHz converter. Publish the effective post-volume/clamped output samples with
 frame indices, timing and a playback generation; do not reconstruct reference
 gain independently from an unsynchronized volume variable.
@@ -42,7 +50,7 @@ unknown alignment need explicit diagnostics and a failed qualification state.
 
 Reference must follow samples actually accepted/played by the output path,
 including partial writes, idle gaps, startup occupancy and audible tails.
-Current TX allocation is 6 × 240 frames, nominally 60 ms at 24 kHz; that is not a
+Current TX allocation is 6 × 240 frames, nominally 45 ms at 32 kHz; that is not a
 measured acoustic delay. Measure capture/output delay and clock drift on the
 assembled head. RIO's initial 90 ms is not our calibration.
 
@@ -51,6 +59,233 @@ reconnect. Clearing software queues does not cancel a blocking write or flush
 TX DMA. Keep reference for any tail that really plays; discard reference for
 audio canceled before playback. The Mac [flush contract](live-conversation.md)
 must reach this device path and receive actual playback-completion information.
+
+## Reference decimation and bandwidth
+
+The Sense-only 32 kHz to 16 kHz bridge filters accepted post-volume PCM
+with a causal 63-tap symmetric Q15 equiripple FIR. The design uses
+[scipy.signal.remez](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.remez.html)
+with 6 kHz passband, 8 kHz stopband and 1:10 band weighting. Coefficients
+are rounded to Q15 and the center is adjusted to unity DC gain. The native
+regression exercises the production helper, including spectral rejection,
+full-scale PCM, phase preservation across gaps and generation reset.
+The linear-phase filter adds 31 input samples (0.969 ms) of delay.
+Recalibrate the assembled head's acoustic delay with this filter; do not
+treat digital spectral checks as evidence of acoustic AEC qualification.
+The existing I2S owner, ESP-SR AFE, reference clock, cancellation fence
+and short-write failure accounting remain authoritative.
+
+## Reference buffer integrity and observable failure
+
+The selected `SenseReferenceCodec` now reads real mono PDM input and
+interleaves it with a bounded 32 kHz to 16 kHz speaker reference before
+Xiaozhi's existing ESP-SR AFE. It uses a generation fence on cancellation,
+post-volume reference samples and short ring copies under a mutex; actual
+blocking I2S reads and writes run outside that mutex. This software path
+is implemented, not a simulated microphone or proof of a real acoustic
+tail flush.
+
+The codec records saturated lifetime counts of reference underrun
+reads, ring-overwrite reads and stale post-cancellation writes. If a
+complete ring capacity of reference samples is published between
+microphone reads, the newest read does not silently claim a valid
+time-aligned history. It substitutes silence, marks A2 reference
+integrity failed. The realtime codec counts these errors without synchronous
+console logging. A sustained 32-read underflow or stale post-cancellation
+playback publish also marks integrity failure. Short input reads and uncertain
+or short output writes are separate sticky integrity failures.
+`GetReferenceDiagnostics()` returns these counts and the sticky
+`integrity_failed` flag under the codec mutex. `ClearReference()`
+resets session indices but **does not erase the lifetime failure**.
+
+**The authenticated Sense `/api/audio.reference` endpoint now exposes
+these counters read-only to the Mac `HttpHead.audio_reference_status()`
+and the camera contention bench. This is a software integrity diagnostic,
+not an acoustic performance metric.** Any nonzero
+`integrity_failed` blocks an A2 qualification claim; even a clean
+counter does not prove measured ERLE, delay/clock compensation,
+cancellation of already buffered TX DMA or preservation of real human
+speech during double talk. The operator must still record the actual
+audio and hardware timing tests from the mandatory barge-in guide.
+
+With continuous microphone consent flashed, the Sense head reuses the
+**same** Xiaozhi listening path after a server audio channel closes even
+when WiFi stays associated. It retries only from idle, at most once every
+five seconds, and never starts a second microphone or WebSocket owner.
+A local BOOT privacy action disables unattended restart for the rest of
+that boot. This is software recovery logic, not evidence that network
+reconnection, double talk or acoustic STOP passed on real hardware.
+
+## Authenticated one-shot Sense microphone/reference capture
+
+The selected `SenseReferenceCodec` now exposes one *optional* private
+four-second PCM calibration window, fed by its own existing
+`NoAudioCodecSimplexPdm::Read` callback. The same sample index stores
+microphone and digital post-volume speaker reference. No second audio
+reader, AEC engine or separate UDP audio path is required. The original
+Xiaozhi microphone, AFE, camera, Opus and speaker remain canonical.
+
+The legacy upstream UDP audio debugger has no per-recording consent or expiry.
+It is disabled for Sense builds, and its retained host receiver accepts only
+explicitly consented loopback test traffic. Closing that receiver is not a
+device microphone stop command. Use the authenticated one-shot procedure below
+for physical calibration.
+
+**This bench feature is disabled in normal firmware.** For a temporary
+operator-authorized lab image only, configure
+`CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y` and
+`CONFIG_DESK_ROBOT_AEC_DELAY_MS=0`. The head build requires delay zero
+while capturing absolute acoustic latency, and the firmware rejects
+incomplete or invalid microphone/reference windows. Keep the selected
+Sense 16 kHz PDM, 32 kHz speaker and device AEC setup. The endpoint
+requires the existing per-head bearer token, uses the existing
+`/api/audio.capture.start`, `/api/audio.capture.abort`,
+`/api/audio.capture.status`, and `/api/audio.capture.raw` HTTP handlers, and streams one bounded
+256000-byte RAM window through an asynchronous worker so HTTP dispatch
+can continue serving emergency STOP. Firmware wipes the PSRAM buffer
+after transfer, timeout, revocation or failed capture.
+
+The operator must explicitly consent to recording microphone data. Generate the
+private Sense configuration with `--continuous-audio --bench-aec-capture
+--aec-delay-ms 0` using `firmware/head/private_config.py`, together with the
+required robot, private configuration and Mac LAN IP, then build with
+`bash scripts/build_head.sh --board sense --private` from `code/`.
+A private firmware build and bearer alone do not grant raw recording.
+For EACH trial, mute with BOOT, hold BOOT while already muted until the
+long-press event, release, then deliberately tap within 30 seconds to
+unmute while connected and idle. This distinct calibration gesture
+authorizes exactly one START within the next 30 seconds. Ordinary unmute
+does not authorize PCM. BOOT mute, double click, WiFi loss, an observed
+audio failure or explicit abort revokes the grant. Failed START after
+consumption requires another gesture. Failed WiFi event registration
+leaves the recorder unavailable. Playback reset invalidates existing PCM
+but does not issue a grant. Repeat the physical gesture for each recording.
+Use a private isolated network and disable/reflash the capture setting
+after measurements. Do not transmit the bearer token as a command-line
+argument, record other people without permission, commit the WAVs or
+store them outside the local protected trial directory.
+
+1. With the physical Sense head running and the bench image deliberately
+   enabled, set its actual private bearer token in the Mac environment
+   variable already configured for this robot. Start the existing audio
+   session before capturing; this is a recorder of active codec samples,
+   not permission to wake the microphone without consent.
+2. Begin the ordinary consented Xiaozhi speaker test stimulus **before**
+   starting the four-second capture and keep it playing throughout the
+   window. The codec's calibration window rejects a missing speaker
+   reference on its first recorded microphone frame, so starting the
+   sound afterward produces a failed trial rather than useful WAVs.
+   Use a repeatable broadband signal and keep the head's ordinary
+   microphone/AFE task active. Do not substitute synthetic reference PCM.
+3. Within 30 seconds of physical consent, capture the four-second source-tagged device window:
+
+   ```sh
+   cd code
+   uv run --no-sync python scripts/capture_sense_aec.py \
+     --head-url "http://${SENSE_IP:?Set SENSE_IP to the head LAN IPv4}:8081" \
+     --robot-id robot-01 --token-env DESK_ROBOT_HEAD_01_TOKEN \
+     --output-dir data/private/aec_lab_trial \
+     --i-consent-to-private-raw-audio
+   ```
+
+   The client checks the head's authenticated reference diagnostics
+   before starting. The **flashed firmware**, not just the build command,
+   must report integer `aec_delay_config_ms=0` and
+   `microphone_privacy_muted=false`. Missing or nonzero configuration
+   stops the client before any START request. START also carries the boot and
+   microphone privacy epochs observed by this client; stale values must not
+   consume a newer physical grant. It validates the same robot identity,
+   boot epoch and particular capture generation in
+   the authenticated START response, subsequent STATUS and raw PCM headers.
+   This rejects an old completed recording from the same device after
+   a new START. Firmware also discards a PDM callback whose samples began
+   before the authorized START, even if that callback completed afterward.
+   The Mac checks the final microphone privacy epoch **and capture
+   generation** after raw transfer, rejecting a physical BOOT mute or a
+   speaker/reference reset that invalidated the samples before WAV saving.
+   The client requires exactly 64000 stereo PCM frames and a four-second
+   device timestamp span within 80 ms, and rejects truncated/oversized
+   replies. It additionally checks that the authenticated codec's PDM read
+   counter advanced by at least 64000 frames and that accepted speaker I2S
+   frames increased during this capture. The firmware additionally
+   latches `speaker_activity_in_window` when the final microphone callback
+   completes the private four-second recording. A speaker write occurring
+   afterward cannot qualify an otherwise silent recording merely by changing
+   the cumulative counters before the Mac's final status request. A silent
+   or inactive speaker trial is rejected before WAV persistence. The
+   device also refuses a complete, correctly timestamped capture when
+   either the 16 kHz digital microphone or speaker-reference channel is
+   entirely zero. This checks for missing digital signal only, not adequate
+   volume, broadband excitation, physical sound or echo suppression; the
+   offline correlation estimator and real assembled-head acoustic trials
+   remain mandatory. These receipts are strictly software activity evidence,
+   not actual audible playback. Saturated counters require a fresh, safely restarted bench session.
+   The Sense buffer also rejects individual microphone callback
+   gaps larger than the frame duration plus 40 ms. These conservative
+   limits protect software timestamp validity, not physical AEC quality.
+   It makes **no automatic retry** of a possibly already-started capture.
+   On an interrupted or failed read after an acknowledged START, the
+   Mac sends an authenticated **generation scoped ABORT** using the
+   same head bearer. The codec invalidates only that capture generation
+   and wipes its retained PCM; its asynchronous HTTP worker checks the
+   generation before sending the next chunk. A delayed older ABORT
+   cannot erase a newer capture. If the Mac crashes or the network
+   disappears, the firmware's independent 12-second buffer expiry
+   remains the fallback. None of these software receipts certifies
+   audible speaker playback or measured AEC quality.
+   The output is private mode 0600 `microphone.wav`,
+   `speaker_reference.wav`, and `capture.json`, in a mode 0700
+   directory with no overwrite. The CLI checks the destination before START,
+   retains the approved directory identity, and anchors creation and cleanup
+   to a checked directory file descriptor. After writing the files, it makes
+   another authenticated reference-status request before reporting success.
+   A changed robot, boot, privacy epoch, capture generation, muted microphone,
+   reference integrity failure or changed destination identity rejects the
+   trial; the writer attempts to remove the files it created through that
+   same directory descriptor. This is a software privacy check, not a
+   guarantee of secure erasure or physical microphone silence.
+   Both WAV files are mono 16 kHz PCM16,
+   including `speaker_reference.wav`: it already contains the codec's filtered
+   and decimated reference, not raw 32 kHz speaker PCM. Do not decimate it again.
+4. Read these real source frames with the existing offline estimator:
+
+   ```sh
+   cd code
+   uv run --no-sync python scripts/estimate_aec_delay.py \
+     --microphone data/private/aec_lab_trial/microphone.wav \
+     --speaker data/private/aec_lab_trial/speaker_reference.wav \
+     --capture-report data/private/aec_lab_trial/capture.json
+   ```
+
+   Keep the two WAVs and their receipt together. SHA-256 PCM digests detect
+   accidental pairing across captures or edited channels; they do not prove
+   hardware identity or acoustic playback. Older receipts lacking digests
+   must be recaptured for this receipt-checked workflow.
+
+5. Repeat speaker-active broadband bench captures during double talk,
+   VAD interruption, WiFi/camera/servo load and head reboot. Also run
+   **no-playback and muted-microphone negative controls**: an entirely
+   zero-valued digital reference or microphone is expected to fail the
+   capture validity check and produce no accepted calibration WAV. Record
+   those rejections and authenticated integrity counters separately, not
+   as successful acoustic delay estimates. Retain a source-qualified
+   local verification receipt with the tested board revision, actual
+   output volume, delay estimates, clock drift and rejected/valid runs.
+   Securely delete raw WAVs after analysis.
+
+**A source capture is not A2 physical qualification.** The on-device
+window timestamps are estimates derived from callback completion and sample
+counts, not hardware timestamps for individual PDM samples. The captured
+microphone and digital reference are pre-AFE signals, not the processed AFE
+output; this recording alone cannot measure ERLE or double-talk preservation.
+It does not prove physical loudspeaker propagation, analog output
+drain, zero acoustic echo, or the actual audible silence position after
+barge-in. There is no hardware evidence yet for echo suppression, ERLE,
+double-talk preservation, interruption timing, temperature drift,
+accurate amplifier feedback or five-pet simultaneity. `capture.json` reports `aec_physically_qualified=false`; the offline estimator
+reports `aec_physically_verified=false` and `natural_barge_in_verified=false`.
+Neither tool promotes its own software output to physical qualification.
+The independent playback acknowledgment thread remains open.
 
 ## Configuration and verification
 

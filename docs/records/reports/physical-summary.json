@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "robot_id": "robot-01",
   "categories": {
     "key": {
@@ -12,5 +14,6 @@
       "passed": false
     }
   },
-  "physical_acceptance_pass": false
+  "physical_acceptance_pass": false,
+  "physical_trial_count": 0
 }

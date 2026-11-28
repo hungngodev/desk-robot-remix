@@ -1,0 +1,252 @@
+#include "PulsePad.h"
+#include "../../include/MuxWrite.h"
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
+namespace desk_robot {
+namespace {
+constexpr std::uint8_t kTofMux = 0x70;
+constexpr std::uint8_t kExtraMux = 0x71;
+constexpr std::uint8_t kMax30102 = 0x57;
+// MAX30102 datasheet, pp. 12-13: ALC_OVF signals contaminated ADC data.
+constexpr std::uint8_t kAmbientOverflow = 0x20;
+// MAX30102 datasheet, p. 12: power-up or brownout reset notification.
+constexpr std::uint8_t kPowerReady = 0x01;
+// MAX30102 dual LED (RED/IR) mode. No claim of medical SpO2/heart rate.
+// 0x23 = 4096nA ADC, 50sps, 411us pulse from MAX3010x register map.
+// LED pilot settings intentionally low; actual paw enclosure needs trial.
+// Datasheet p. 10: verify only defined configuration bits. FIFO
+// pointers are live counters, not stable configuration registers.
+struct Setting { std::uint8_t reg, value, mask; };
+constexpr Setting settings[] = {
+    {0x09, 0x03, 0xc7},  // mode, shutdown and reset
+    {0x08, 0x00, 0xff},  // FIFO averaging, rollover, almost-full
+    {0x0a, 0x23, 0x7f},  // ADC range, sample rate, pulse width
+    {0x0c, 0x07, 0xff},  // red LED amplitude
+    {0x0d, 0x07, 0xff},  // IR LED amplitude
+    {0x02, kAmbientOverflow, 0xe0},  // interrupt enables
+};
+constexpr std::uint8_t kSettingCount = sizeof(settings) / sizeof(settings[0]);
+}
+bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
+  const auto result = write_mux_mask(*wire_, address, mask);
+  if (address == kExtraMux && result.acknowledged) mux_present_ = true;
+  if (!result.ok()) return false;
+  if (wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
+      wire_->available() < 1) return false;
+  return wire_->read() == mask;
+}
+bool PulsePad::select() {
+  // Never expose the floor range multiplexer at the same time as an accessory.
+  return select_mux(kTofMux, 0) && select_mux(kExtraMux, 1);
+}
+bool PulsePad::close() { return select_mux(kExtraMux, 0); }
+bool PulsePad::write_reg(std::uint8_t reg, std::uint8_t value) {
+  wire_->beginTransmission(kMax30102);
+  const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return wrote && acknowledged;
+}
+bool PulsePad::read_bytes(std::uint8_t reg, std::uint8_t* dest,
+                          std::uint8_t length) {
+  if (!dest || length == 0 || length > 24) return false;
+  wire_->beginTransmission(kMax30102);
+  const bool wrote = wire_->write(reg) == 1;
+  const bool acknowledged = wire_->endTransmission(!wrote) == 0;
+  if (!wrote || !acknowledged) return false;
+  if (wire_->requestFrom(kMax30102, static_cast<std::size_t>(length), true) != length)
+    return false;
+  for (std::uint8_t i = 0; i < length; ++i) {
+    if (wire_->available() < 1) return false;
+    const int reading = wire_->read();
+    if (reading < 0) return false;
+    dest[i] = static_cast<std::uint8_t>(reading);
+  }
+  return true;
+}
+bool PulsePad::read_reg(std::uint8_t reg, std::uint8_t& value) {
+  return read_bytes(reg, &value, 1);
+}
+bool PulsePad::configure_setting(std::uint8_t step) {
+  if (step >= kSettingCount) return false;
+  const auto& setting = settings[step];
+  std::uint8_t actual = 0;
+  return write_reg(setting.reg, setting.value) && read_reg(setting.reg, actual) &&
+         (actual & setting.mask) == setting.value;
+}
+
+void PulsePad::recover_configuration() {
+  // One identity or configuration step per poll, not full bringup in the
+  // safety loop. Always verify mux closure before advancing recovery.
+  std::uint8_t part = 0, status = 0;
+  const bool ok = recovery_step_ == 0
+      ? read_reg(0xff, part) && part == 0x15U && read_reg(0x00, status)
+      : configure_setting(recovery_step_ - 1);
+  const bool closed = close();
+  if (!ok || !closed) recovery_step_ = 0;
+  else if (++recovery_step_ > kSettingCount) recovering_ = false;
+  // The next normal poll must flush the FIFO before publishing new data.
+  fifo_unsynced_ = true;
+  sample_.valid = false;
+}
+
+bool PulsePad::begin(TwoWire& wire) {
+  wire_ = &wire; // already set to 400kHz, 15ms Wire bound by TofBus
+  sample_ = OpticalRaw{};
+  polled_ = false;
+  // Bound the first FIFO observation too: setup can spend hundreds of ms
+  // initializing other I2C devices before the main loop starts.
+  last_ms_ = millis();
+  fifo_unsynced_ = false;
+  recovering_ = false;
+  recovery_step_ = 0;
+  if (!select()) { close(); return false; }
+  std::uint8_t part_id = 0;
+  const bool recognized = read_reg(0xff, part_id) && part_id == 0x15U;
+  bool configured = false;
+  if (recognized) {
+    // Clear the startup power-ready flag before configuring the device.
+    std::uint8_t status = 0;
+    configured = read_reg(0x00, status);
+    for (std::uint8_t step = 0; configured && step < kSettingCount; ++step)
+      configured = configure_setting(step);
+    configured = configured && write_reg(0x04, 0x00) &&
+                 write_reg(0x05, 0x00) && write_reg(0x06, 0x00);
+  }
+  if (!close()) configured = false;
+  sample_.present = recognized && configured;
+  sample_.part_id = sample_.present ? part_id : 0;
+  return sample_.present;
+}
+bool PulsePad::poll(std::uint32_t now_ms) {
+  if (!sample_.present || (polled_ && now_ms - last_ms_ < 60U))
+    return false;
+  // The FIFO has no capture timestamps. After a stalled body poll, even
+  // one to four buffered records may be old, despite no FIFO overflow.
+  const bool missed_poll_window = now_ms - last_ms_ > 250U;
+  polled_ = true;
+  last_ms_ = now_ms;
+  if (!select()) {
+    (void)close();
+    fifo_unsynced_ = true;
+    if (recovering_) recovery_step_ = 0;
+    sample_.valid = false;
+    return false;
+  }
+  if (recovering_) {
+    recover_configuration();
+    return false;
+  }
+  // MAX30102 datasheet p. 14: consecutive registers auto-increment.
+  // Read 0x04..0x06 without touching FIFO_DATA (0x07). One combined read
+  // saves 54 SCL clocks (135us at 400kHz) versus three register reads.
+  std::uint8_t pointers[3]{};
+  bool ok = read_bytes(0x04, pointers, sizeof(pointers));
+  const std::uint8_t write_pointer = pointers[0];
+  const std::uint8_t overflow = pointers[1];
+  const std::uint8_t read_pointer = pointers[2];
+  // MAX30102 FIFO pointers and overflow counters are five-bit values.
+  // Reject corrupt reserved bits rather than masking them into a plausible
+  // fresh paw-contact sample. No sensor output is used to authorize motors.
+  if (!ok || ((write_pointer | read_pointer | overflow) & 0xe0U) != 0U) {
+    // A failed pointer read cannot establish which FIFO records remain.
+    fifo_unsynced_ = true;
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
+  // Capture overflow before FIFO_DATA can clear interrupt status.
+  // A flagged batch has ambiguous optical quality; never publish it as touch.
+  std::uint8_t interrupt_status = 0;
+  if (!read_reg(0x00, interrupt_status)) {
+    fifo_unsynced_ = true;
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
+  // A mux disconnect alone does not reset downstream registers. A sensor
+  // brownout does. Never interpret its post-reset FIFO with old settings.
+  std::uint8_t mode = 0;
+  if ((interrupt_status & kPowerReady) == 0U && fifo_unsynced_ &&
+      !read_reg(0x09, mode)) {
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
+  if ((interrupt_status & kPowerReady) != 0U ||
+      (fifo_unsynced_ && (mode & settings[0].mask) != settings[0].value)) {
+    recovering_ = true;
+    recovery_step_ = 0;
+    fifo_unsynced_ = true;
+    sample_.valid = false;
+    (void)close();
+    return false;
+  }
+  const std::uint8_t available =
+      static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
+  // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
+  // delayed, even a short backlog may contain stale paw contact. Reject
+  // elapsed polls exceeding 250ms as well as count and overflow anomalies.
+  // Drop any ambiguous backlog without assigning it a new capture time.
+  // A new reading must arrive on a later poll before an event is emitted.
+  if (fifo_unsynced_ || missed_poll_window || available > 4U ||
+      (overflow & 31U) != 0U ||
+      (interrupt_status & kAmbientOverflow) != 0U) {
+    // A full FIFO can wrap both pointers to the same value. The hardware
+    // overflow counter is independent evidence that samples were lost.
+    // Clear both old data and the overflow flag before accepting new ones.
+    const bool discarded =
+        write_reg(0x06, static_cast<std::uint8_t>(write_pointer & 31U));
+    const bool cleared = write_reg(0x05, 0);
+    const bool closed = close();
+    // On a failed flush or mux close, keep quarantine for the next poll.
+    fifo_unsynced_ = !(discarded && cleared && closed);
+    sample_.valid = false;
+    return false;
+  }
+  // At most four recent samples / 24 bytes in one safety-first iteration.
+  const std::uint8_t n = available;
+  std::uint8_t data[24]{};
+  if (n > 0) ok = read_bytes(0x07, data, n * 6);
+  const bool closed = close();
+  if (!ok || !closed) {
+    // A partial FIFO transfer can consume samples before reporting failure.
+    // Never timestamp the remainder as a new physical paw interaction.
+    fifo_unsynced_ = true;
+    sample_.valid = false;
+    return false;
+  }
+  if (n == 0) {
+    // Do not keep reporting the last accepted sample as presently valid
+    // when the hardware FIFO has no new conversion. Preserve provenance
+    // (at_ms and sample_seq) for a read-only historical diagnostic.
+    sample_.valid = false;
+    return false;
+  }
+  // A uniform bus-fill record is not evidence of a physical conversion.
+  // Quarantine the entire burst, even when its last record looks plausible.
+  for (std::uint8_t i = 0; i < n; ++i) {
+    if (optical_fifo_uniform_fault(&data[i * 6])) {
+      fifo_unsynced_ = true;
+      sample_.valid = false;
+      return false;
+    }
+  }
+  const std::uint8_t* latest = &data[(n - 1) * 6];
+  // Default is RED/IR. Recheck each LED after a generic GY-MAX30102 PCB
+  // swap; use the reversed lab profile only on measured channel identity.
+  const auto channels = decode_optical_channels(latest, kOpticalFifoIrFirst);
+  // Full-scale ADC data cannot distinguish reflection from clipping.
+  if (optical_channels_saturated(channels)) {
+    sample_.valid = false;
+    return false;
+  }
+  sample_.red = channels.red;
+  sample_.ir = channels.ir;
+  sample_.valid = true;
+  sample_.at_ms = now_ms;
+  ++sample_.sample_seq;
+  if (sample_.sample_seq == 0U) ++sample_.sample_seq;
+  return true;
+}
+} // namespace desk_robot
+#endif

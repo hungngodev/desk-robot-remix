@@ -1,0 +1,344 @@
+#include "ReplyTxQueue.h"
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <utility>
+
+#define CHECK(expr) do { if (!(expr)) std::abort(); } while (0)
+
+struct FakeSerial {
+  int free = 0;
+  std::size_t per_write = 1024;
+  std::string sent;
+  std::size_t writes = 0;
+  int availableForWrite() const { return free; }
+  std::size_t write(const std::uint8_t* data, std::size_t count) {
+    CHECK(free > 0);
+    CHECK(count > 0 && count <= 32 && count <= static_cast<std::size_t>(free));
+    ++writes;
+    const auto accepted = std::min(count, per_write);
+    sent.append(reinterpret_cast<const char*>(data), accepted);
+    free -= static_cast<int>(accepted);
+    return accepted;
+  }
+};
+
+using Queue = desk_robot::ReplyTxQueue<128>;
+static_assert(noexcept(std::declval<Queue&>().enqueue_line(nullptr)), "normal enqueue must not throw");
+static_assert(noexcept(std::declval<Queue&>().enqueue_priority_line(nullptr)), "urgent enqueue must not throw");
+static_assert(noexcept(std::declval<const Queue&>().pending()), "pending query must not throw");
+static_assert(noexcept(std::declval<const Queue&>().dropped()), "drop count query must not throw");
+// The generic serial backend can allocate or throw; do not promise otherwise.
+static_assert(!noexcept(std::declval<Queue&>().drain(std::declval<FakeSerial&>())), "serial drain can propagate backend exceptions");
+
+void test_distinct_urgent_receipt_survives_duplicate_burst() {
+  for (const bool stop_first : {false, true}) {
+    const char* first = stop_first ? "OK stop" : "OK halt";
+    const char* other = stop_first ? "OK halt" : "OK stop";
+    for (const std::size_t prefix : {0U, 1U, 8U}) {
+      desk_robot::ReplyTxQueue<16> queue;
+      FakeSerial serial;
+      CHECK(queue.enqueue_line("01234567890123"));
+      CHECK(queue.enqueue_priority_line(first));
+      CHECK(queue.enqueue_priority_line(first));
+      serial.free = 16;
+      CHECK(queue.drain(serial, prefix) == prefix);
+      CHECK(queue.enqueue_priority_line(other));
+      CHECK(queue.dropped() == 1);
+      CHECK(queue.pending() == 34 - prefix);
+      CHECK(!queue.enqueue_priority_line(first));
+      CHECK(queue.dropped() == 2);
+      while (queue.pending()) {
+        serial.free = 16;
+        serial.per_write = 3;
+        CHECK(queue.drain(serial) > 0);
+      }
+      CHECK(serial.sent == std::string(first) + "\r\n" + other +
+                               "\r\n01234567890123\r\n");
+    }
+  }
+}
+
+// Move the next round's normal ring start exactly one byte forward modulo 17.
+void advance_ring(desk_robot::ReplyTxQueue<17>& queue, FakeSerial& serial,
+                  std::string& expected, std::size_t refill_bytes) {
+  const auto send = [&](std::size_t length) {
+    const std::string frame(length - 2, 'a');
+    CHECK(queue.enqueue_line(frame.c_str()));
+    expected += frame + "\r\n";
+    while (queue.pending()) {
+      serial.free = 32;
+      CHECK(queue.drain(serial) == 1);
+    }
+  };
+  if (refill_bytes == 0) {
+    send(3);
+    send(15);
+  } else {
+    send(18 - refill_bytes);
+  }
+  CHECK(serial.sent == expected);
+}
+
+// Cover every physical ring start and every split of the first status frame.
+// Refill freed normal bytes before the urgent burst and keep flooding while
+// the UART alternates between blocked and single-byte writes.
+void test_urgent_under_sustained_ring_pressure() {
+  for (std::size_t split = 0; split <= 8; ++split) {
+    desk_robot::ReplyTxQueue<17> queue;
+    FakeSerial serial;
+    std::string expected;
+    std::size_t drops = 0;
+    for (std::size_t round = 0; round < 17; ++round) {
+      CHECK(queue.enqueue_line("abcdef"));
+      CHECK(queue.enqueue_line("1234567"));
+      CHECK(queue.pending() == 17);
+      serial.per_write = 1;
+      for (std::size_t i = 0; i < split; ++i) {
+        serial.free = 1;
+        CHECK(queue.drain(serial) == 1);
+      }
+      const std::string refill(split >= 3 ? split - 2 : 0, 'r');
+      if (!refill.empty()) CHECK(queue.enqueue_line(refill.c_str()));
+      const char* first = round % 2 ? "OK halt" : "OK stop";
+      const char* other = round % 2 ? "OK stop" : "OK halt";
+      CHECK(queue.enqueue_priority_line(first));
+      CHECK(queue.enqueue_priority_line(first));
+      CHECK(queue.enqueue_priority_line(other));  // replace only duplicate tail
+      ++drops;
+      const std::size_t before = queue.pending();
+      for (const int free : {0, -1, 0}) {
+        serial.free = free;
+        CHECK(queue.drain(serial) == 0);
+        CHECK(queue.pending() == before);
+      }
+      // At most the already-started status and first urgent receipt precede
+      // the second urgent slot. Flood attempts cannot extend this bound.
+      const std::size_t first_end = (split > 0 && split < 8 ? 8 - split : 0) + 9;
+      serial.per_write = 7;
+      for (std::size_t i = 0; i < first_end;) {
+        CHECK(!queue.enqueue_line("012345678901234"));
+        ++drops;
+        serial.free = 32;
+        const auto written = queue.drain(serial, first_end - i);
+        CHECK(written > 0 && written <= 7);
+        i += written;
+        CHECK(queue.pending() == before - i);
+      }
+      serial.per_write = 1;
+      CHECK(queue.enqueue_priority_line(first));  // reuse the freed urgent slot
+      CHECK(!queue.enqueue_priority_line(other));
+      ++drops;
+      const std::string urgent = std::string(first) + "\r\n" + other + "\r\n" + first + "\r\n";
+      expected += split == 0 ? urgent + "abcdef\r\n" : "abcdef\r\n" + urgent;
+      expected += "1234567\r\n";
+      if (!refill.empty()) expected += refill + "\r\n";
+      for (std::size_t i = 0; queue.pending() && i < 44; ++i) {
+        serial.free = 32;
+        CHECK(queue.drain(serial) == 1);
+      }
+      CHECK(queue.pending() == 0 && queue.dropped() == drops);
+      CHECK(serial.sent == expected);
+      advance_ring(queue, serial, expected, refill.empty() ? 0 : split);
+    }
+  }
+}
+
+// Exercise signed FIFO availability and unsigned budgets on both lanes.
+void test_drain_integer_boundaries() {
+  for (const bool urgent : {false, true}) {
+    Queue queue;
+    FakeSerial serial;
+    const std::string line(urgent ? 62 : 126, 'x');
+    CHECK(urgent ? queue.enqueue_priority_line(line.c_str()) :
+                    queue.enqueue_line(line.c_str()));
+    const auto initial = queue.pending();
+    const auto unlimited = std::numeric_limits<std::size_t>::max();
+    for (const int free : {std::numeric_limits<int>::min(), -1, 0}) {
+      serial.free = free;
+      CHECK(queue.drain(serial, unlimited) == 0);
+      CHECK(queue.pending() == initial && queue.dropped() == 0);
+      CHECK(serial.writes == 0 && serial.sent.empty() && serial.free == free);
+    }
+    serial.free = std::numeric_limits<int>::max();
+    CHECK(queue.drain(serial, 0) == 0);
+    CHECK(serial.writes == 0 && queue.pending() == initial);
+    serial.per_write = 0;
+    CHECK(queue.drain(serial, unlimited) == 0);
+    CHECK(serial.writes == 1 && serial.sent.empty() && queue.pending() == initial);
+    serial.per_write = unlimited;
+    for (std::size_t remaining = initial; remaining > 0; remaining -= 32) {
+      CHECK(queue.drain(serial, unlimited) == 32);
+      CHECK(queue.pending() == remaining - 32);
+    }
+    CHECK(queue.pending() == 0 && queue.dropped() == 0);
+    CHECK(serial.sent == line + "\r\n");
+    CHECK(serial.free == std::numeric_limits<int>::max() - static_cast<int>(initial));
+    const auto writes = serial.writes;
+    CHECK(queue.drain(serial, unlimited) == 0 && serial.writes == writes);
+  }
+}
+
+int main() {
+  test_drain_integer_boundaries();
+  test_urgent_under_sustained_ring_pressure();
+  test_distinct_urgent_receipt_survives_duplicate_burst();
+  desk_robot::ReplyTxQueue<128> head, usb;
+  const std::string status(94, 's');
+  CHECK(head.enqueue_line(status.c_str()));
+  FakeSerial head_serial, usb_serial;
+  head_serial.free = 0;
+  CHECK(head.drain(head_serial) == 0); // full hardware FIFO: no waiting
+  CHECK(head.pending() == status.size() + 2);
+  head_serial.free = 100;
+  CHECK(head.drain(head_serial, 100) == 32); // hard per-cycle cap
+  CHECK(head_serial.sent == status.substr(0, 32));
+  CHECK(usb.enqueue_line("OK stop"));
+  usb_serial.free = 16;
+  CHECK(usb.drain(usb_serial) == 9);
+  CHECK(usb_serial.sent == "OK stop\r\n");
+  CHECK(head_serial.sent.size() == 32); // ports have separate queues
+  while (head.pending() != 0) {
+    head_serial.free = 128;
+    const auto written = head.drain(head_serial);
+    CHECK(written > 0 && written <= 32);
+  }
+  CHECK(head_serial.sent == status + "\r\n");
+
+  desk_robot::ReplyTxQueue<24> congested;
+  CHECK(congested.enqueue_line("1234567890123456"));
+  CHECK(!congested.enqueue_line("second")); // no partial frame
+  CHECK(congested.pending() == 18 && congested.dropped() == 1);
+  FakeSerial sink;
+  sink.free = 7;
+  sink.per_write = 4;
+  CHECK(congested.drain(sink) == 4); // short write retained
+  CHECK(congested.enqueue_line("two")); // circular queue wrap
+  while (congested.pending()) {
+    sink.free = 24;
+    CHECK(congested.drain(sink) > 0);
+  }
+  CHECK(sink.sent == "1234567890123456\r\ntwo\r\n");
+  CHECK(!congested.enqueue_line(std::string(25, 'x').c_str()));
+  CHECK(congested.dropped() == 2);
+  // Already-full normal queue must not swallow a completed STOP/HALT receipt.
+  desk_robot::ReplyTxQueue<128> backlog;
+  const std::string one(60, 'a'), two(60, 'b');
+  CHECK(backlog.enqueue_line(one.c_str()));
+  CHECK(backlog.enqueue_line(two.c_str()));
+  CHECK(!backlog.enqueue_line("another ordinary status"));
+  CHECK(backlog.enqueue_priority_line("OK halt"));
+  CHECK(backlog.enqueue_priority_line("OK stop"));
+  CHECK(!backlog.enqueue_priority_line("OK halt")); // bounded urgent lane
+  CHECK(backlog.dropped() == 2);
+  FakeSerial backlog_serial;
+  backlog_serial.free = 0;
+  CHECK(backlog.drain(backlog_serial) == 0);
+  while (backlog.pending()) {
+    backlog_serial.free = 128;
+    const auto written = backlog.drain(backlog_serial);
+    CHECK(written > 0 && written <= 32);
+  }
+  CHECK(backlog_serial.sent == "OK halt\r\nOK stop\r\n" +
+         one + "\r\n" + two + "\r\n");
+
+  // Put CR at the last ring byte and LF at the first. Fill every normal
+  // byte, then reject a new frame without modifying the queued tail.
+  desk_robot::ReplyTxQueue<16> exact;
+  FakeSerial exact_serial;
+  CHECK(exact.enqueue_line("abc"));
+  exact_serial.free = 16;
+  CHECK(exact.drain(exact_serial) == 5);
+  CHECK(exact.enqueue_line("0123456789"));
+  CHECK(exact.enqueue_line("zz"));
+  CHECK(exact.pending() == 16);
+  CHECK(!exact.enqueue_line("x"));
+  CHECK(exact.pending() == 16 && exact.dropped() == 1);
+  CHECK(exact.enqueue_priority_line("OK stop"));
+  CHECK(exact.pending() == 25);
+  exact_serial.free = 0;
+  CHECK(exact.drain(exact_serial) == 0);
+  CHECK(exact.pending() == 25);
+  exact_serial.free = 16;
+  CHECK(exact.drain(exact_serial) == 9);
+  CHECK(exact_serial.sent == "abc\r\nOK stop\r\n");
+  CHECK(exact.pending() == 16);
+  // Start the wrapped status and stop just after CR, not after LF.
+  exact_serial.free = 16;
+  CHECK(exact.drain(exact_serial, 11) == 11);
+  CHECK(exact_serial.sent == "abc\r\nOK stop\r\n0123456789\r");
+  CHECK(exact.enqueue_priority_line("OK halt"));
+  CHECK(exact.enqueue_priority_line("OK stop"));
+  CHECK(!exact.enqueue_priority_line("OK halt"));
+  CHECK(exact.pending() == 23 && exact.dropped() == 2);
+  exact_serial.free = 16;
+  CHECK(exact.drain(exact_serial) == 1); // finish LF before either receipt
+  CHECK(exact.pending() == 22);
+  exact_serial.per_write = 0;
+  CHECK(exact.drain(exact_serial) == 0);
+  CHECK(exact.pending() == 22);
+  exact_serial.per_write = 2;
+  CHECK(exact.drain(exact_serial) == 2);
+  CHECK(exact.pending() == 20);
+  CHECK(!exact.enqueue_priority_line("OK halt")); // partial slot is occupied
+  exact_serial.per_write = 16;
+  exact_serial.free = 16;
+  CHECK(exact.drain(exact_serial) == 7);
+  CHECK(exact.pending() == 13);
+  CHECK(exact.enqueue_priority_line("OK halt")); // reuse freed urgent slot
+  CHECK(exact.pending() == 22 && exact.dropped() == 3);
+  while (exact.pending()) {
+    exact_serial.free = 16;
+    CHECK(exact.drain(exact_serial) > 0);
+  }
+  CHECK(exact_serial.sent == "abc\r\nOK stop\r\n0123456789\r\n"
+                              "OK halt\r\nOK stop\r\nOK halt\r\nzz\r\n");
+
+  // Once a JSON line starts, complete it before the priority lane. Never
+  // splice "OK halt" into an already transmitted status frame.
+  desk_robot::ReplyTxQueue<128> partial;
+  CHECK(partial.enqueue_line(one.c_str()));
+  CHECK(partial.enqueue_line(two.c_str()));
+  FakeSerial partial_serial;
+  partial_serial.free = 3;
+  partial_serial.per_write = 2;
+  CHECK(partial.drain(partial_serial) == 2);
+  CHECK(partial.enqueue_priority_line("OK halt"));
+  while (partial.pending()) {
+    partial_serial.free = 128;
+    // A nondivisor of the remaining first frame forces the drain to
+    // stop at its delimiter even when the next status fits in this write.
+    partial_serial.per_write = 7;
+    const auto written = partial.drain(partial_serial);
+    CHECK(written > 0 && written <= 7);
+  }
+  CHECK(partial_serial.sent == one + "\r\nOK halt\r\n" + two + "\r\n");
+
+  CHECK(!partial.enqueue_priority_line(std::string(63, 'x').c_str()));
+  CHECK(partial.dropped() == 1);
+  // Malformed reply content must never create a second apparent UART
+  // command response. Reject before changing either queue's state.
+  desk_robot::ReplyTxQueue<64> framed;
+  CHECK(!framed.enqueue_line("status\r\nOK arm"));
+  CHECK(!framed.enqueue_line("status\nOK arm"));
+  CHECK(!framed.enqueue_priority_line("OK halt\r\nOK arm"));
+  CHECK(!framed.enqueue_priority_line("OK stop\nOK arm"));
+  CHECK(!framed.enqueue_line(std::string(100000, 'x').c_str()));
+  CHECK(!framed.enqueue_priority_line(std::string(100000, 'x').c_str()));
+  CHECK(!framed.enqueue_line(""));
+  CHECK(!framed.enqueue_priority_line(""));
+  CHECK(framed.pending() == 0 && framed.dropped() == 8);
+  CHECK(framed.enqueue_line("status"));
+  CHECK(framed.enqueue_priority_line("OK stop"));
+  FakeSerial framed_serial;
+  while (framed.pending()) {
+    framed_serial.free = 128;
+    CHECK(framed.drain(framed_serial) > 0);
+  }
+  CHECK(framed_serial.sent == "OK stop\r\nstatus\r\n");
+
+  std::cout << "PASS bounded independent WROOM UART reply queues with urgent stop receipts\n";
+}

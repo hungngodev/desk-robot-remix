@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "mode": "simulation",
   "physical_acceptance_pass": false,
   "pickup": {

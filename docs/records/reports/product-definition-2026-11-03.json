@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "date": "2026-11-03",
   "scope": "Product requirements, source CAD collection and visual concept only",
   "source_and_preview_hash_checks": 38,

@@ -134,6 +134,14 @@
         51.9658,
         53.9829
       ]
+    },
+    {
+      "file": "config.scad",
+      "source_url": "https://github.com/slahiri/sparky/blob/91e3784be60b76d30942f2a487752389c7b05872/cad/config.scad",
+      "bytes": 2918,
+      "sha256": "3ddc744bdd93b4c42d17ab8e71c69e60dc35d4f4b0707e4c6cedd062e7caf8c4",
+      "git_blob_sha": "2fe77a47641c5f1945dd826480ef4b3f0220d872",
+      "changes": "None; Git blob matches pinned upstream source."
     }
   ],
   "commit": "91e3784be60b76d30942f2a487752389c7b05872",

@@ -1,0 +1,335 @@
+#include "AttitudeNorm.h"
+#include "ImuYawCapture.h"
+#include <cstdint>
+#include <initializer_list>
+#include <stdexcept>
+
+using desk_robot::BerryModel;
+using desk_robot::BerryReading;
+using desk_robot::ImuYawCapture;
+using Result = ImuYawCapture::Result;
+
+static void check(bool ok) {
+  if (!ok) throw std::runtime_error("MPU6050 yaw capture contract failed");
+}
+static ImuYawCapture::Calibration calibration(int sign = 1,
+                                             std::uint32_t max_error = 500000) {
+  ImuYawCapture::Calibration c{};
+  c.axis = 2; c.sign = sign; c.bias_raw = 0;
+  c.max_rate_raw = 500;
+  c.bias_uncertainty_raw = 20;
+  c.scale_error_ppm = 20000;
+  c.accel_norm_min_raw = 12000;
+  c.accel_norm_max_raw = 20000;
+  c.temp_min_raw = -1000; c.temp_max_raw = 1000;
+  c.max_gap_ms = 200; c.max_age_ms = 150;
+  c.max_yaw_error_urad = max_error;
+  return c;
+}
+static BerryReading sample(std::int16_t gyro, std::uint32_t time) {
+  BerryReading r{};
+  r.model = BerryModel::Mpu6050;
+  r.valid = true;
+  r.low_g_status_valid = true;
+  r.accel[2] = 16384;
+  r.gyro[2] = gyro;
+  r.temperature_raw = 100;
+  r.at_ms = time;
+  return r;
+}
+static void yaw_and_replay() {
+  ImuYawCapture cap;
+  auto c = calibration();
+  check(cap.observe(sample(131, 100), 100) == Result::Unqualified);
+  c.axis = 3;
+  check(!cap.configure(c));
+  c = calibration();
+  c.sign = 0;
+  check(!cap.configure(c));
+  check(cap.configure(calibration()));
+  check(!cap.configure(calibration()));
+  check(cap.observe(sample(131, 100), 100) == Result::Baseline);
+  check(cap.observe(sample(131, 100), 110) == Result::Duplicate);
+  check(cap.observe(sample(131, 200), 200) == Result::Delta);
+  check(cap.last_delta_urad() == 1745);
+  check(cap.yaw_urad() == 1745);
+  check(cap.error_bound_urad() >= 300 &&
+        cap.error_bound_urad() <= 310);
+  check(cap.observe(sample(131, 300), 300) == Result::Delta);
+  check(cap.yaw_urad() == 3490);
+  check(!cap.fresh(500)); // stale receipt never becomes a new observation
+  check(cap.observe(sample(131, 200), 500) == Result::Invalid);
+  check(!cap.continuous() && cap.yaw_urad() == 0);
+  check(cap.observe(sample(131, 350), 350) == Result::Baseline);
+  check(cap.yaw_urad() == 0 && cap.segment() == 2);
+  auto changed = sample(140, 350);
+  check(cap.observe(changed, 350) == Result::Invalid);
+  check(!cap.continuous());
+}
+static void handling_and_calibration_faults() {
+  ImuYawCapture cap;
+  check(cap.configure(calibration(-1)));
+  check(cap.observe(sample(131, 100), 100) == Result::Baseline);
+  check(cap.observe(sample(131, 200), 200) == Result::Delta);
+  check(cap.yaw_urad() == -1745);
+  auto low_g = sample(131, 300);
+  low_g.low_g_irq = true;
+  check(cap.observe(low_g, 300) == Result::Invalid);
+  check(!cap.continuous());
+  check(cap.observe(sample(131, 310), 310) == Result::Baseline);
+  auto saturated = sample(32767, 320);
+  check(cap.observe(saturated, 320) == Result::Invalid);
+  auto no_irq_status = sample(131, 330);
+  no_irq_status.low_g_status_valid = false;
+  check(cap.observe(no_irq_status, 330) == Result::Invalid);
+  auto invalid_temp = sample(131, 340);
+  invalid_temp.temperature_raw = 1001;
+  check(cap.observe(invalid_temp, 340) == Result::Invalid);
+  auto invalid_accel = sample(131, 350);
+  invalid_accel.accel[2] = 0;
+  check(cap.observe(invalid_accel, 350) == Result::Invalid);
+  check(cap.observe(sample(131, 360), 360) == Result::Baseline);
+  check(cap.observe(sample(131, 570), 570) == Result::Invalid);
+  check(cap.observe(sample(131, 580), 580) == Result::Baseline);
+}
+static void rollover_and_drift_latch() {
+  ImuYawCapture wrap;
+  check(wrap.configure(calibration()));
+  check(wrap.observe(sample(131, 0xfffffff0U), 0xfffffff0U) ==
+        Result::Baseline);
+  check(wrap.observe(sample(131, 0), 0) == Result::Delta);
+  check(wrap.last_delta_urad() >= 279 &&
+        wrap.last_delta_urad() <= 280);
+  check(wrap.observe(sample(131, 0x20), 0x20) == Result::Delta);
+
+  ImuYawCapture drift;
+  check(drift.configure(calibration(1, 500)));
+  check(drift.observe(sample(131, 100), 100) == Result::Baseline);
+  check(drift.observe(sample(131, 200), 200) == Result::Delta);
+  check(drift.observe(sample(131, 300), 300) == Result::Invalid);
+  check(drift.drift_latched() && !drift.continuous());
+  check(drift.observe(sample(131, 400), 400) == Result::Invalid);
+  drift.reset_for_boot();
+  check(!drift.drift_latched());
+  check(drift.observe(sample(131, 1), 1) == Result::Unqualified);
+}
+static void invalid_acquisition_fences_replay() {
+  ImuYawCapture cap;
+  check(cap.configure(calibration()));
+  check(cap.observe(sample(131, 100), 100) == Result::Baseline);
+  auto fault = sample(131, 200);
+  fault.low_g_irq = true;
+  check(cap.observe(fault, 200) == Result::Invalid);
+  // A valid-looking delayed frame predating the fault cannot establish
+  // a new segment; neither can a rewritten acquisition at the fault time.
+  check(cap.observe(sample(131, 150), 200) == Result::Invalid);
+  check(cap.observe(sample(131, 200), 200) == Result::Invalid);
+  check(!cap.continuous() && cap.segment() == 1);
+  check(cap.observe(sample(131, 201), 201) == Result::Baseline);
+  check(cap.segment() == 2);
+
+  ImuYawCapture wrap;
+  check(wrap.configure(calibration()));
+  check(wrap.observe(sample(131, 0xfffffff0U), 0xfffffff0U) ==
+        Result::Baseline);
+  fault = sample(131, 0x10U);
+  fault.low_g_status_valid = false;
+  check(wrap.observe(fault, 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0U), 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x10U), 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x11U), 0x11U) == Result::Baseline);
+  // A future-dated frame is invalid but cannot advance the replay fence.
+  check(wrap.observe(sample(131, 0x100U), 0x12U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x13U), 0x13U) == Result::Baseline);
+}
+
+static void extreme_axes_and_stationary_bias() {
+  const std::int16_t extremes[] = {-32768, -32767, 0, 32766, 32767};
+  for (const auto x : extremes) {
+    for (const auto y : extremes) {
+      for (const auto z : extremes) {
+        ImuYawCapture cap;
+        check(cap.configure(calibration()));
+        auto r = sample(0, 100);
+        r.accel[0] = x; r.accel[1] = y; r.accel[2] = z;
+        check(cap.observe(r, 100) == Result::Invalid);
+      }
+    }
+  }
+  for (const int sign : {-1, 1}) {
+    ImuYawCapture cap;
+    auto c = calibration(sign, 5000);
+    c.bias_raw = 4096;
+    check(cap.configure(c));
+    check(cap.observe(sample(4096, 100), 100) == Result::Baseline);
+    std::uint32_t previous_error = 0;
+    for (std::uint32_t t = 150; t <= 1000; t += 50) {
+      check(cap.observe(sample(4096, t), t) == Result::Delta);
+      check(cap.yaw_urad() == 0 && cap.last_delta_urad() == 0);
+      check(cap.error_bound_urad() > previous_error);
+      previous_error = cap.error_bound_urad();
+      check(cap.observe(sample(4096, t), t) == Result::Duplicate);
+      check(cap.error_bound_urad() == previous_error);
+    }
+  }
+}
+// A clipped roll or pitch axis makes planar yaw evidence untrustworthy,
+// even when the configured yaw channel and acceleration norm look quiet.
+static void saturation_on_every_gyro_axis() {
+  for (std::uint8_t yaw_axis = 0; yaw_axis < 3; ++yaw_axis) {
+    for (std::uint8_t clipped_axis = 0; clipped_axis < 3; ++clipped_axis) {
+      for (const std::int16_t rail : {-32768, 32767}) {
+        ImuYawCapture cap;
+        auto c = calibration();
+        c.axis = yaw_axis;
+        check(cap.configure(c));
+        auto clipped = sample(0, 100);
+        clipped.gyro[clipped_axis] = rail;
+        check(cap.observe(clipped, 100) == Result::Invalid);
+        check(!cap.continuous() && cap.segment() == 0);
+        check(cap.observe(sample(0, 100), 100) == Result::Invalid);
+        check(cap.observe(sample(0, 150), 150) == Result::Baseline);
+        check(cap.observe(sample(0, 200), 200) == Result::Delta);
+        clipped.at_ms = 250;
+        check(cap.observe(clipped, 250) == Result::Invalid);
+        check(!cap.fresh(250) && cap.last_delta_urad() == 0);
+        check(cap.observe(sample(0, 250), 250) == Result::Invalid);
+        check(cap.observe(sample(0, 300), 300) == Result::Baseline);
+        check(cap.segment() == 2);
+      }
+    }
+  }
+}
+
+// The norm helper is integer-only, including a zero or axis-aligned vector.
+// Yaw capture must reject zero acceleration without retaining a pose segment.
+static void zero_acceleration_and_norm_edges() {
+  using desk_robot::attitude_norm_root;
+  check(attitude_norm_root(0) == 0);
+  check(attitude_norm_root(16384ULL * 16384ULL) == 16384);
+  ImuYawCapture cap;
+  auto c = calibration();
+  c.accel_norm_min_raw = 0;
+  check(!cap.configure(c));
+  check(cap.configure(calibration()));
+  auto r = sample(131, 100);
+  r.accel[2] = 12000;
+  check(cap.observe(r, 100) == Result::Baseline);
+  r.at_ms = 200;
+  r.accel[2] = 20000;
+  check(cap.observe(r, 200) == Result::Delta);
+  check(cap.yaw_urad() != 0 && cap.error_bound_urad() != 0);
+  r.at_ms = 300;
+  r.accel[2] = 0;
+  check(cap.observe(r, 300) == Result::Invalid);
+  check(!cap.continuous() && !cap.fresh(300));
+  check(cap.yaw_urad() == 0 && cap.last_delta_urad() == 0);
+  check(cap.error_bound_urad() == 0 && cap.segment() == 1);
+  check(cap.observe(sample(131, 300), 300) == Result::Invalid);
+  check(cap.observe(sample(131, 301), 301) == Result::Baseline);
+  check(cap.segment() == 2);
+  for (const std::int16_t outside : {11999, 20001}) {
+    ImuYawCapture edge;
+    check(edge.configure(calibration()));
+    r = sample(131, 100);
+    r.accel[2] = outside;
+    check(edge.observe(r, 100) == Result::Invalid);
+  }
+}
+
+static void signed_half_turn_wrap() {
+  // 180 deg/s: three 200 ms and four 100 ms steps reach exactly pi
+  // after per-step microradian rounding. Neither endpoint wraps early.
+  for (const int sign : {-1, 1}) {
+    ImuYawCapture cap;
+    auto c = calibration(sign);
+    c.max_rate_raw = 23580;
+    c.bias_uncertainty_raw = 1;
+    c.scale_error_ppm = 1;
+    check(cap.configure(c));
+    std::uint32_t t = 100;
+    check(cap.observe(sample(23580, t), t) == Result::Baseline);
+    for (const std::uint32_t dt : {200U, 200U, 200U, 100U, 100U, 100U, 100U}) {
+      t += dt;
+      check(cap.observe(sample(23580, t), t) == Result::Delta);
+      check(cap.last_delta_urad() == sign * (dt == 200 ? 628319 : 314159));
+    }
+    check(cap.yaw_urad() == sign * 3141593);
+    const auto error = cap.error_bound_urad();
+    t += 100;
+    check(cap.observe(sample(23580, t), t) == Result::Delta);
+    check(cap.yaw_urad() == sign * -2827434);
+    check(cap.last_delta_urad() == sign * 314159);
+    check(cap.segment() == 1 && cap.error_bound_urad() > error);
+  }
+}
+
+static void exact_age_and_gap_boundaries() {
+  ImuYawCapture cap;
+  check(cap.configure(calibration()));
+  check(cap.observe(sample(131, 100), 250) == Result::Baseline);
+  check(cap.fresh(250) && !cap.fresh(251));
+  check(cap.observe(sample(131, 100), 250) == Result::Duplicate);
+  check(cap.observe(sample(131, 300), 450) == Result::Delta);
+  check(cap.last_delta_urad() == 3491 && cap.fresh(450));
+  check(cap.observe(sample(131, 300), 451) == Result::Invalid);
+  check(!cap.continuous() && cap.acquisition_ms() == 300);
+  check(cap.observe(sample(131, 301), 451) == Result::Baseline);
+  check(cap.observe(sample(131, 502), 502) == Result::Invalid);
+  check(!cap.continuous() && cap.acquisition_ms() == 502);
+  check(cap.observe(sample(131, 502), 502) == Result::Invalid);
+  check(cap.observe(sample(131, 503), 503) == Result::Baseline);
+  check(cap.segment() == 3);
+}
+
+// Exercise the largest allowed corrected rate, bias uncertainty, scale
+// error and acquisition gap together. The raw sample stays off the rails;
+// the corrected rate can still exceed its calibrated bound after subtraction.
+static void maximum_calibrated_arithmetic() {
+  for (const int direction : {-1, 1}) {
+    for (const int sign : {-1, 1}) {
+      ImuYawCapture cap;
+      auto c = calibration(sign, 937950U);
+      c.bias_raw = static_cast<std::int16_t>(-direction * 4096);
+      c.max_rate_raw = 32000;
+      c.bias_uncertainty_raw = 32000;
+      c.scale_error_ppm = 100000;
+      const auto raw = static_cast<std::int16_t>(direction * 27904);
+      check(cap.configure(c));
+      check(cap.observe(sample(raw, 100), 100) == Result::Baseline);
+      check(cap.observe(sample(raw, 300), 300) == Result::Delta);
+      check(cap.last_delta_urad() == direction * sign * 852680LL);
+      check(cap.yaw_urad() == direction * sign * 852680LL);
+      // The exact budget is admissible, but one more integration must latch.
+      check(cap.error_bound_urad() == 937950U);
+      check(cap.observe(sample(raw, 300), 300) == Result::Duplicate);
+      check(cap.error_bound_urad() == 937950U);
+      check(cap.observe(sample(raw, 301), 301) == Result::Invalid);
+      check(cap.drift_latched() && !cap.continuous());
+      check(cap.yaw_urad() == 0 && cap.error_bound_urad() == 0);
+
+      ImuYawCapture outside;
+      check(outside.configure(c));
+      check(outside.observe(sample(raw, 100), 100) == Result::Baseline);
+      const auto excessive = static_cast<std::int16_t>(raw + direction);
+      check(outside.observe(sample(excessive, 200), 200) == Result::Invalid);
+      check(!outside.continuous() && !outside.drift_latched());
+      check(outside.observe(sample(raw, 200), 200) == Result::Invalid);
+      check(outside.observe(sample(raw, 201), 201) == Result::Baseline);
+      check(outside.segment() == 2);
+    }
+  }
+}
+
+int main() {
+  maximum_calibrated_arithmetic();
+  zero_acceleration_and_norm_edges();
+  signed_half_turn_wrap();
+  exact_age_and_gap_boundaries();
+  saturation_on_every_gyro_axis();
+  yaw_and_replay();
+  handling_and_calibration_faults();
+  rollover_and_drift_latch();
+  invalid_acquisition_fences_replay();
+  extreme_axes_and_stationary_bias();
+}

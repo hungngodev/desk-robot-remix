@@ -21,4 +21,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 This license applies only to new integration code. Upstream software, model
-weights, CAD and print files retain their own licenses; see ATTRIBUTION.md.
+weights, CAD and print files retain their own licenses; see docs/ATTRIBUTION.md.

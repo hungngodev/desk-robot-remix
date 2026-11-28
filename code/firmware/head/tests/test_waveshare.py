@@ -35,7 +35,8 @@ class WaveshareOverlayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        names = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc"]
+        names = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc",
+                 "main/audio/audio_service.cc"]
         names += [
             f"main/boards/common/{name}"
             for name in (
@@ -129,6 +130,140 @@ class WaveshareOverlayTests(unittest.TestCase):
         for other in ("sense", "modular", "cores3"):
             self.assertFalse((self.root / overlay.BOARDS[other]).exists())
 
+    def test_rgb565_guard_precedes_capture_copy_and_uses_current_length(self):
+        for variant in ("waveshare", "modular"):
+            with self.subTest(variant=variant):
+                overlay.apply(self.root, variant)
+                source = (self.root / "main/boards/common/esp32_camera.cc").read_text()
+                capture = source.split("bool Esp32Camera::Capture() {", 1)[1].split(
+                    "bool Esp32Camera::SetHMirror", 1
+                )[0]
+                guard = capture.index("desk_robot::ValidRgb565Frame(")
+                self.assertLess(guard, capture.index("size_t pixel_count"))
+                self.assertLess(guard, capture.index("memcpy(encode_buf_"))
+                failure = capture[guard:capture.index("size_t pixel_count")]
+                self.assertIn("esp_camera_fb_return(current_fb_);", failure)
+                self.assertIn("current_fb_ = nullptr;", failure)
+                self.assertIn("return false;", failure)
+                self.assertIn("jpeg_src_len = current_fb_->len;", source)
+                self.assertNotIn("jpeg_src_len = encode_buf_size_;", source)
+                installed = self.root / "main/boards/common/desk_robot_camera_frame_bounds.hpp"
+                self.assertEqual(
+                    installed.read_bytes(),
+                    (HEAD / "overlay/camera_frame_bounds.hpp").read_bytes(),
+                )
+                overlay.remove(self.root)
+                self.assertFalse(installed.exists())
+
+    def test_explain_uses_one_endpoint_snapshot_for_url_and_token(self):
+        for variant in ("waveshare", "modular", "cores3"):
+            with self.subTest(variant=variant):
+                overlay.apply(self.root, variant)
+                common = self.root / "main/boards/common"
+                drivers = ("esp_video",) if variant == "cores3" else ("esp_video", "esp32_camera")
+                for name in drivers:
+                    source = (common / f"{name}.cc").read_text()
+                    header = (common / f"{name}.h").read_text()
+                    self.assertIn("desk_robot::CameraExplainConfig explain_config_;", header)
+                    self.assertIn("explain_config_.Set(url, token);", source)
+                    self.assertEqual(source.count("explain_config_.Snapshot()"), 1)
+                    self.assertIn('"Bearer " + explain_target.token', source)
+                    self.assertIn('http->Open("POST", explain_target.url)', source)
+                    self.assertNotIn("explain_url_", source)
+                    self.assertNotIn("explain_token_", source)
+                overlay.remove(self.root)
+
+    def test_display_initialization_precedes_ui_and_network_consumers(self):
+        """Check installed board startup against the pinned display/application."""
+        overlay.apply(self.root, "waveshare")
+        board = self.root / overlay.BOARDS["waveshare"]
+        source = (board / "desk_robot_waveshare.cc").read_text()
+        display = source.split("void InitializeDisplay()", 1)[1].split(
+            "void InitializeCamera()", 1
+        )[0]
+        stages = (
+            "i2c_new_master_bus(&config, &display_bus_)",
+            "esp_lcd_new_panel_io_i2c(display_bus_",
+            "esp_lcd_new_panel_ssd1306(panel_io,",
+            "esp_lcd_panel_reset(panel)",
+            "esp_lcd_panel_init(panel)",
+            "esp_lcd_panel_invert_color(panel, false)",
+            "esp_lcd_panel_disp_on_off(panel, true)",
+            "display_ = new OledDisplay(",
+        )
+        positions = [display.index(stage) for stage in stages]
+        self.assertEqual(positions, sorted(positions))
+        for stage in stages[:-1]:
+            self.assertIn("ESP_ERROR_CHECK(" + stage, display)
+        constructor = source.split("DeskRobotWaveshareBoard() :", 1)[1].split(
+            "void StartNetwork() override", 1
+        )[0]
+        startup = (
+            "InitializeControlBus();",
+            "InitializeExpander();",
+            "InitializeDisplay();",
+            "InitializeCamera();",
+            "boot_button_.OnClick(",
+        )
+        positions = [constructor.index(stage) for stage in startup]
+        self.assertEqual(positions, sorted(positions))
+        app = (UPSTREAM / "main/application.cc").read_text()
+        initialize = app.split("void Application::Initialize()", 1)[1].split(
+            "board.StartNetwork();", 1
+        )[0]
+        self.assertLess(
+            initialize.index("display->SetupUI();"),
+            initialize.index("board.SetNetworkEventCallback("),
+        )
+        oled = (UPSTREAM / "main/display/oled_display.cc").read_text()
+        self.assertLess(
+            oled.index("display_ = lvgl_port_add_disp("),
+            oled.index("void OledDisplay::SetupUI()"),
+        )
+
+    def test_oled_draw_buffer_and_i2c_clock_contract(self):
+        """Check configuration, not physical DMA allocation or display timing."""
+        overlay.apply(self.root, "waveshare")
+        board = self.root / overlay.BOARDS["waveshare"]
+        source = (board / "desk_robot_waveshare.cc").read_text()
+        display = source.split("void InitializeDisplay()", 1)[1].split(
+            "void InitializeCamera()", 1
+        )[0]
+        for setting in (
+            "io_config.dev_addr = 0x3C;",
+            "io_config.scl_speed_hz = 400000;",
+            "panel_config.bits_per_pixel = 1;",
+            "ssd1306.height = DISPLAY_HEIGHT;",
+            "esp_lcd_new_panel_io_i2c(display_bus_",
+            "esp_lcd_new_panel_ssd1306(panel_io,",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, display)
+        header = (board / "config.h").read_text()
+        for setting in (
+            "#define DISPLAY_WIDTH 128",
+            "#define DISPLAY_HEIGHT 64",
+            "#define DISPLAY_I2C_PORT I2C_NUM_0",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, header)
+        # This candidate intentionally uses SSD1306, not the stock SPI LCD.
+        self.assertNotIn("spi_bus_initialize", source)
+        oled = (UPSTREAM / "main/display/oled_display.cc").read_text()
+        config = oled.split("const lvgl_port_display_cfg_t display_cfg = {", 1)[1].split(
+            "display_ = lvgl_port_add_disp", 1
+        )[0]
+        for setting in (
+            ".buffer_size = static_cast<uint32_t>(width_ * height_),",
+            ".double_buffer = false,",
+            ".trans_size = 0,",
+            ".monochrome = true,",
+            ".buff_dma = 1,",
+            ".buff_spiram = 0,",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, config)
+
     def test_reversible_aec_whitelist_and_drift_protection(self):
         overlay.apply(self.root, "waveshare")
         overlay.apply(self.root, "waveshare")
@@ -178,12 +313,30 @@ class WaveshareSelectionTests(unittest.TestCase):
             python.parent.mkdir(parents=True)
             python.write_text(
                 f"#!{sys.executable}\nimport json,os,sys\n"
-                'open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n'
+                'if sys.argv[1:2]==["-c"]:\n exec(sys.argv[2])\nelse:\n'
+                ' open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n'
             )
             python.chmod(0o755)
             export = root / ".tools/esp-idf/export.sh"
             export.parent.mkdir(parents=True)
             export.write_text(":\n")
+            sdk = export.parent
+            subprocess.run(["git", "-C", str(sdk), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(sdk), "add", "export.sh"], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(sdk),
+                    "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-qm", "locked SDK",
+                ],
+                check=True,
+            )
+            sdk_commit = subprocess.check_output(
+                ["git", "-C", str(sdk), "rev-parse", "HEAD"], text=True
+            ).strip()
+            (root / "toolchain-lock.json").write_text(
+                json.dumps({"esp_idf": {"commit": sdk_commit}})
+            )
             trace = root / "args.json"
             for extra in ([], ["--private"]):
                 subprocess.run(

@@ -1,0 +1,503 @@
+"""Offline Guide 60 last-seen viewpoint planning and negative replay."""
+
+from dataclasses import replace
+
+import pytest
+from desk_robot.object_search import (
+    SearchViewpoint,
+    propose_object_search,
+    summarize_search_observation,
+)
+from desk_robot.object_targets import ObjectOwner, ObjectQuery, ObjectTarget
+from desk_robot.route_planner import GridSnapshot, RouteRequest, SafetyEnvelope
+
+
+def fixtures():
+    query = ObjectQuery(
+        "robot-01", "key", "session-2", "turn-7", "origin-3", 8,
+        "tag-4", "cal-5", 101, "mac-boot-5", 12, 900_000, 1_500_000,
+    )
+    owner = ObjectOwner(
+        "robot-01", "session-2", "turn-7", "origin-3", 8, "tag-4",
+        "cal-5", 101, "mac-boot-5", 12, True, True,
+    )
+    target = ObjectTarget(
+        "last_seen", "not_currently_confirmed", "robot-01", "key",
+        "camera_seen", 1800000000.1, search_hint_mm=(120, 220),
+        request_fence=query,
+    )
+    grid = GridSnapshot(
+        "robot-01", "origin-3", 8, "tag-4", "cal-5", 15, 15, 20,
+        ("safe",) * 225, 800_000, 1_400_000, True,
+    )
+    request = RouteRequest(
+        "robot-01", "origin-3", 8, "tag-4", "session-2", "turn-7",
+        (3, 7), 0, (9, 7), 1_500_000,
+    )
+    envelope = SafetyEnvelope(3, 2, 2, 32, True)
+    viewpoint = SearchViewpoint(
+        "robot-01", "origin-3", 8, "tag-4", "cal-5", "view-1",
+        (9, 7), 0, True, heading=0,
+    )
+    return grid, request, envelope, query, owner, target, viewpoint
+
+
+def search(*, candidates=None, clock_us=None, is_current=None, now_us=1_000_000,
+           **changes):
+    grid, request, env, query, owner, target, view = fixtures()
+    return propose_object_search(
+        changes.get("grid", grid), changes.get("route_request", request),
+        changes.get("envelope", env), changes.get("object_query", query),
+        changes.get("live_owner", owner), changes.get("target", target),
+        candidates if candidates is not None else (view,), now_us=now_us,
+        clock_us=clock_us if clock_us is not None else lambda: 1_000_000,
+        request_is_current=is_current if is_current is not None else lambda: True,
+        max_viewpoints=changes.get("max_viewpoints", 8),
+        max_expansions_per_view=changes.get("max_expansions_per_view", 512),
+    )
+
+
+def test_last_seen_selects_safe_viewpoint_not_arrival_or_motor_command():
+    result = search()
+    assert result.status == "viewpoint_proposal"
+    assert result.reason == "must_reobserve_target"
+    assert result.viewpoint_id == "view-1"
+    assert result.route is not None and result.route.cells[-1] == (9, 7)
+    assert result.route.final_heading == 0
+    assert not result.arrived and not result.may_execute
+    assert result.route.may_execute is False
+    assert result.considered == 1
+    assert search() == result
+
+
+def test_unreachable_first_viewpoint_skipped_in_favor_of_next_safe_candidate():
+    grid, _, _, _, _, _, view = fixtures()
+    blocked = list(grid.support)
+    blocked[7 * grid.width + 9] = "unsafe"
+    second = replace(view, viewpoint_id="view-2", cell=(8, 7), priority=1)
+    result = search(grid=replace(grid, support=tuple(blocked)),
+                    candidates=(view, second))
+    assert result.status == "viewpoint_proposal"
+    assert result.viewpoint_id == "view-2" and result.considered == 2
+    assert result.route is not None and result.route.cells[-1] == (8, 7)
+
+
+def test_unknown_support_blocks_all_search_viewpoints():
+    grid, _, _, _, _, _, _ = fixtures()
+    support = list(grid.support)
+    for y in range(grid.height):
+        support[y * grid.width + 7] = "unknown"
+    result = search(grid=replace(grid, support=tuple(support)))
+    assert result.status == "no_current_sighting"
+    assert result.reason == "no_reachable_uninspected_viewpoint"
+    assert result.route is None and not result.may_execute
+
+
+def test_unseen_or_user_reported_target_cannot_trigger_viewpoint_plan():
+    _, _, _, _, _, target, _ = fixtures()
+    for replacement in (
+        replace(target, status="unknown", search_hint_mm=None),
+        replace(target, status="user_reported", source="user_reported"),
+        replace(target, status="current_sighting", search_hint_mm=None),
+        replace(target, search_hint_mm=None),
+    ):
+        result = search(target=replacement)
+        assert result.status == "no_current_sighting"
+        assert result.route is None and not result.may_execute
+
+
+def test_inspected_viewpoint_is_never_visited_twice():
+    _, _, _, _, _, _, view = fixtures()
+    result = search(candidates=(replace(view, inspected_in_request=True),))
+    assert result.reason == "no_reachable_uninspected_viewpoint"
+    assert result.considered == 0
+
+
+def test_unverified_or_absent_viewpoint_never_yields_route():
+    _, _, _, _, _, _, view = fixtures()
+    assert search(candidates=(replace(view, previously_reachable=False),)).route is None
+    assert search(candidates=()).route is None
+
+
+@pytest.mark.parametrize("changed", [
+    {"robot_id": "robot-02"},
+    {"origin_id": "old-origin"},
+    {"epoch": 9},
+    {"anchor_id": "tag-9"},
+    {"calibration_id": "cal-6"},
+])
+def test_foreign_or_unanchored_viewpoint_refused(changed):
+    _, _, _, _, _, _, view = fixtures()
+    result = search(candidates=(replace(view, **changed),))
+    assert result.status == "rejected"
+    assert result.reason == "foreign_or_stale_viewpoint"
+    assert result.route is None
+
+
+@pytest.mark.parametrize("changed", [
+    {"camera_boot": 102},
+    {"host_boot_id": "rebooted-mac"},
+    {"camera_grant": 13},
+    {"origin_id": "picked-up"},
+    {"epoch": 9},
+])
+def test_live_owner_identity_change_refuses_all_routes(changed):
+    _, _, _, _, owner, _, _ = fixtures()
+    result = search(live_owner=replace(owner, **changed))
+    assert result.status == "rejected"
+    assert result.reason == "origin_map_or_camera_changed"
+    assert result.route is None
+
+
+def test_old_turn_and_memory_or_camera_consent_revoke_stop_search():
+    _, _, _, query, owner, _, _ = fixtures()
+    for change in (replace(owner, session_id="other"),
+                   replace(owner, turn_id="new"),
+                   replace(owner, robot_id="robot-02")):
+        assert search(live_owner=change).reason == "turn_or_robot_changed"
+    for change in (replace(owner, camera_allowed=False),
+                   replace(owner, memory_allowed=False)):
+        assert search(live_owner=change).reason == "observation_consent_revoked"
+    assert search(object_query=replace(query, cancelled=True)).reason == "cancelled"
+
+
+def test_operator_stop_before_search_and_while_planning():
+    assert search(is_current=lambda: False).reason == "request_invalidated"
+    _, _, _, _, _, _, view = fixtures()
+    calls = 0
+
+    def current():
+        nonlocal calls
+        calls += 1
+        return calls < 4
+
+    result = search(candidates=(view,), is_current=current)
+    assert result.status == "rejected" and result.reason == "request_invalidated"
+    assert result.route is None and not result.may_execute
+
+
+def test_monotonic_rollback_and_deadline_expiry_are_finite_refusals():
+    assert search(clock_us=lambda: 900_000).reason == "invalid_clock"
+    assert search(clock_us=lambda: 1_500_000).reason == "deadline_expired"
+    assert search(clock_us=lambda: 1_400_000).reason == "map_expired"
+    assert search(now_us=1_500_000).reason == "deadline_or_clock_invalid"
+
+
+def test_no_clock_or_owner_callback_never_proposes_motion():
+    grid, request, envelope, query, owner, target, view = fixtures()
+    for clock, is_current in ((None, lambda: True), (lambda: 1_000_000, None)):
+        result = propose_object_search(grid, request, envelope, query, owner, target,
+                                       (view,), now_us=1_000_000,
+                                       clock_us=clock, request_is_current=is_current)
+        assert result.reason == "missing_live_owner"
+        assert result.route is None
+
+
+def test_same_request_cannot_extend_deadline_or_use_other_map():
+    grid, request, _, _, _, _, _ = fixtures()
+    assert search(route_request=replace(request, deadline_us=1_600_000)).reason == (
+        "route_or_map_identity_changed"
+    )
+    assert search(grid=replace(grid, epoch=9)).reason == "route_or_map_identity_changed"
+
+
+def test_budget_and_duplicate_viewpoint_ids_are_rejected():
+    _, _, _, _, _, _, view = fixtures()
+    assert search(candidates=(view, view)).reason == "invalid_viewpoint"
+    assert search(candidates=(view,) * 33).reason == "invalid_search_input"
+    assert search(max_viewpoints=0).reason == "invalid_search_input"
+    assert search(max_expansions_per_view=True).reason == "invalid_search_input"
+    repeated = tuple(replace(view, viewpoint_id=f"view-{i}", cell=(i % 5 + 8, 7),
+                             priority=i) for i in range(12))
+    result = search(candidates=repeated, max_viewpoints=1)
+    assert result.considered == 1
+    assert not result.may_execute
+
+
+def test_malformed_target_or_viewpoint_never_enters_route_planner():
+    _, _, _, _, _, target, view = fixtures()
+    assert search(target=replace(target, may_execute=True)).reason == (
+        "target_identity_or_authority_invalid"
+    )
+    assert search(candidates=(replace(view, cell=(True, 7)),)).reason == (
+        "invalid_viewpoint"
+    )
+    assert search(target=replace(target, search_hint_mm=(float("nan"), 5))).reason == (
+        "no_same_map_last_seen_hint"
+    )
+
+
+
+def test_unfenced_manually_created_target_cannot_reach_route_planner():
+    _, _, _, _, _, target, _ = fixtures()
+    result = search(target=replace(target, request_fence=None))
+    assert result.reason == "target_request_changed"
+    assert result.route is None and not result.may_execute
+
+
+@pytest.mark.parametrize(("query_change", "owner_change", "route_change"), [
+    ({"session_id": "new-session"}, {"session_id": "new-session"},
+     {"session_id": "new-session"}),
+    ({"turn_id": "new-turn"}, {"turn_id": "new-turn"},
+     {"turn_id": "new-turn"}),
+    ({"camera_boot": 102}, {"camera_boot": 102}, {}),
+    ({"host_boot_id": "new-mac"}, {"host_boot_id": "new-mac"}, {}),
+    ({"camera_grant": 13}, {"camera_grant": 13}, {}),
+    ({"deadline_us": 1_600_000}, {}, {}),
+])
+def test_old_last_seen_target_rejected_after_fresh_request_owner_change(
+    query_change, owner_change, route_change,
+):
+    _, request, _, query, owner, target, _ = fixtures()
+    result = search(
+        object_query=replace(query, **query_change),
+        live_owner=replace(owner, **owner_change),
+        route_request=replace(request, **route_change),
+        target=target,
+    )
+    assert result.reason == "target_request_changed"
+    assert result.status == "rejected"
+    assert result.route is None and not result.may_execute
+
+
+@pytest.mark.parametrize("change", [
+    {"origin_id": "new-body-boot"},
+    {"epoch": 9},
+    {"anchor_id": "new-tag"},
+])
+def test_old_last_seen_target_rejected_after_reanchoring(change):
+    grid, request, _, query, owner, target, _ = fixtures()
+    result = search(
+        grid=replace(grid, **change),
+        route_request=replace(request, **change),
+        object_query=replace(query, **change),
+        live_owner=replace(owner, **change),
+        target=target,
+    )
+    assert result.reason == "target_request_changed"
+    assert result.route is None and not result.may_execute
+
+
+def test_same_cell_wrong_camera_heading_is_not_an_observation_pose():
+    grid, request, _, _, _, _, view = fixtures()
+    support = ["unknown"] * len(grid.support)
+    for x in range(2, 12):
+        support[7 * grid.width + x] = "safe"
+    narrow = replace(grid, support=tuple(support))
+    wrong = replace(view, cell=request.start, heading=2)
+    denied = search(grid=narrow, candidates=(wrong,))
+    assert denied.status == "no_current_sighting" and denied.route is None
+    right = replace(wrong, heading=request.heading)
+    proposed = search(grid=narrow, candidates=(right,))
+    assert proposed.status == "viewpoint_proposal"
+    assert proposed.route is not None and proposed.route.cells == (request.start,)
+    assert proposed.route.final_heading == right.heading
+    assert not proposed.arrived and not proposed.may_execute
+
+
+@pytest.mark.parametrize("heading", [None, True, -1, 4, "0"])
+def test_missing_or_invalid_viewpoint_heading_is_rejected(heading):
+    _, _, _, _, _, _, view = fixtures()
+    result = search(candidates=(replace(view, heading=heading),))
+    assert result.reason == "invalid_viewpoint" and result.route is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize(
+    ("last_read", "expected"),
+    [(1_025_000, "rejected"), (1_100_000, "viewpoint_proposal")],
+)
+def test_nested_route_clock_cannot_rewind_outer_search(last_read, expected):
+    _, request, _, _, _, _, view = fixtures()
+    view = replace(view, cell=request.start, heading=request.heading)
+    ticks = iter((1_000_000, 1_000_000, 1_050_000, 1_100_000, last_read))
+    result = search(candidates=(view,), clock_us=lambda: next(ticks))
+    assert result.status == expected
+    if expected == "rejected":
+        assert result.reason == "invalid_clock" and result.route is None
+    assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize(
+    ("target_spec", "expect_timestamp"),
+    [
+        (("last_seen", "camera_seen"), True),
+        (("user_reported", "user_reported"), False),
+        (("current_sighting", "camera_seen"), False),
+        (("unknown", "user_reported"), False),
+        (("rejected", "camera_seen"), False),
+        (None, False),
+    ],
+)
+@pytest.mark.parametrize(
+    ("observation", "remaining", "status", "exhausted"),
+    [
+        ("camera_seen", 0, "target_seen_unverified_location", False),
+        ("camera_not_seen", 0, "not_found_after_search", True),
+        ("camera_not_seen", 1, "no_current_sighting", False),
+        ("rejected", 0, "no_current_sighting", False),
+        ("inconclusive", 0, "no_current_sighting", False),
+    ],
+)
+def test_search_observation_never_promotes_detection_to_metric_arrival(
+    observation, remaining, status, exhausted, target_spec, expect_timestamp,
+):
+    _, _, _, query, _, default_target, view = fixtures()
+    if target_spec is None:
+        target = None
+    else:
+        t_status, t_source = target_spec
+        target = replace(default_target, status=t_status, source=t_source)
+    candidates = (view,)
+    if remaining:
+        candidates += (replace(view, viewpoint_id="view-2", priority=1, cell=(10, 7)),)
+    proposal = search(candidates=candidates)
+    assert proposal.remaining_viewpoints == remaining
+    result = summarize_search_observation(
+        label=query.label, final_cell=view.cell, target=target, search=proposal,
+        observation_status=observation, reason="detector_outcome",
+    )
+    assert result["status"] == status
+    assert result["search_exhausted"] is exhausted
+    expected_ts = default_target.seen_at_wall_s if expect_timestamp else None
+    assert result["last_seen_at_wall_s"] == expected_ts
+    assert result["target_observed"] is (observation == "camera_seen")
+    assert result["arrived"] is False and result["final_cell_verified"] is False
+    assert result["motor_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("inspected", "heading", "expected", "remaining"),
+    [
+        (True, 0, "no_current_sighting", None),
+        (False, 0, "viewpoint_proposal", 0),
+        (False, 1, "viewpoint_proposal", 1),
+    ],
+)
+def test_viewpoint_aliases_do_not_repeat_same_pose(inspected, heading, expected, remaining):
+    _, _, _, _, _, _, view = fixtures()
+    alias = replace(view, viewpoint_id="view-2", priority=1, heading=heading)
+    result = search(candidates=(replace(view, inspected_in_request=inspected), alias))
+    assert result.status == expected
+    assert result.remaining_viewpoints == remaining
+    assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize("first_inspected, remaining", [(False, 1), (True, 0)])
+def test_unsafe_viewpoint_is_not_counted_as_observed(first_inspected, remaining):
+    grid, _, _, query, _, target, view = fixtures()
+    blocked = list(grid.support)
+    blocked[7 * grid.width + 9] = "unsafe"
+    first = replace(view, inspected_in_request=first_inspected)
+    second = replace(view, viewpoint_id="view-2", cell=(8, 7), priority=1)
+    proposal = search(grid=replace(grid, support=tuple(blocked)),
+                      candidates=(first, second))
+    assert proposal.status == "viewpoint_proposal"
+    assert proposal.viewpoint_id == second.viewpoint_id
+    assert proposal.considered == (1 if first_inspected else 2)
+    assert proposal.remaining_viewpoints == remaining
+    result = summarize_search_observation(
+        label=query.label, final_cell=second.cell, target=target, search=proposal,
+        observation_status="camera_not_seen", reason="detector_outcome",
+    )
+    assert result["status"] == (
+        "not_found_after_search" if first_inspected else "no_current_sighting"
+    )
+    assert result["search_exhausted"] is first_inspected
+    assert result["remaining_viewpoints"] == remaining
+    assert not result["arrived"] and not result["motor_authorized"]
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"may_execute": True}, "unexpected_route_authority"),
+        ({"cells": ()}, "invalid_route_receipt"),
+        ({"cells": ((8, 7),)}, "invalid_route_receipt"),
+        ({"final_heading": True}, "invalid_route_receipt"),
+        ({"final_heading": 1}, "invalid_route_receipt"),
+        ({"robot_id": "other"}, "invalid_route_receipt"),
+        ({"origin_id": "other"}, "invalid_route_receipt"),
+        ({"epoch": 9}, "invalid_route_receipt"),
+        ({"session_id": "other"}, "invalid_route_receipt"),
+        ({"turn_id": "other"}, "invalid_route_receipt"),
+        ({"status": "rejected", "reason": "unsafe_start"}, "unsafe_start"),
+    ],
+)
+def test_search_refuses_invalid_route_receipts_without_trying_next_view(
+    monkeypatch, change, reason,
+):
+    from desk_robot import object_search
+
+    _, _, _, _, _, _, view = fixtures()
+    route = search().route
+    assert route is not None
+    calls = []
+
+    def plan(grid, request, envelope, **kwargs):
+        calls.append(request.goal)
+        return replace(route, **change)
+
+    monkeypatch.setattr(object_search, "plan_route", plan)
+    second = replace(view, viewpoint_id="view-2", cell=(10, 7), priority=1)
+    result = search(candidates=(second, view))
+    assert calls == [view.cell]
+    assert result.status == "rejected" and result.reason == reason
+    assert result.considered == 1 and result.route is None
+    assert not result.may_execute and not result.arrived
+
+
+def test_search_checks_liveness_before_accepting_route_receipt(monkeypatch):
+    from desk_robot import object_search
+
+    route = search().route
+    assert route is not None
+    current = True
+
+    def plan(*args, **kwargs):
+        nonlocal current
+        current = False
+        return replace(route, may_execute=True)
+
+    monkeypatch.setattr(object_search, "plan_route", plan)
+    result = search(is_current=lambda: current)
+    assert result.status == "rejected" and result.reason == "request_invalidated"
+    assert result.considered == 1 and result.route is None
+    assert not result.may_execute and not result.arrived
+
+
+def test_search_validates_all_viewpoints_before_planning(monkeypatch):
+    from desk_robot import object_search
+
+    _, _, _, _, _, target, view = fixtures()
+
+    def unexpected_plan(*args, **kwargs):
+        pytest.fail("invalid candidate must prevent all route planning")
+
+    monkeypatch.setattr(object_search, "plan_route", unexpected_plan)
+    foreign = replace(view, viewpoint_id="view-2", robot_id="other", priority=100)
+    result = search(candidates=(view, foreign), max_viewpoints=1)
+    assert result.reason == "foreign_or_stale_viewpoint" and result.considered == 0
+    result = search(candidates=(view, foreign), target=replace(target, search_hint_mm=None))
+    assert result.reason == "no_same_map_last_seen_hint" and result.considered == 0
+
+
+@pytest.mark.parametrize("bad_owner", [True, False])
+def test_callback_exceptions_preserve_failure_reason_and_order(bad_owner):
+    calls = []
+
+    def owner():
+        calls.append("owner")
+        if bad_owner:
+            raise RuntimeError("owner unavailable")
+        return True
+
+    def clock():
+        calls.append("clock")
+        raise RuntimeError("clock unavailable")
+
+    result = search(is_current=owner, clock_us=clock)
+    assert result.reason == ("request_invalidated" if bad_owner else "invalid_clock")
+    assert calls == (["owner"] if bad_owner else ["owner", "clock"])
+    assert result.considered == 0 and result.route is None
+    assert not result.may_execute and not result.arrived

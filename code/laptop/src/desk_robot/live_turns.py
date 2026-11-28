@@ -68,9 +68,18 @@ class ObservationRequest:
 
 
 def _seconds(value: float) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("Use finite monotonic seconds")
-    return float(value)
+    # A huge Python int can OverflowError during float/isfinite conversion.
+    # Untrusted capture timestamps must fail as validation, not crash the
+    # owning event loop while a newer frame is waiting.
+    try:
+        seconds = float(value)
+    except OverflowError as exc:
+        raise ValueError("Use finite monotonic seconds") from exc
+    if not math.isfinite(seconds):
+        raise ValueError("Use finite monotonic seconds")
+    return seconds
 
 
 class LiveTurns:
@@ -93,7 +102,7 @@ class LiveTurns:
         frame_interval: float = 1.0,
         frame_max_age: float = 2.0,
         heartbeat_interval: float = 30.0,
-    ):
+    ) -> None:
         for limit in (max_audio_bytes, max_jpeg_bytes):
             if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
                 raise ValueError("Media byte limits must be positive integers")
@@ -136,11 +145,12 @@ class LiveTurns:
 
     def is_connection_current(self, connection_epoch: int) -> bool:
         """Recheck popped frames before sending to an external video transport."""
-        return self._connected and connection_epoch == self._connection_epoch
+        return (self._connected and type(connection_epoch) is int
+                and connection_epoch == self._connection_epoch)
 
     def is_current(self, epoch: int) -> bool:
         """Recheck popped chunks before sending; a device flush is still required."""
-        return self._connected and epoch == self._epoch
+        return self._connected and type(epoch) is int and epoch == self._epoch
 
     def _invalidate(self, reason: str) -> FlushPlayback:
         discarded = self._audio_bytes
@@ -152,6 +162,8 @@ class LiveTurns:
         return FlushPlayback(self._epoch, reason, discarded)
 
     def set_connected(self, connected: bool) -> FlushPlayback | None:
+        if type(connected) is not bool:
+            raise ValueError("Connection state must be a boolean")
         if connected == self._connected:
             return None
         self._connected = connected
@@ -199,10 +211,11 @@ class LiveTurns:
         self, jpeg: bytes, *, captured_at: float, now: float, connection_epoch: int
     ) -> bool:
         """Keep the latest usable capture; timestamps share the owner's clock."""
-        captured_at = _seconds(captured_at)
-        now = _seconds(now)
+        # Retired producers cannot surface payload errors in the new session.
         if not self.is_connection_current(connection_epoch):
             return False
+        captured_at = _seconds(captured_at)
+        now = _seconds(now)
         if not 0 <= now - captured_at <= self.frame_max_age:
             return False
         if not isinstance(jpeg, bytes) or not jpeg:
@@ -245,12 +258,17 @@ class LiveTurns:
         """Reject old turn completions instead of marking a newer turn idle."""
         if not self.is_current(epoch):
             return False
+        if any(value is not None and type(value) is not bool
+               for value in (user, model, tool)):
+            raise ValueError("Busy ownership flags must be booleans")
         for role, value in (("user", user), ("model", model), ("tool", tool)):
             if value is not None:
                 self._busy[role] = value
         return True
 
     def set_quiet(self, quiet: bool) -> FlushPlayback | None:
+        if type(quiet) is not bool:
+            raise ValueError("Quiet mode must be a boolean")
         self._quiet = quiet
         if quiet and self._spontaneous_epoch is not None:
             return self._invalidate("quiet")
@@ -302,7 +320,8 @@ class LiveTurns:
         The adapter must keep model busy until playback is complete. This method
         alone does not mark generation or device playback idle.
         """
-        if epoch != self._pending_observation:
+        # is_current already rejects non-integer epochs and disconnected sessions.
+        if not self.is_current(epoch) or epoch != self._pending_observation:
             return False
         self._pending_observation = None
         return True

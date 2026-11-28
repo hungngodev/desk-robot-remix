@@ -1,0 +1,224 @@
+#include <array>
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include "McpPortDirectionLock.h"
+
+#define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
+
+struct Registers {
+  std::array<std::uint8_t, 0x16> values{};
+  int fail_read = -1, fail_write = -1, ignore_write = -1;
+  unsigned writes = 0, latch_writes = 0;
+  Registers() {
+    values[0x00] = values[0x01] = 0xFF;
+    values[0x0C] = 0x0F;
+    values[0x0D] = 0x01;
+  }
+  bool verify(desk_robot::McpPortDirectionLock& lock, bool optional = true) {
+    return lock.verify([this](std::uint8_t reg, std::uint8_t& value) {
+      if (reg == fail_read) return false;
+      value = values.at(reg);
+      return true;
+    }, [this](std::uint8_t reg, std::uint8_t value) {
+      // Check every attempted write, not only the final register state.
+      // Dock port A must never be driven, even if a later write repairs it.
+      CHECK(reg == 0x00 || reg == 0x01 || reg == 0x15);
+      CHECK(value == (reg == 0x15 ? 0x00 : 0xFF));
+      if (reg == 0x15) CHECK(values[0x01] == 0xFF);
+      ++writes;
+      if (reg == 0x15) ++latch_writes;
+      if (reg == fail_write) return false;
+      if (reg != ignore_write) values.at(reg) = value;
+      return true;
+    }, optional);
+  }
+};
+
+static void check_every_direction_bit() {
+  for (const bool haptic : {false, true}) {
+    for (unsigned port = 0; port < 2; ++port) {
+      for (unsigned bit = 0; bit < 8; ++bit) {
+        Registers regs;
+        desk_robot::McpPortDirectionLock lock;
+        if (haptic) {
+          lock.expect_haptic_output();
+          regs.values[1] = 0xFB;
+        }
+        CHECK(regs.verify(lock) && lock.verified());
+        CHECK(regs.writes == 0);
+        regs.values[port] ^= static_cast<std::uint8_t>(1U << bit);
+        regs.values[0x15] = 0x04;
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+        CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+        CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
+        const auto writes = regs.writes;
+        CHECK(!regs.verify(lock));
+        CHECK(regs.writes == writes); // verified reset cannot rearm
+      }
+    }
+  }
+}
+
+// Verify every pullup byte, including extra enabled pullups on externally
+// biased inputs. Fault containment may only change direction and OLATB.
+static void check_every_pullup_value() {
+  for (const bool haptic : {false, true}) {
+    for (const unsigned reg : {0x0CU, 0x0DU}) {
+      for (unsigned value = 0; value < 256; ++value) {
+        Registers regs;
+        desk_robot::McpPortDirectionLock lock;
+        if (haptic) {
+          lock.expect_haptic_output();
+          regs.values[1] = 0xFB;
+        }
+        CHECK(regs.verify(lock) && regs.writes == 0);
+        const auto expected = regs.values[reg];
+        regs.values[reg] = static_cast<std::uint8_t>(value);
+        const auto pullup_a = regs.values[0x0C];
+        const auto pullup_b = regs.values[0x0D];
+        regs.values[0x15] = haptic ? 0x04 : 0;
+        if (value == expected) {
+          CHECK(regs.verify(lock) && lock.verified() && regs.writes == 0);
+          continue;
+        }
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+        CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+        CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
+        CHECK(regs.values[0x0C] == pullup_a && regs.values[0x0D] == pullup_b);
+        const auto writes = regs.writes;
+        regs.values[reg] = expected;
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+        CHECK(regs.writes == writes);
+      }
+    }
+  }
+}
+
+static void check_reset_and_transport_faults() {
+  Registers missing_optional;
+  desk_robot::McpPortDirectionLock dock_only;
+  missing_optional.fail_read = 0x0D;
+  CHECK(missing_optional.verify(dock_only, false));
+  CHECK(!missing_optional.verify(dock_only) && !dock_only.faulted());
+  CHECK(!dock_only.verified());
+  missing_optional.fail_read = -1;
+  CHECK(missing_optional.verify(dock_only));
+
+  // A known unsafe GPA direction cannot be downgraded to a transient
+  // read failure just because the next register is unavailable.
+  Registers mixed;
+  desk_robot::McpPortDirectionLock mixed_lock;
+  CHECK(mixed.verify(mixed_lock) && mixed_lock.verified());
+  mixed.values[0] = 0xFE;
+  mixed.fail_read = 1;
+  CHECK(!mixed.verify(mixed_lock) && mixed_lock.faulted());
+  CHECK(!mixed_lock.verified() && mixed.latch_writes == 0);
+  mixed.fail_read = -1;
+  CHECK(!mixed.verify(mixed_lock) && !mixed_lock.verified());
+  CHECK(mixed.values[0] == 0xFF && mixed.values[1] == 0xFF);
+  CHECK(mixed.latch_writes == 1);
+
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  lock.expect_haptic_output();
+  regs.values[1] = 0xF9; // unexpected GPB1 output, GPB2 still output
+  regs.values[0x15] = 0x04;
+  regs.ignore_write = 1;
+  CHECK(!regs.verify(lock) && lock.faulted());
+  CHECK(regs.latch_writes == 0 && regs.values[0x15] == 0x04);
+  regs.ignore_write = -1;
+  regs.fail_write = 0;
+  CHECK(!regs.verify(lock));
+  CHECK(regs.values[1] == 0xFF && regs.values[0x15] == 0);
+  regs.fail_write = -1;
+  CHECK(!regs.verify(lock));
+  const auto writes = regs.writes;
+  CHECK(!regs.verify(lock) && regs.writes == writes);
+}
+
+static void check_direction_drift_after_verified_reset() {
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  regs.values[0] = 0xFE;
+  CHECK(!regs.verify(lock) && lock.faulted());
+  for (unsigned port = 0; port < 2; ++port) {
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      regs.values[port] = static_cast<std::uint8_t>(0xFFU ^ (1U << bit));
+      CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+      CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+    }
+  }
+  regs.values[0x15] = 0x04;
+  CHECK(!regs.verify(lock) && regs.values[0x15] == 0);
+  regs.values[0] = 0xFB;
+  regs.fail_read = 0;
+  CHECK(!regs.verify(lock) && regs.values[0] == 0xFF);
+  regs.fail_read = -1;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+}
+
+static void check_expectation_change_revokes_verification() {
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  CHECK(regs.verify(lock) && lock.verified());
+  lock.expect_haptic_output();
+  CHECK(!lock.verified() && !lock.faulted() && regs.writes == 0);
+  regs.values[1] = 0xFB;
+  CHECK(regs.verify(lock) && lock.verified());
+  lock.expect_haptic_output();
+  CHECK(lock.verified()); // unchanged expectation does not revoke proof
+  regs.values[1] = 0xF9;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  lock.expect_haptic_output();
+  CHECK(lock.faulted() && !lock.verified());
+  CHECK(!regs.verify(lock) && lock.faulted());
+}
+
+static void check_optional_work_cannot_restore_faulted_verification() {
+  for (const int failed_register : {0x00, 0x01, 0x0C, 0x0D}) {
+    Registers regs;
+    desk_robot::McpPortDirectionLock lock;
+    lock.expect_haptic_output();
+    regs.values[1] = 0xFB;
+    CHECK(regs.verify(lock) && lock.verified());
+    regs.fail_read = failed_register;
+    CHECK(!regs.verify(lock) && !lock.verified() && !lock.faulted());
+    CHECK(regs.writes == 0);
+    regs.fail_read = -1;
+    CHECK(regs.verify(lock) && lock.verified());
+  }
+
+  // Removing the optional device from the poll must not clear a mismatch
+  // that was already observed while the optional device was configured.
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  CHECK(regs.verify(lock) && lock.verified());
+  regs.values[0x0D] = 0x00;
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
+  CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
+  const auto writes = regs.writes;
+  regs.fail_read = 0x0D;
+  CHECK(!regs.verify(lock, false) && lock.faulted() && !lock.verified());
+  regs.fail_read = -1;
+  regs.values[0x0D] = 0x01;
+  CHECK(!regs.verify(lock, false) && lock.faulted() && !lock.verified());
+  CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+  CHECK(regs.writes == writes);
+}
+
+int main() {
+  try {
+    check_every_direction_bit();
+    check_every_pullup_value();
+    check_reset_and_transport_faults();
+    check_direction_drift_after_verified_reset();
+    check_expectation_change_revokes_verification();
+    check_optional_work_cannot_restore_faulted_verification();
+    std::cout << "PASS MCP23017 direction lock and verified reset\n";
+  } catch (const std::exception& error) {
+    std::cerr << "FAIL " << error.what() << '\n';
+    return 1;
+  }
+}

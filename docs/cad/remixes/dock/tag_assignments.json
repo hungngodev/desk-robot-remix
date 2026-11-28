@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "status": "candidate_only",
+  "family": "AprilTag 36h11",
+  "docks": [
+    {
+      "dock_id": 1,
+      "beacon_id": 1,
+      "marker_id": 12
+    },
+    {
+      "dock_id": 2,
+      "beacon_id": 2,
+      "marker_id": 13
+    },
+    {
+      "dock_id": 3,
+      "beacon_id": 3,
+      "marker_id": 14
+    },
+    {
+      "dock_id": 4,
+      "beacon_id": 4,
+      "marker_id": 15
+    },
+    {
+      "dock_id": 5,
+      "beacon_id": 5,
+      "marker_id": 16
+    }
+  ]
+}

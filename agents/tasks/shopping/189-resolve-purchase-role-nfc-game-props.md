@@ -1,0 +1,29 @@
+# DRR-189 · Resolve purchase role nfc_game_props
+
+**State at inventory snapshot** · Superseded / deferred
+
+**Authority** · Review only
+
+Inspect and report. Use read-only checks. Post distinct findings in the existing review thread when authorized. Route any fix to the appropriate implementation task.
+
+## Before you start
+
+- Check [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17) at the live head. Use the GitHub issue for this card to check ownership, claim the work and save your checkpoint. [Launch and issue instructions](../../README.md)
+- Read [chat-mode source](../../shared/00_meta_instructions.md), [work isolation and claims](../../shared/01_agent_worktree_rules.md), [checkpoints and review](../../shared/02_continuation_and_review_loop.md), [push order](../../shared/03_parallel_push_queue.md), [ownership](../../shared/04_scope_and_ownership.md), [release evidence](../../shared/05_acceptance_criteria.md). The scoped paths and the current accepted guide apply to this card.
+- Prerequisites · Start independently from the current PR and scoped evidence.
+
+The current linked station register marks this optional role deferred. Reopen only after an explicit scope decision.
+
+## Scoped work and acceptance
+
+[`docs/hardware/full-feature-plan.json`](../../../docs/hardware/full-feature-plan.json) · [`docs/hardware/full-63-role-source-ownership.json`](../../../docs/hardware/full-63-role-source-ownership.json)
+
+Verify the selected versus deferred token paths against the current station scope. Check interoperability with the reader and token quantities if selected. Attach exact supplier SKU or inspected-stock evidence, quantity, landed price or unknown state, and the ownership link. Record a specific blocker for any missing choice.
+
+## Handoff
+
+Record the reviewed SHA, source path or commit, the executed check and its result, and the exact open dependency or next action. Keep simulated evidence, exact-SHA CI and physical results distinct. Mark the issue verified only when this card’s acceptance is met. [Issue completion format](../../README.md#claim-verify-and-hand-off-in-github)
+
+## Sources
+
+[Tab 14 source index](../../coverage.md#tab-14) · [Guide 10](../../../docs/plans/spatial-first-unit/10-requirements-and-shopping.md) · [Catalog role nfc_game_props](../../coverage.md#role-nfc-game-props)

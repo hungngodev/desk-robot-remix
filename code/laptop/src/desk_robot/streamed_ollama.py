@@ -1,0 +1,114 @@
+"""Bounded Ollama NDJSON to speakable incremental sentence chunks.
+
+Reuse the existing Ollama /api/chat stream instead of waiting for every token.
+The caller owns Xiaozhi session and cancellation; no audio or motion transport
+is created here. Fragments are never treated as machine commands.
+"""
+from __future__ import annotations
+
+import json
+from collections.abc import AsyncIterable, AsyncIterator
+
+
+def _cut(buffer: str, target: int) -> tuple[str, str] | None:
+    # Only cut after an actual sentence punctuation boundary, not at the first
+    # arbitrary token. A long run-on paragraph is split at a word boundary.
+    for pos, char in enumerate(buffer):
+        # A period at the fragment boundary might be part of a decimal.
+        # Wait for following whitespace before streaming that sentence.
+        if char in ".!?" and pos >= 2 and (
+            pos + 1 < len(buffer) and buffer[pos + 1].isspace()
+        ):
+            return buffer[:pos + 1].strip(), buffer[pos + 1:].lstrip()
+    if len(buffer) >= target:
+        end = buffer.rfind(" ", 0, target + 1)
+        if end > target // 2:
+            return buffer[:end].strip(), buffer[end + 1:].lstrip()
+    return None
+
+
+async def ollama_speech_segments(
+    lines: AsyncIterable[str], *, max_total: int = 2000, target: int = 150
+) -> AsyncIterator[str]:
+    """Convert actual Ollama JSON chunks to bounded TTS segments.
+
+    Requires a proper done marker. On truncated/invalid streams it fails
+    rather than claiming a complete spoken turn. Partial already-spoken audio
+    can only be stopped by the outer Xiaozhi owner.
+    """
+    if not 30 <= target <= 300 or not 1 <= max_total <= 5000:
+        raise ValueError("Invalid streaming speech limits")
+    buffered = ""
+    count = 0
+    emitted = False
+    done = False
+    async for line in lines:
+        if not line.strip():
+            continue
+        if done:
+            raise RuntimeError("Ollama streaming data after done marker")
+        try:
+            packet = json.loads(line)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("Malformed Ollama streaming frame") from exc
+        if not isinstance(packet, dict):
+            raise RuntimeError("Ollama streaming frame must be an object")
+        if packet.get("error"):
+            raise RuntimeError("Ollama streaming provider error")
+        if "done" in packet and type(packet["done"]) is not bool:
+            raise RuntimeError("Ollama streaming completion marker invalid")
+        # done=True means the HTTP stream ended, not necessarily that the
+        # model finished its sentence. A token-budget/length stop must never
+        # be promoted into a complete peer turn, even if it carries text.
+        # Older Ollama streams omit done_reason; explicit reasons must be stop.
+        if packet.get("done") is True and "done_reason" in packet:
+            reason = packet["done_reason"]
+            if type(reason) is not str or reason != "stop":
+                raise RuntimeError("Ollama streaming stopped before normal completion")
+        message = packet.get("message", {})
+        if not isinstance(message, dict):
+            raise RuntimeError("Ollama streaming message invalid")
+        # Scheduling belongs to the Mac conversation owner, not the model.
+        # Reject foreign provider control metadata before yielding any words.
+        scheduling_fields = {"scheduling", "functionResponseScheduling",
+                             "function_response_scheduling"}
+        if scheduling_fields.intersection(packet) or scheduling_fields.intersection(message):
+            raise RuntimeError("Ollama streaming foreign scheduling metadata rejected")
+        # The speech channel owns assistant words, NOT tool output or
+        # untrusted user/system frames. A model tool request needs the
+        # separately authorized completed-tool path before speech synthesis.
+        if ("role" in message and message["role"] != "assistant"
+                or message.get("tool_calls")):
+            raise RuntimeError("Ollama streaming non-assistant/tool frame rejected")
+        fragment = message.get("content", "")
+        if not isinstance(fragment, str):
+            raise RuntimeError("Ollama streaming content invalid")
+        count += len(fragment)
+        if count > max_total:
+            raise RuntimeError("Ollama streaming response exceeds speech limit")
+        try:
+            fragment.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise RuntimeError("Ollama streaming content is not valid UTF-8") from exc
+        buffered += fragment
+        if packet.get("done") is True:
+            # Hold all remaining speech until EOF validates the terminal frame.
+            # Earlier nonterminal sentences still stream incrementally.
+            done = True
+            continue
+        while (piece := _cut(buffered, target)) is not None:
+            sentence, buffered = piece
+            if sentence:
+                emitted = True
+                yield sentence
+    if not done:
+        raise RuntimeError("Ollama streaming response ended without done marker")
+    while (piece := _cut(buffered, target)) is not None:
+        sentence, buffered = piece
+        if sentence:
+            emitted = True
+            yield sentence
+    if buffered.strip():
+        yield buffered.strip()
+    elif not emitted:
+        raise RuntimeError("Ollama returned empty streamed speech")

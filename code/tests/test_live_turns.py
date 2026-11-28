@@ -383,3 +383,82 @@ def test_quiet_mode_preserves_an_explicit_user_requested_turn():
     assert value.set_quiet(True) is None
     assert value.is_current(turn)
     assert value.pop_audio().pcm == b"\x01\x00"
+
+
+@pytest.mark.parametrize("invalid", [0, 1, "", "false", [], {}])
+def test_busy_and_quiet_flags_reject_nonboolean_values(invalid):
+    value = connected(heartbeat_interval=1)
+    current = value.epoch
+    for field in ("user", "model", "tool"):
+        with pytest.raises(ValueError, match="booleans"):
+            value.set_busy(current, **{field: invalid})
+    with pytest.raises(ValueError, match="boolean"):
+        value.set_quiet(invalid)
+    # Failed validation cannot accidentally suppress an otherwise permitted
+    # spontaneous observation or alter current turn ownership.
+    value.enable_proactivity(now=0)
+    offer(value, b"fresh", captured_at=1)
+    assert value.poll_observation(now=1) is not None
+
+
+def test_absent_observation_never_reports_successful_completion():
+    value = connected(heartbeat_interval=1)
+    # No real observation has ever been acquired. A missing identity is not
+    # permission to report a successful completed operation.
+    assert not value.finish_observation(None)
+    assert not value.finish_observation(value.epoch)
+    value.enable_proactivity(now=0)
+    offer(value, b"fresh", captured_at=1)
+    request = value.poll_observation(now=1)
+    assert request is not None
+    assert not value.finish_observation(None)
+    assert value.finish_observation(request.epoch)
+    assert not value.finish_observation(request.epoch)
+    assert not value.finish_observation(None)
+
+
+@pytest.mark.parametrize("invalid", [None, 0, 1, "", "false", []])
+def test_connection_state_rejects_nonboolean_values(invalid):
+    value = connected()
+    epoch = value.epoch
+    connection_epoch = value.connection_epoch
+    with pytest.raises(ValueError, match="boolean"):
+        value.set_connected(invalid)
+    assert value.is_current(epoch)
+    assert value.connection_epoch == connection_epoch
+
+
+def test_boolean_generation_cannot_impersonate_first_live_turn_or_camera_connection():
+    value = connected(heartbeat_interval=1)
+    # Python bool is a subclass of int: True == 1 must never confer
+    # possession of this first connected audio or camera generation.
+    assert value.epoch == value.connection_epoch == 1
+    assert not value.is_current(True)
+    assert not value.is_connection_current(True)
+    assert not value.set_busy(True, model=False)
+    assert not value.queue_audio(True, b"\x01\x00")
+    assert not offer(value, b"untrusted frame", captured_at=1, now=1,
+                     connection_epoch=True)
+    assert value.queued_audio_bytes == 0
+    assert value.take_video_frame(now=1) is None
+    # The legitimate integer tokens still work without granting permission
+    # to model speech or moving the robot.
+    assert value.is_current(1)
+    assert value.is_connection_current(1)
+    assert value.set_busy(1, model=True)
+    assert value.queue_audio(1, b"\x02\x00")
+    assert offer(value, b"real frame", captured_at=1, now=1,
+                 connection_epoch=1)
+    assert value.take_video_frame(now=1).jpeg == b"real frame"
+
+
+@pytest.mark.parametrize("bad_clock", [10 ** 400, -(10 ** 400)])
+def test_extreme_integer_monotonic_clocks_fail_with_value_error(bad_clock):
+    with pytest.raises(ValueError, match="finite monotonic"):
+        core(frame_interval=bad_clock)
+    value = connected()
+    with pytest.raises(ValueError, match="finite monotonic"):
+        offer(value, b"untrusted", captured_at=bad_clock, now=0)
+    with pytest.raises(ValueError, match="finite monotonic"):
+        value.take_video_frame(now=bad_clock)
+    assert value.take_video_frame(now=0) is None

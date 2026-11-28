@@ -1,0 +1,59 @@
+"""Mac lifecycle admission; never a physical preflight or motion permit."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import HTTPException, Request
+from starlette.datastructures import State
+
+
+def runtime_ready(state: State) -> bool:
+    owner = getattr(state, "runtime", None)
+    return (
+        owner is not None
+        and getattr(state, "runtime_started", False) is True
+        and getattr(state, "runtime_lifespan_owner", owner) is owner
+        and not getattr(owner, "_closed", False)
+        and getattr(owner, "_fatal_service_error", None) is None
+    )
+
+
+@asynccontextmanager
+async def runtime_lifespan(state: State) -> AsyncIterator[None]:
+    """Preserve the initiating failure while reporting unconfirmed cleanup."""
+    state.runtime_started = False
+    owner = state.runtime
+    state.runtime_lifespan_owner = owner
+    primary: BaseException | None = None
+    try:
+        start = getattr(owner, "start", None)
+        if callable(start):
+            await start()
+        if getattr(state, "runtime", None) is not owner:
+            raise RuntimeError("Runtime owner changed during startup")
+        state.runtime_started = True
+        yield
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        state.runtime_started = False
+        state.runtime_lifespan_owner = None
+        try:
+            await owner.close()
+        except (Exception, asyncio.CancelledError) as error:
+            if primary is None:
+                raise
+            primary.add_note(f"Runtime shutdown also failed: {type(error).__name__}")
+            logging.getLogger(__name__).error(
+                "Runtime shutdown failed after lifespan failure", exc_info=error,
+            )
+
+
+async def require_runtime_ready(request: Request) -> None:
+    if not runtime_ready(request.app.state):
+        raise HTTPException(503, "Runtime unavailable")

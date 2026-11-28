@@ -1,0 +1,131 @@
+"""Source admission fence for a single group conversation."""
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from .brain_context import live_asr_in_current_grant
+
+if TYPE_CHECKING:
+    from .config import Settings
+
+ROOM_EVIDENCE_MAX_AGE_S = 12.0
+
+
+@dataclass
+class GroupContextConsent:
+    """Capture grant generations once; a later grant cannot revive old evidence."""
+
+    settings: Settings
+    sharing_generation: int | None = None
+    memory_generation: int | None = None
+    camera_generation: int | None = None
+    room_generation: int | None = None
+    room_received_at: float | None = None
+    room_connection_epoch: int | None = None
+
+    @classmethod
+    def capture(cls, settings: Settings, *, has_multimodal: bool) -> GroupContextConsent:
+        fence = cls(settings)
+        if settings.mode == "hardware" and settings.fleet_text_sharing_enabled:
+            fence.sharing_generation = settings.fleet_sharing_consent_generation
+            if settings.voice_memory_tools_enabled:
+                fence.memory_generation = settings.voice_memory_consent_generation
+            if has_multimodal and settings.voice_vision_tools_enabled:
+                fence.admit_camera()
+        return fence
+
+    def _sharing_current(self) -> bool:
+        settings = self.settings
+        return (
+            self.sharing_generation is not None
+            and settings.fleet_text_sharing_enabled
+            and settings.fleet_sharing_consent_generation == self.sharing_generation
+        )
+
+    def _camera_current(self) -> bool:
+        settings = self.settings
+        return (
+            self.camera_generation is not None
+            and settings.voice_vision_tools_enabled
+            and settings.camera_consent_generation == self.camera_generation
+        )
+
+    def allows_autonomous_social(self, *, has_permission_check: bool) -> bool:
+        """Hardware peer dialogue needs its own opt-in and a live caller fence."""
+        settings = self.settings
+        return settings.mode != "hardware" or (
+            has_permission_check
+            and settings.fleet_social_autonomy_enabled
+            and self._sharing_current()
+        )
+
+    def admit_camera(self) -> None:
+        if self.camera_generation is None:
+            self.camera_generation = self.settings.camera_consent_generation
+
+    def admit_room(
+        self,
+        *,
+        received_at: float | None = None,
+        connection_epoch: int | None = None,
+    ) -> None:
+        if self.room_generation is None:
+            self.room_generation = self.settings.room_station_consent_generation
+        if self.room_received_at is None and received_at is not None:
+            self.room_received_at = received_at
+        if self.room_connection_epoch is None and connection_epoch is not None:
+            self.room_connection_epoch = connection_epoch
+
+    def filter_live_transcripts(self, timeline: list[dict], *, now: float) -> list[dict]:
+        """Exclude expired ASR and evidence outside the group's current grants."""
+        settings = self.settings
+        if settings.mode != "hardware":
+            return timeline
+        live_relay_allowed = self._sharing_current() and self._camera_current()
+        # Match the hub's 30-second visible ASR lifetime at the admission boundary.
+        earliest_source_at = max(settings.camera_consent_started_at, now - 30.0)
+        return [
+            item for item in timeline
+            if live_asr_in_current_grant(
+                item, now=now, enabled=live_relay_allowed,
+                consent_started_at=earliest_source_at,
+            )
+        ]
+
+    def revoked(
+        self,
+        *,
+        private_memory_current: bool,
+        now: float | None = None,
+        current_room_epoch: int | None = None,
+        room_current: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Use the same source predicate for speech admission and prompt cleanup."""
+        settings = self.settings
+        room_stale = (
+            self.room_received_at is not None
+            and now is not None
+            and not 0 <= now - self.room_received_at <= ROOM_EVIDENCE_MAX_AGE_S
+        )
+        room_epoch_changed = (
+            self.room_connection_epoch is not None
+            and current_room_epoch is not None
+            and current_room_epoch != self.room_connection_epoch
+        )
+        room_hub_revoked = callable(room_current) and not room_current()
+        return (
+            (self.sharing_generation is not None and not self._sharing_current())
+            or (self.memory_generation is not None
+                and (not settings.voice_memory_tools_enabled
+                     or settings.voice_memory_consent_generation != self.memory_generation))
+            or (self.camera_generation is not None and not self._camera_current())
+            or (self.room_generation is not None
+                and (not settings.room_station_context_enabled
+                     or settings.room_station_consent_generation != self.room_generation
+                     or room_stale
+                     or room_epoch_changed
+                     or room_hub_revoked))
+            or not private_memory_current
+        )

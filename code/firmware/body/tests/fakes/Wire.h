@@ -1,0 +1,699 @@
+#pragma once
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+#include "AccessoryReadings.h"
+#include "Arduino.h"
+
+// Deterministic sensor protocol emulator. Not a real hardware test.
+class TwoWire {
+ public:
+  std::uint8_t ranges = 0;
+  std::uint8_t extras = 0;
+  bool unsafe_parallel_mux = false;
+  unsigned transactions = 0;
+  std::uint8_t ads_config_high = 0xC3;
+  bool ads_conversion_ready = true;
+  std::uint16_t ads_belly_raw = 0x0400U;
+  std::uint16_t ads_jaw_raw = 0xFEDCU;
+  bool fail_ads_config_write = false;
+  int fail_ads_read_register = -1;
+  unsigned rejected_ads_reads = 0;
+  unsigned rejected_ads_config_writes = 0;
+  std::uint8_t current_address = 0, register_address = 0;
+  std::vector<std::uint8_t> outbound;
+  std::vector<std::uint8_t> inbound;
+  std::size_t pos = 0;
+  bool pending_sht = false;
+  bool fail_dock_gpio = false;
+  bool fail_fuel_register_read = false;
+  bool fail_fuel_version_read = false;
+  std::uint16_t fuel_version = 0x0011U;
+  int fail_ina_read_register = -1;
+  bool fail_sht_command = false;
+  std::uint16_t ina226_bus_raw = 0x1000U;
+  std::uint16_t ina226_shunt_raw = 0x0010U;
+  // Normal fake cadence has a new conversion each poll; fault injection
+  // holds CVRF low while the previous data registers remain readable.
+  bool ina226_conversion_ready = true;
+  // Default polls model a completed conversion; manual mode exposes the
+  // real read-to-clear PVALID behavior and a still-readable cached PDATA.
+  bool apds_auto_ready = true;
+  std::uint8_t apds_status = 0x02, apds_pdata = 42, apds_gesture_status = 0;
+  int fail_apds_read_register = -1;
+  unsigned apds_pdata_reads = 0;
+  std::vector<std::uint8_t> apds_gesture_fifo;
+  bool fail_optional_gpio = false;
+  bool fail_mcp_register_write = false;
+  bool fail_pulse_register_write = false;
+  bool fail_pulse_fifo_read_once = false; // simulate partial FIFO consumption
+  bool fail_imu_register_write = false;
+  unsigned failed_pulse_writes = 0;
+  unsigned pulse_terminated_transmissions = 0;
+  // MAX30102 FIFO pointers are explicit in host trials.
+  std::uint8_t pulse_fifo_write_pointer = 4;
+  std::uint8_t pulse_fifo_read_pointer = 0;
+  std::uint8_t pulse_fifo_overflow = 0;
+  std::uint8_t pulse_interrupt_status = 0;
+  std::uint8_t pulse_interrupt_enable = 0;
+  std::uint8_t pulse_config[14]{};
+  int ignore_pulse_config_write_reg = -1;
+  int fail_pulse_config_read_reg = -1;
+  bool fail_pulse_status_read = false;
+  bool pulse_clip_ir = false;
+  int pulse_fifo_fill = -1; // ACKed uniform FIFO bytes, or normal data if negative
+  unsigned failed_imu_writes = 0;
+  unsigned imu_terminated_transmissions = 0;
+  unsigned failed_mcp_writes = 0;
+  unsigned mcp_terminated_transmissions = 0;
+  unsigned optional_gpio_reads = 0;
+  std::uint8_t optional_gpioB = 0x01; // reed open, PIR low
+  std::uint8_t mcp_olatb = 0;  // BANK=0 OLATB 0x15
+  std::uint8_t mcp_iodira = 0xFF; // BANK=0 IODIRA 0x00
+  std::uint8_t mcp_iodirb = 0xFF; // BANK=0 IODIRB 0x01
+  std::uint8_t mcp_gppua = 0, mcp_gppub = 0;
+  unsigned haptic_rising_edges = 0;
+  bool fail_mcp_latch_readback = false;
+  bool fail_mcp_direction_readback = false;
+  bool nfc_connected = false;
+  bool nfc_tag_present = false;
+  // One complete I2C ACK with a broken PN532 checksum, not a tag removal.
+  bool nfc_corrupt_scan_ack_once = false;
+  unsigned nfc_corrupt_scan_acks = 0;
+  std::uint8_t nfc_command = 0, nfc_phase = 0;
+  unsigned nfc_scans = 0;
+  unsigned dock_gpio_reads = 0;
+  std::uint8_t dock_gpioA = 0x0F; // switches closed, no input or charger
+  bool range_mux_stuck = false;
+  bool optional_mux_stuck = false;
+  bool fail_optional_mux_write = false;
+  bool fail_cap_register_write = false;
+  bool fail_cap_clear_write = false;
+  std::uint8_t cap_main_control = 0x01;
+  std::uint8_t cap_touch_bits = 0xA5; // CAP1188 sensor status mask, including release
+  std::uint8_t cap_multi_touch_block = 0x80;
+  std::uint8_t cap_input_enable = 0xFF;
+  bool ignore_cap_input_enable_write = false;
+  std::uint8_t cap_config2 = 0x40;
+  bool ignore_cap_multi_touch_write = false;
+  std::uint8_t cap_config = 0x20;
+  std::uint8_t cap_recal_config = 0x8A;
+  std::uint8_t cap_noise_threshold = 0x01;
+  bool ignore_cap_config_write = false;
+  bool fail_cap_config_write = false;
+  unsigned cap_interrupt_clears = 0;
+  std::uint8_t cap_product_id = 0x50;
+  std::uint8_t cap_manufacturer_id = 0x5D;
+  bool cap_connected = true;
+  bool cap_uses_0x29 = false; // common generic breakout address
+  unsigned cap_register_end_calls = 0;
+  unsigned cap_failed_write_stops = 0;
+  unsigned cap_register_requests = 0;
+  bool optional_mux_installed = true;
+  bool accessory_devices_connected = true; // fitted mux, no downstream devices when false
+  bool optional_mux_write_nack = false;
+  bool optional_mux_read_nack = false;
+  bool range_mux_write_nack = false;
+  bool range_mux_read_nack = false;
+  bool range_mux_bad_readback = false;
+  bool hold_sda_on_range_disconnect = false;
+  std::uint8_t hold_sda_on_range_mask = 0; // one-shot downstream hang on STOP
+  std::uint16_t tof_register = 0;
+  unsigned tof_samples = 0;
+  // Bit masks are scoped to range mux lanes, never the accessory 0x29.
+  std::uint8_t tof_missing_lanes = 0;
+  std::uint8_t tof_wrong_model_lanes = 0;
+  std::uint8_t tof_spad_timeout_lanes = 0;
+  std::uint8_t tof_phase_timeout_lanes = 0;
+  bool tof_ready = true;
+  std::uint8_t tof_interrupt_error_bits = 0;
+  bool hold_sda_after_tof_result = false;
+  bool fail_tof_register_write = false;
+  unsigned rejected_tof_register_writes = 0;
+  unsigned tof_register_stop_transmissions = 0;
+  std::uint8_t tof_stop_variable = 0x55;
+  unsigned tof_register_writes = 0;
+  unsigned fail_tof_write_index = 0;
+  std::uint8_t tof_raw_status = 11;
+  std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
+  bool tof_force_zero = false; // inject an actual zero-mm conversion
+  std::uint16_t tof_lane_mm[8]{}; // independent physical lane overrides
+  // On-wire raw 9.7 fixed-point optical quality fields for regression.
+  std::uint16_t tof_ambient_97 = 0x0123;
+  std::uint16_t tof_signal_97 = 0x4567;
+  unsigned imu_probe_attempts = 0;
+  struct UpstreamImuReg {
+    std::uint8_t address;
+    std::uint8_t reg;
+    std::uint8_t value;
+  };
+  std::vector<UpstreamImuReg> upstream_imu_regs;
+
+  void add_upstream_imu_reg(std::uint8_t address, std::uint8_t reg,
+                            std::uint8_t value) {
+    upstream_imu_regs.push_back(UpstreamImuReg{address, reg, value});
+  }
+  const UpstreamImuReg* find_upstream_imu_reg(std::uint8_t address,
+                                              std::uint8_t reg) const {
+    for (const auto& entry : upstream_imu_regs) {
+      if (entry.address == address && entry.reg == reg) return &entry;
+    }
+    return nullptr;
+  }
+  bool has_upstream_imu_addr(std::uint8_t address) const {
+    for (const auto& entry : upstream_imu_regs) {
+      if (entry.address == address) return true;
+    }
+    return false;
+  }
+
+  bool fail_begin = false;
+  bool begin(int, int, int) { return !fail_begin; }
+  std::uint16_t timeout_ms = 50;
+  void setTimeOut(std::uint16_t ms) { timeout_ms = ms; }
+  std::uint16_t getTimeOut() { return timeout_ms; }
+  // Explicit one-shot transport faults. ESP32 HAL normally reports zero
+  // bytes on error; a short nonzero count is an additional adversarial case.
+  // Arduino-ESP32 maps ESP_FAIL (address or data NACK) to status 2.
+  // Inject before device side effects; real peripherals may accept a prefix.
+  int next_transfer_nack_address = -1;
+  // Read-phase NACK independent of an earlier successful mux/control write.
+  int next_read_nack_address = -1;
+  // Simulate an exhausted Wire TX buffer after N accepted bytes.
+  // Rejection stays active until the next beginTransmission, but the
+  // accepted prefix can still reach the device when the driver sends STOP.
+  int next_short_write_address = -1;
+  std::size_t next_short_write_after = 0;
+  bool short_write_active = false;
+  bool repeated_start_pending = false;
+  // ESP-IDF v4.4.7 also reports arbitration loss as I2C_STATUS_TIMEOUT.
+  // Model the bounded Wire-visible failure, not physical arbitration timing.
+  int next_stop_timeout_address = -1;
+  int next_read_timeout_address = -1;
+  // One-shot elapsed time for a successful ToF result transfer.
+  std::uint32_t next_tof_result_delay_ms = 0;
+  int next_short_read_address = -1;
+  std::size_t next_short_read_request = 0;
+  std::size_t next_short_read_count = 0;
+  std::vector<std::uint16_t> tof_init_timeouts;
+
+  void beginTransmission(std::uint8_t addr) {
+    if (addr == 0x68 || addr == 0x69 || addr == 0x6a || addr == 0x6b ||
+        addr == 0x1c || addr == 0x1d || addr == 0x1e)
+      ++imu_probe_attempts;
+    current_address = addr;
+    outbound.clear();
+    short_write_active = false;
+    // Arduino-ESP32 clears an abandoned same-task repeated START here.
+    repeated_start_pending = false;
+  }
+  std::size_t write(std::uint8_t v) {
+    if (current_address == next_short_write_address &&
+        outbound.size() == next_short_write_after) {
+      next_short_write_address = -1;
+      short_write_active = true;
+    }
+    if (short_write_active) return 0;
+    if (fail_tof_register_write && current_address == 0x29 &&
+        ranges != 0 && extras == 0) {
+      ++rejected_tof_register_writes;
+      return 0;
+    }
+    if (fail_optional_mux_write && current_address == 0x71) return 0;
+    if (fail_pulse_register_write && current_address == 0x57) {
+      ++failed_pulse_writes;
+      return 0;
+    }
+    if (fail_imu_register_write &&
+        (current_address == 0x68 || current_address == 0x69 ||
+         current_address == 0x6a || current_address == 0x6b ||
+         current_address == 0x1c || current_address == 0x1d ||
+         current_address == 0x1e)) {
+      ++failed_imu_writes;
+      return 0;
+    }
+    if (fail_mcp_register_write && current_address == 0x20) {
+      ++failed_mcp_writes;
+      return 0;
+    }
+    const bool cap_target = current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29);
+    if (fail_cap_register_write && cap_target) return 0;
+    if (fail_cap_clear_write && cap_target && outbound.size() == 1 &&
+        outbound[0] == 0x00) return 0;
+    outbound.push_back(v);
+    return 1;
+  }
+  bool connected(std::uint8_t addr) const {
+    if (addr == 0x70) return true;
+    if (addr == 0x71) return optional_mux_installed;
+    if (extras != 0 && !accessory_devices_connected) return false;
+    if (addr == 0x29)
+      return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0 &&
+              (ranges & tof_missing_lanes) == 0) ||
+             (ranges == 0 && extras == 1 && cap_uses_0x29 && cap_connected);
+    if (ranges == 0 && extras == 0 && has_upstream_imu_addr(addr)) return true;
+    if (ranges != 0 || extras == 0) return false;
+    switch (extras) {
+      case 1: return (addr == 0x28 && !cap_uses_0x29 && cap_connected) || addr == 0x57;
+      case 2: return addr == 0x39 || addr == 0x36;
+      case 4: return addr == 0x48;
+      case 8: return addr == 0x44;
+      case 16: return addr == 0x36 || addr == 0x40;
+      case 32: return addr == 0x20 || (nfc_connected && addr == 0x24);
+      case 64: return addr == 0x36;
+      case 128: return addr == 0x36;
+      default: return false;
+    }
+  }
+  std::uint8_t endTransmission(bool stop = true) {
+    ++transactions;
+    if (stop && current_address == 0x29 && ranges != 0 && extras == 0)
+      ++tof_register_stop_transmissions;
+    if (current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29))
+      { ++cap_register_end_calls;
+        if (fail_cap_register_write && stop) ++cap_failed_write_stops; }
+    if (current_address == 0x20) ++mcp_terminated_transmissions;
+    if (current_address == 0x57) ++pulse_terminated_transmissions;
+    if (current_address == 0x68 || current_address == 0x69 ||
+        current_address == 0x6a || current_address == 0x6b ||
+        current_address == 0x1c || current_address == 0x1d ||
+        current_address == 0x1e) ++imu_terminated_transmissions;
+    // Pinned Arduino-ESP32 2.0.17 does not call the HAL for non-STOP
+    // writes until a matching requestFrom(). No mux or register state
+    // may change yet, even if endTransmission(false) returns success.
+    if (!stop) {
+      repeated_start_pending = true;
+      return 0;
+    }
+    repeated_start_pending = false;
+    if (current_address == next_stop_timeout_address) {
+      next_stop_timeout_address = -1;
+      fake_arduino_millis() += timeout_ms;
+      return 5; // Arduino-ESP32 endTransmission timeout
+    }
+    return applyTransmission();
+  }
+
+  std::uint8_t applyTransmission() {
+    if (current_address == next_transfer_nack_address) {
+      next_transfer_nack_address = -1;
+      return 2;
+    }
+    if (!connected(current_address)) return 4;
+    if (fail_sht_command && current_address == 0x44 &&
+        outbound.size() == 1 && outbound[0] == 0xFD) return 4;
+    // Fail only the ADS1115 single-shot config WRITE, not its mux or reads.
+    if (fail_ads_config_write && current_address == 0x48 &&
+        outbound.size() == 3 && outbound[0] == 0x01) {
+      ++rejected_ads_config_writes;
+      return 4;
+    }
+    const bool cap_target = current_address == 0x28 ||
+        (current_address == 0x29 && extras == 1 && cap_uses_0x29);
+    if (cap_target && outbound.size() == 2) {
+      if (outbound[0] == 0x2a && !ignore_cap_multi_touch_write)
+        cap_multi_touch_block = outbound[1];
+      if (outbound[0] == 0x44) cap_config2 = outbound[1];
+      if (outbound[0] == 0x21 && !ignore_cap_input_enable_write)
+        cap_input_enable = outbound[1];
+      if (outbound[0] == 0x20) {
+        if (fail_cap_config_write) return 4;
+        if (!ignore_cap_config_write) cap_config = outbound[1];
+      }
+      if (outbound[0] == 0x2f) cap_recal_config = outbound[1];
+      if (outbound[0] == 0x38) cap_noise_threshold = outbound[1];
+      if (outbound[0] == 0x00) {
+        cap_main_control = outbound[1];
+        ++cap_interrupt_clears;
+      }
+    }
+    if (current_address == 0x70) {
+      if (outbound.empty()) return 0; // address-only I2C ACK probe
+      if (outbound.size() != 1) return 4;
+      if (range_mux_write_nack) return 4;
+      if (!range_mux_stuck) {
+        ranges = outbound[0];
+        if (hold_sda_on_range_disconnect && ranges == 0) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_on_range_disconnect = false;
+        }
+        if (hold_sda_on_range_mask != 0 && ranges == hold_sda_on_range_mask) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_on_range_mask = 0;
+        }
+      }
+      // Latch overlap in both selection directions, even if a later
+      // transaction repairs the masks before the driver publishes a sample.
+      if ((ranges && extras) || (outbound[0] & (outbound[0] - 1U)))
+        unsafe_parallel_mux = true;
+    } else if (current_address == 0x71) {
+      if (outbound.empty()) return 0; // address-only TCA9548A probe
+      if (outbound.size() != 1) return 4;
+      if (optional_mux_write_nack) return 4;
+      if (!optional_mux_stuck) extras = outbound[0];
+      if ((extras && ranges) || (outbound[0] & (outbound[0] - 1U)))
+        unsafe_parallel_mux = true;
+    } else if (current_address == 0x29 && extras == 1 &&
+               cap_uses_0x29 && !outbound.empty()) {
+      register_address = outbound[0];
+    } else if (current_address == 0x29 && !outbound.empty()) {
+      if (outbound.size() < 1 || outbound.size() > 2) return 4;
+      tof_register = outbound[0];
+      if (outbound.size() == 2) {
+        ++tof_register_writes;
+        if (fail_tof_write_index != 0U && tof_register_writes == fail_tof_write_index) {
+          fail_tof_write_index = 0U;
+          return 2;
+        }
+        if (outbound[0] == 0x91) tof_stop_variable = outbound[1];
+      }
+    } else if (current_address == 0x24 && !outbound.empty()) {
+      if (outbound.size() < 9 || outbound[0] != 0 || outbound[1] != 0 ||
+          outbound[2] != 0xff) return 4;
+      nfc_command = outbound[6];
+      nfc_phase = 1; // deterministic ACK, then response on separate mux slots
+    } else if (!outbound.empty()) {
+      register_address = outbound[0];
+      if (current_address == 0x20 && outbound.size() == 2) {
+        if (register_address == 0x15) {
+          if ((mcp_olatb & 0x04U) == 0 && (outbound[1] & 0x04U) != 0)
+            ++haptic_rising_edges;
+          mcp_olatb = outbound[1];
+        }
+        if (register_address == 0x00) mcp_iodira = outbound[1];
+        if (register_address == 0x01) mcp_iodirb = outbound[1];
+        if (register_address == 0x0C) mcp_gppua = outbound[1];
+        if (register_address == 0x0D) mcp_gppub = outbound[1];
+      }
+      if (current_address == 0x57 && outbound.size() == 2) {
+        if (register_address != ignore_pulse_config_write_reg) {
+          if (register_address == 0x02) pulse_interrupt_enable = outbound[1];
+          else if (register_address == 0x08 || register_address == 0x09 ||
+                   register_address == 0x0a || register_address == 0x0c ||
+                   register_address == 0x0d)
+            pulse_config[register_address] = outbound[1];
+        }
+        if (register_address == 0x06)
+          pulse_fifo_read_pointer = outbound[1] & 31U;
+        if (register_address == 0x05)
+          pulse_fifo_overflow = outbound[1] & 31U;
+      }
+      if (current_address == 0x44 && outbound[0] == 0xFD)
+        pending_sht = true;
+      if (current_address == 0x48 && outbound.size() == 3 &&
+          outbound[0] == 0x01) ads_config_high = outbound[1];
+    }
+    return 0;
+  }
+  std::size_t requestFrom(std::uint8_t addr, std::size_t count, bool stop = true) {
+    (void)stop;
+    ++transactions;
+    // Mismatched address is rejected before clearing RX or pending TX.
+    if (repeated_start_pending && addr != current_address) return 0;
+    const bool deferred = repeated_start_pending;
+    repeated_start_pending = false;
+    inbound.clear();
+    pos = 0;
+    // A zero-length read performs no bus transfer or read-to-clear action.
+    if (count == 0) return 0;
+    if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
+      ++cap_register_requests;
+    if (addr == next_read_timeout_address) {
+      next_read_timeout_address = -1;
+      fake_arduino_millis() += timeout_ms;
+      return 0;
+    }
+    if (addr == next_read_nack_address) {
+      next_read_nack_address = -1;
+      return 0;
+    }
+    if (!deferred && addr == next_transfer_nack_address) {
+      next_transfer_nack_address = -1;
+      return 0;
+    }
+    if (deferred) {
+      // The supported combined transaction is a one-byte sensor register
+      // pointer followed by a read. Mux selection requires an explicit
+      // STOP before readback (TCA9548A SCPS207H, section 7.5.4).
+      // Do not simulate unsupported combined writes as successful.
+      if (addr == 0x70 || addr == 0x71 || outbound.size() != 1 ||
+          applyTransmission() != 0) return 0;
+    }
+    if (!connected(addr)) return 0;
+    if (addr == 0x39 && register_address == fail_apds_read_register) return 0;
+    if (addr == 0x48 && extras == 4 &&
+        register_address == fail_ads_read_register) {
+      ++rejected_ads_reads;
+      return 0;
+    }
+    if (addr == 0x57 && register_address == 0x07 &&
+        fail_pulse_fifo_read_once) {
+      // I2C transfer drops after silicon advanced one sample.
+      fail_pulse_fifo_read_once = false;
+      if (count >= 6)
+        pulse_fifo_read_pointer =
+            static_cast<std::uint8_t>((pulse_fifo_read_pointer + 1U) & 31U);
+      return 0;
+    }
+    if (addr == 0x40 && extras == 16 &&
+        register_address == fail_ina_read_register) return 0;
+    if (fail_fuel_version_read && addr == 0x36 && extras == 16 &&
+        register_address == 0x08) return 0;
+    if (fail_fuel_register_read && addr == 0x36 && extras == 16 &&
+        (register_address == 0x02 || register_address == 0x04)) return 0;
+    if (addr == 0x70) {
+      if (range_mux_read_nack) return 0;
+      inbound = {range_mux_bad_readback
+          ? static_cast<std::uint8_t>(0xff) : ranges};
+    } else if (addr == 0x71) {
+      if (optional_mux_read_nack) return 0;
+      inbound = {extras};
+    } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
+      if (register_address == 0xFD) inbound = {cap_product_id};
+      else if (register_address == 0xFE) inbound = {cap_manufacturer_id};
+      else if (register_address == 0x03)
+        inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
+      else if (register_address == 0x21) inbound = {cap_input_enable};
+      else if (register_address == 0x00) inbound = {cap_main_control};
+      else if (register_address == 0x20) inbound = {cap_config};
+      else if (register_address == 0x2f) inbound = {cap_recal_config};
+      else if (register_address == 0x38) inbound = {cap_noise_threshold};
+      else if (register_address == 0x2a) inbound = {cap_multi_touch_block};
+      else if (register_address == 0x44) inbound = {cap_config2};
+    } else if (addr == 0x29) {
+      if (tof_register == 0x13 && count == 1) {
+        inbound = {static_cast<std::uint8_t>(
+            (tof_ready ? 0x07 : 0) | tof_interrupt_error_bits)};
+        // A missing conversion must NOT manufacture freshness.
+      } else if (tof_register == 0x91 && count == 1) {
+        inbound = {tof_stop_variable};
+      } else if (tof_register == 0x14 && count == 12) {
+        // Delay only the actual ToF result read, not the generic register pointer.
+        fake_arduino_millis() += next_tof_result_delay_ms;
+        next_tof_result_delay_ms = 0;
+        inbound.assign(12, 0);
+        inbound[0] = static_cast<std::uint8_t>(tof_raw_status << 3);
+        // ST API register order, independent of the production decoder.
+        inbound[6] = static_cast<std::uint8_t>(tof_signal_97 >> 8);
+        inbound[7] = static_cast<std::uint8_t>(tof_signal_97);
+        inbound[8] = static_cast<std::uint8_t>(tof_ambient_97 >> 8);
+        inbound[9] = static_cast<std::uint8_t>(tof_ambient_97);
+        // A lane-specific value follows the physical mux mask, not the
+        // scheduler's expected channel. Zero preserves the legacy defaults.
+        unsigned lane_mm = 0;
+        for (unsigned lane = 0; lane < 8; ++lane) {
+          if (ranges == (1U << lane)) lane_mm = tof_lane_mm[lane];
+        }
+        const unsigned mm = tof_force_zero ? 0U :
+                            (tof_force_mm != 0 ? tof_force_mm :
+                             (lane_mm != 0 ? lane_mm :
+                              (ranges == 16 ? 300 : 45)));
+        inbound[10] = static_cast<std::uint8_t>(mm >> 8);
+        inbound[11] = static_cast<std::uint8_t>(mm);
+        ++tof_samples;
+        if (hold_sda_after_tof_result) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_after_tof_result = false;
+        }
+      }
+    } else if (addr == 0x24 && nfc_connected) {
+      if (nfc_phase == 1 && count == 7) {
+        inbound = {1, 0, 0, 0xff, 0, 0xff, 0};
+        if (nfc_command == 0x4a && nfc_corrupt_scan_ack_once) {
+          nfc_corrupt_scan_ack_once = false;
+          ++nfc_corrupt_scan_acks;
+          inbound[5] = 0; // Invalid ACK checksum on an otherwise live bus.
+        }
+        nfc_phase = 2;
+      } else if (nfc_phase == 2 && count >= 10) {
+        const std::vector<std::uint8_t> payload = nfc_command != 0x4a
+            ? std::vector<std::uint8_t>{}
+            : (nfc_tag_present
+               ? std::vector<std::uint8_t>{1, 1, 4, 0, 8, 4,
+                   0x12, 0x34, 0x56, 0x78}
+               : std::vector<std::uint8_t>{0});
+        const auto len = static_cast<std::uint8_t>(2 + payload.size());
+        inbound = {1, 0, 0, 0xff, len, static_cast<std::uint8_t>(-len),
+                   0xd5, static_cast<std::uint8_t>(nfc_command + 1)};
+        std::uint8_t sum = static_cast<std::uint8_t>(0xd5U + nfc_command + 1);
+        for (std::uint8_t b : payload) {
+          inbound.push_back(b);
+          sum = static_cast<std::uint8_t>(sum + b);
+        }
+        inbound.push_back(static_cast<std::uint8_t>(-sum));
+        inbound.push_back(0);
+        inbound.resize(count, 0);
+        if (nfc_command == 0x4a) ++nfc_scans;
+        nfc_phase = 0;
+      }
+    } else if (addr == 0x20 && register_address == 0x12) {
+      if (fail_dock_gpio) return 0;
+      ++dock_gpio_reads;
+      inbound = {dock_gpioA};
+    } else if (addr == 0x20 && register_address == 0x13) {
+      if (fail_optional_gpio) return 0;
+      ++optional_gpio_reads;
+      inbound = {optional_gpioB};
+    } else if (addr == 0x20 && register_address == 0x15) {
+      if (fail_mcp_latch_readback) return 0;
+      inbound = {mcp_olatb};
+    } else if (addr == 0x20 && register_address == 0x00) {
+      if (fail_mcp_direction_readback) return 0;
+      inbound = {mcp_iodira};
+    } else if (addr == 0x20 && register_address == 0x01) {
+      if (fail_mcp_direction_readback) return 0;
+      inbound = {mcp_iodirb};
+    } else if (addr == 0x20 && register_address == 0x0C) {
+      inbound = {mcp_gppua};
+    } else if (addr == 0x20 && register_address == 0x0D) {
+      inbound = {mcp_gppub};
+    } else if (addr == 0x44 && pending_sht && count == 6) {
+      const std::uint8_t temp[2] = {0x66, 0x66};
+      const std::uint8_t humidity[2] = {0x80, 0x00};
+      inbound = {temp[0], temp[1], desk_robot::sensirion_crc(temp, 2),
+                 humidity[0], humidity[1],
+                 desk_robot::sensirion_crc(humidity, 2)};
+      pending_sht = false;
+    } else if (addr == 0x28 && register_address == 0xFD) inbound = {cap_product_id};
+    else if (addr == 0x28 && register_address == 0xFE) inbound = {cap_manufacturer_id};
+    else if (addr == 0x28 && register_address == 0x03)
+      inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
+    else if (addr == 0x28 && register_address == 0x21) inbound = {cap_input_enable};
+    else if (addr == 0x28 && register_address == 0x00) inbound = {cap_main_control};
+    else if (addr == 0x28 && register_address == 0x20) inbound = {cap_config};
+    else if (addr == 0x28 && register_address == 0x2f) inbound = {cap_recal_config};
+    else if (addr == 0x28 && register_address == 0x38) inbound = {cap_noise_threshold};
+    else if (addr == 0x28 && register_address == 0x2a) inbound = {cap_multi_touch_block};
+    else if (addr == 0x28 && register_address == 0x44) inbound = {cap_config2};
+    else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
+    else if (addr == 0x57 && (register_address == 0x02 ||
+             register_address == 0x08 || register_address == 0x09 ||
+             register_address == 0x0a || register_address == 0x0c ||
+             register_address == 0x0d)) {
+      if (register_address == fail_pulse_config_read_reg) return 0;
+      inbound = {register_address == 0x02 ? pulse_interrupt_enable :
+                 pulse_config[register_address]};
+    }
+    else if (addr == 0x57 && register_address == 0x00) {
+      if (fail_pulse_status_read) return 0;
+      inbound = {pulse_interrupt_status};
+      pulse_interrupt_status = 0; // read-to-clear
+    }
+    else if (addr == 0x57 && register_address == 0x04 && count == 3)
+      inbound = {pulse_fifo_write_pointer, pulse_fifo_overflow,
+                 pulse_fifo_read_pointer};
+    else if (addr == 0x57 && register_address == 0x04)
+      inbound = {pulse_fifo_write_pointer};
+    else if (addr == 0x57 && register_address == 0x05)
+      inbound = {pulse_fifo_overflow};
+    else if (addr == 0x57 && register_address == 0x06)
+      inbound = {pulse_fifo_read_pointer};
+    else if (addr == 0x57 && register_address == 0x07 && count <= 24 &&
+             count % 6 == 0) {
+      for (unsigned i = 0; i < count / 6; ++i) {
+        const unsigned red = 1000 + i;
+        const unsigned ir = pulse_clip_ir ? 0x3ffffU : 5000 + i;
+        inbound.insert(inbound.end(), {0, static_cast<std::uint8_t>(red >> 8),
+             static_cast<std::uint8_t>(red), static_cast<std::uint8_t>(ir >> 16),
+             static_cast<std::uint8_t>(ir >> 8),
+             static_cast<std::uint8_t>(ir)});
+      }
+      if (pulse_fifo_fill >= 0)
+        inbound.assign(count, static_cast<std::uint8_t>(pulse_fifo_fill));
+      pulse_fifo_read_pointer =
+          static_cast<std::uint8_t>((pulse_fifo_read_pointer + count / 6) & 31U);
+    } else if (addr == 0x39 && register_address == 0x92) inbound = {0xAB};
+    else if (addr == 0x39 && register_address == 0x93) {
+      if (apds_auto_ready) apds_status |= 0x02U;
+      inbound = {apds_status};
+    } else if (addr == 0x39 && register_address == 0x9C) {
+      ++apds_pdata_reads;
+      inbound = {apds_pdata};
+      apds_status &= 0xFDU;
+    } else if (addr == 0x39 && register_address == 0xAF)
+      inbound = {apds_gesture_status};
+    else if (addr == 0x39 && register_address == 0xAE)
+      inbound = {static_cast<std::uint8_t>(apds_gesture_fifo.size() / 4U)};
+    else if (addr == 0x39 && register_address == 0xFC &&
+             count <= apds_gesture_fifo.size()) {
+      inbound.assign(apds_gesture_fifo.begin(), apds_gesture_fifo.begin() + count);
+      apds_gesture_fifo.erase(apds_gesture_fifo.begin(),
+                              apds_gesture_fifo.begin() + count);
+    }
+    else if (addr == 0x36 && extras != 16 && register_address == 0x0B)
+      inbound = {0x20};
+    else if (addr == 0x36 && extras != 16 && register_address == 0x0C)
+      inbound = {0x07, 0xD0};
+    else if (addr == 0x36 && extras == 16 && register_address == 0x08)
+      inbound = {static_cast<std::uint8_t>(fuel_version >> 8),
+                 static_cast<std::uint8_t>(fuel_version)};
+    else if (addr == 0x36 && extras == 16 && register_address == 0x02)
+      inbound = {0xB4, 0x00};
+    else if (addr == 0x36 && extras == 16 && register_address == 0x04)
+      inbound = {0x32, 0x00};
+    else if (addr == 0x40 && register_address == 0xFE)
+      inbound = {0x54, 0x49};
+    else if (addr == 0x40 && register_address == 0x06)
+      inbound = {0x00, static_cast<std::uint8_t>(ina226_conversion_ready ? 0x08U : 0U)};
+    else if (addr == 0x40 && register_address == 0x02)
+      inbound = {static_cast<std::uint8_t>(ina226_bus_raw >> 8),
+                 static_cast<std::uint8_t>(ina226_bus_raw)};
+    else if (addr == 0x40 && register_address == 0x01)
+      inbound = {static_cast<std::uint8_t>(ina226_shunt_raw >> 8),
+                 static_cast<std::uint8_t>(ina226_shunt_raw)};
+    else if (addr == 0x48 && register_address == 0x01) {
+      inbound = {static_cast<std::uint8_t>(
+          (ads_config_high & 0x7fU) | (ads_conversion_ready ? 0x80U : 0U)
+        ), 0x83};
+    }
+    else if (addr == 0x48 && register_address == 0x00) {
+      if (ads_config_high == 0xC3)
+        inbound = {static_cast<std::uint8_t>(ads_belly_raw >> 8),
+                   static_cast<std::uint8_t>(ads_belly_raw)};
+      else inbound = {static_cast<std::uint8_t>(ads_jaw_raw >> 8),
+                      static_cast<std::uint8_t>(ads_jaw_raw)};
+    } else if (ranges == 0 && extras == 0) {
+      if (const auto* imu_reg = find_upstream_imu_reg(addr, register_address)) {
+        inbound = {imu_reg->value};
+      }
+    }
+    if (inbound.size() != count) {
+      inbound.clear();
+      return 0;
+    }
+    if (addr == next_short_read_address && count == next_short_read_request) {
+      next_short_read_address = -1;
+      if (next_short_read_count < inbound.size())
+        inbound.resize(next_short_read_count);
+    }
+    return inbound.size();
+  }
+  int available() const { return static_cast<int>(inbound.size() - pos); }
+  int read() {
+    if (pos >= inbound.size()) return -1;
+    return inbound[pos++];
+  }
+};
+extern TwoWire Wire;

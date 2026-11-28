@@ -1,40 +1,54 @@
+> Current selected six-axis IMU: **MPU6050 / GY-521** for the first robot and future four. BerryIMU is an optional legacy spare, not the fleet baseline. The WROOM reads actual six-axis data and has a local software attitude inhibit, but neither mounting nor pickup, shake and tilt behavior has been physically qualified. See the [MPU6050 register map](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf).
+
 # Touch, handling and expressive interactions
 
 Updated 2026-11-06. Required first additions: one head-touch input and one
 six-axis motion sensor per robot. RGB lighting is optional. This specifies
-integration and tests; none of these add-ons has been wired, flashed or qualified.
-The [photo inventory](photo-inventory-2026-11-04.md) now identifies an owned
-BerryIMU and other spares. Hold a new prototype IMU purchase until the owned unit
-has been identified and tested. The follow-up photo identifies an owned
-Adafruit #1374 AT42QT1010 for robot one's head touch.
+integration and tests. The owned AT42QT1010 now has WROOM input polling,
+debounced status and a local stop interlock in firmware, but no physical
+wiring, shell test, flashing or qualifying trial has been completed.
+The [photo inventory](photo-inventory-2026-11-04.md) identifies a reported
+BerryIMU spare and other parts; the exact MPU6050 carrier, installed orientation
+and available quantity still need confirmation. The selected WROOM path probes
+MPU6050 WHO_AM_I on the upstream I2C bus, reads actual raw accelerometer
+and gyro samples, and includes a local software attitude inhibit.
+Neither physical sensor readings nor loaded tilt, shake, pickup and safe-resume
+trials have been qualified. Do not substitute the spare without a documented
+engineering decision. The follow-up photo identifies an owned Adafruit
+#1374 AT42QT1010 head-touch board; no new Adafruit board is required.
 
 ## Minimal hardware and current pin feasibility
 
 | Part | Quantity per core | Proposed connection | Decision |
 | --- | ---: | --- | --- |
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
-| Owned BerryIMU accelerometer+gyro board | 1 | Proposed body I2C21/22 upstream of mux; exact older-board pins/supply/addresses to verify | Prototype reuse first. Likely V1, not proven; identify chips and acquire real samples before choosing driver. One photographed board does not cover five cores. LSM6DS3TR-C remains a conditional replacement only |
-| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not steal bodyGPIO4, already allocated to mux reset |
-| Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
+| MPU6050 / likely GY-521 module (user reported) | 1 | WROOM GPIO21 SDA / GPIO22 SCL upstream of TCA9548A; verify 3.3 V logic and actual breakout power path | **Selected first robot and fleet IMU**, family 4. Boot WHO_AM_I register 0x75 must return 0x68 at bus address 0x68 or 0x69. Six-axis signed samples via register 0x3B. Physical mounting and handling classification still unqualified. Stock count unknown | 
+| Photographed BerryIMU (optional compatible alternative) | 0 required | Same upstream I2C only if MPU6050 removed | Preserve V1/V2/V3 support; never join two unqualified IMUs or assume this photographed chip revision |
+| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is reserved by project policy and
+the TCA9548A RESET must be pulled high to 3.3 V |
+| Normally closed mechanical bumper switches | 2 selected | Series loop to WROOM GPIO35 with external 3.3 V pullup | Required local continuity/stop evidence in full profiles; not a substitute for floor sensors |
 
-BerryIMU supplies the required acceleration and gyro functions without requiring
-use of its magnetometer/barometer. Do not use a compass as track odometry;
+BerryIMU remains an optional spare with accelerometer and gyro support;
+it is not the selected source for the required handling IMU.
+Do not use a compass as track odometry;
 actuator magnets/current can disturb it. The GY-61 in the photos is consistent
 with ADXL335 analog acceleration, not MPU6050 and not a gyro. Its three ADC lines
 are less convenient than the existing I2C route. The mechanical tilt switch is
 only a binary input. See the photo audit for revision and electrical checks.
 
-MPU6050/GY-521 can be evaluated if separately owned and functioning. It is an older,
-discontinued part, not the new five-unit baseline. Do not buy a9-axis compass for
-these interactions: a six-axis accelerometer+gyro is sufficient. A LIS3DH-only
+MPU6050/GY-521 is the selected baseline for the first pet and five-unit fleet;
+its carrier revision, 3.3 V electrical compatibility, mounting and calibration
+must still be measured. Do not buy a nine-axis compass for these interactions:
+a six-axis accelerometer and gyro are sufficient. A LIS3DH-only
 alternative measures acceleration/tilt but has no gyro; it is not an equivalent
 six-axis substitution.
 
 GPIO34/35/36/39 are input-only with no internal pullups. Keep one owner for body
 I2C and bounded reads; IMU processing must not delay the floor/stop path. The IMU
 addresses must be checked against mux0x70 and ToF0x29 before final allocation.
-The optional BMP280 can conflict with a BerryIMU pressure sensor at0x77; leave
-the redundant sensor disconnected unless that address collision is resolved.
+The selected BMP280 belongs on accessory mux `0x71` lane 3 at 0x76 or 0x77.
+Keep the selected MPU6050 upstream; a legacy BerryIMU spare with an upstream
+pressure chip must not be fitted if its address collides with the BMP280.
 Anonymous breakouts must have
 verified supply, pullups and logic levels; an IC specification is not proof of
 board-level5V tolerance. No BerryIMU envelope has been measured for this build.
@@ -43,18 +57,76 @@ For an optional5V NeoPixel, use a guaranteed compatible level buffer such as
 SN74AHCT1G125, plus appropriate decoupling/data resistor. Native ESP-IDF
 `espressif/led_strip` is the reviewed head integration route. A bare LED plus
 resistor or the existing onboard indicator is a cheaper alternative; do not
-assume direct3.3V data works with every5V RGB pixel. No LED route is compiled yet.
+assume direct 3.3 V data works with every 5 V RGB pixel. The Sense-only
+`CONFIG_DESK_ROBOT_RGB_HEART_ENABLED` flag defaults to off; when enabled,
+`GetLed()` uses the pinned Xiaozhi `SingleLed` RMT driver on GPIO9.
+See [Sense RGB and J3 gates](../../code/firmware/head/sense/README.md).
+The pinned driver clears the pixel in Xiaozhi device idle, but listening and
+other states can illuminate it. Mac pet quiet mode is not a proven LED-dark
+command, and a black RGB frame does not disconnect pixel or buffer power.
+
+Before enabling or purchasing the final heart assembly, verify the exact
+BOB-13282 revision, SN74AHCT1G125DBVR 5 V supply, defined active-low OE and
+data input during reset, common ground, local decoupling, data resistor,
+power sequencing without backfeed, and physical J3 isolation. Measure actual
+5 V branch current with RGB disabled, black, listening, speaking and worst
+permitted brightness; repeat through quiet-mode entry, continuous listening,
+reboot and simultaneous audio/camera load. Record dark current separately
+from illumination and include it in the battery budget. Keep the feature
+unqualified until the measured results and quiet-mode behavior are reviewed.
+No new GPIO, power switch or purchase is authorized by this description.
 A visible laser supplies no additional sensing and the fixed head cannot aim it
 independently; the first build uses eyes/audio and optional diffused light.
+
+## Selected expansion sensor roles
+
+The [full feature plan](full-feature-plan.json) selects one of each role below per
+robot; runtime opt-in and physical qualification are separate from selected
+quantities. The [63-role ownership matrix](full-63-role-source-ownership.json)
+records source owners and host tests, not successful execution or purchase
+approval. The WROOM owns both I2C muxes: eight VL53L0X lanes remain on `0x70`;
+accessory mux `0x71` is isolated and quiesced before critical range reads.
+See [canonical wiring](wiring.md) for all eight accessory lanes.
+
+| Role ID | 0x71 lane | 7-bit address | Source state | Implemented / deferred boundary |
+| --- | ---: | --- | --- | --- |
+| `max30102` | 0 | 0x57 | `optical_raw_source` | CAP1188 shares lane 0; raw red/IR paw contact only, no BPM, SpO2 or identity. FIFO orientation, baffle, carrier and thresholds unqualified. |
+| `apds9960` | 1 | 0x39 | `optional_gesture_source` | AS5600 nose shares lane 1; proximity and bounded gesture FIFO only. Color/lux acquisition and calibrated light sensing are deferred. |
+| `sht41` | 3 | 0x44 | `environment_driver_source` | CRC-checked temperature/humidity; physical placement and breath thresholds unqualified. |
+| `bmp280` | 3 | 0x76 / 0x77 | `environment_driver_source` | Chip ID 0x58 and factory compensation; pressure/temperature only, not humidity or altitude. Verify carrier and trim. |
+| `mcp23017` | 5 | 0x20 | `dock_gpio_haptic_source` | Required fresh GPIOA dock interlock in full profiles. GPIOB0/B1 optional reed/PIR, GPB3 guarded DC fault input; GPB2 haptic edge only in opt-in lab builds. No charge enable. |
+| `pn532` | 5 | 0x24 | `read_only_nfc_source` | Optional bounded SAM/tag polling after dock GPIOA; toy token only, no authentication. IRQ/reset driving deferred; carrier wake/stretch and bus recovery unqualified. |
+
+Lane 2 remains ADS1115 force (0x48); lane 4 remains INA226 (0x40) and
+MAX17048 (0x36); lanes 6 and 7 remain isolated AS5600 wheel encoders (0x36).
+Raw MAX30102 collection is disabled by default in WROOM images, including
+`esp32_full` and `esp32_dc_full`. A full-sensor lab build must explicitly set
+`DESK_ROBOT_ENABLE_PAW_RAW=1` to initialize and poll the optical FIFO. The
+`esp32_full_pulse_reversed_lab` image opts in with reversed channel order;
+normal red-first trials use the same explicit collection flag without the
+reversal. Disabled images retain the auxiliary pulse schema for compatibility
+with absent/invalid, zero-valued placeholders, not acquired raw samples.
+This is a boot-time firmware choice, independent of the Mac's runtime
+`paw_contact_interactions_qualified` setting. Enabling raw collection allows
+red/IR readings to travel over auxiliary telemetry even when derived Mac paw
+interactions are disabled; it does not grant physical or medical qualification.
+Do not enable on a person's paw contact without consent. Disabling the firmware
+collection flag is not proof of optical sensor power removal or physical LED
+shutdown after a controller-only reset.
+
+Optional peripheral failure must never bypass local dock or cliff evidence.
+Do not allocate a second sensor for APDS color/light, a second IMU, or a
+second NFC reader just to expose a deferred function. All physical carrier,
+pullup, timing, optical, mounting and cost gates remain HOLD.
 
 ## Behavior contract
 
 | Event | Reaction | Guard |
 | --- | --- | --- |
 | Head pat, stationary | Happy eyes/short sound, brief interaction state | Debounce/coalesce; no movement implicitly authorized |
-| Touch during exploration | Pause movement locally first, then show response | Touch is not an automatic rearm/resume command |
+| Touch during exploration | Body disarms drive locally on the first raw sampled HIGH, before gesture debounce, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
 | Double tap, stationary | Invite conversation or show attention | Respect active speech, quiet settings and cooldown |
-| Deliberate long touch | Quiet/pause state | Never authorize motors through this gesture |
+| Deliberate long touch | WROOM hold event enters Mac pet quiet mode, cancelling its active spontaneous reply | Never authorize motors or clear faults through this gesture; physical response still unqualified |
 | Gentle tilt/rotation | Eyes lean/look curious; short sound if appropriate | Excessive tilt suppresses drive; thresholds are calibrated on actual hardware |
 | Shake | Surprised/dizzy reaction | Reject normal track/servo vibration and own animated motion; cooldown repeated events |
 | Suspected pickup | Stop tracks before expression/voice; held-like response | Fuse IMU transient/attitude, multiple floor-range changes and touch/context. IMU alone cannot prove a level robot is held still |
@@ -91,11 +163,16 @@ these are not existing supported wire commands.
 - Reachy supplies speech/listening arbitration and orientation reporting;
   Google's agent supplies camera-event handling. Neither automatically supplies
   our held-state fusion. See [complete source map](../source-map.md).
-- WROOM driver route: identify the owned BerryIMU version first; use the maker's
-  version-detection/register examples as a reviewed reference, not an assumed
-  drop-in LSM6 driver. LSM6DS/BusIO/Unified Sensor applies only to that conditional
-  replacement. The AT42QT1010 needs a digital event adapter rather than a special
-  library. No BerryIMU driver has been imported, compiled or physically tested.
+- Selected WROOM driver route: use `BerryImu::decode_mpu6050` and the shared
+  upstream `Wire` bus for bounded MPU6050 raw six-axis acquisitions.
+  `BodyControl` has a local software attitude guard in the guarded full
+  firmware profile; it stays motion-inert until real calibration is installed.
+  BerryIMU V1/V2/V3 register mappings and maker examples remain supported
+  only for an explicitly chosen spare/legacy alternative, not the first-pet
+  baseline. Do not load a competing LSM6 or BusIO stack without a documented
+  board decision. AT42QT1010 uses a digital event adapter, not a sensor library.
+  Actual carrier voltage, axes, sensor ages, vibration and stops remain untested
+  on the assembled robot; host tests are not physical qualification.
 
 ## Optional later ideas, without a sensor shopping spree
 
@@ -106,16 +183,38 @@ it cannot identify different accessories by itself. Keep the module optional
 until its pin/mount/voltage checks pass. A simple light sensor can support dark-room sleep;
 camera auto-exposure is not a calibrated lux reading. A small jaw/contact switch
 can provide contact evidence, but not gripping force or proof of pickup.
+
+The selected jaw FSR402 is separate from that optional switch and from the
+belly FSR: ADS1115 channel 1 measures jaw contact; channel 0 is belly squeeze.
+Use the [FSR jaw fit coupon](../cad/remixes/one_robot_adapter_kit_README.md)
+and [measured linkage interfaces](../cad/FUSION_MEASUREMENT_SHEET.md). Fit
+on a flat supported seat with the tail uncreased and its vent unobstructed.
+The compliant silicone actuator must transfer normal contact through the
+actual active area, with no adhesive/rim load bypass or unloaded preload;
+measure compressed height, force response and baseline after installation.
+Do not infer force in newtons, finger contact, or grasp success from ADC
+counts alone. Follow [no-motion jaw calibration](../guides/jaw-calibration-helper.md)
+and retain the WROOM force and travel qualification gates.
 Battery-aware behavior requires the selected power module's qualified status or
 a real monitor; no mood meter or raw assumed voltage means remaining capacity.
-All of these stay optional until their small mount/pin/cost benefit is established.
+The later ideas remain optional; selected FSR, reed, power-monitor and other
+roles in the full feature plan are not removed by deferring their runtime use.
 Do not add an ultrasonic sensor, second camera or extra controller solely to
 produce another reaction already possible with the existing camera/mic/ToFs.
 
 ## Acceptance before duplication
 
 - A10: detect tap/double/hold through actual case; suppress bounce/repeated events;
-  touching during motion stops/pauses before the expression path. It cannot rearm.
+  touching during motion stops/pauses before the expression path. Existing body
+  firmware now distinguishes single tap, double tap and long hold using debounced
+  edges and local uptime. One **raw sampled high** independently stops the
+  current WROOM motor lease before three-sample gesture classification, and
+  blocks a new arm while raw or stable input remains pressed. Candidate
+  software windows are a short touch up to 600 ms, a second tap ending within
+  350 ms of the first release, and a hold of at least 900 ms. The final windows
+  and touch response through the shell still require measured trials. Typed
+  counters flow through the existing head UART status to firsthand Mac memory.
+  It cannot rearm.
 - A11: recognize intended tilt/shake and suspected handling while rejecting normal
   loaded motor/servo vibration. Held/unsafe attitude inhibits tracks. Putdown,
   reconnect and reboot do not automatically resume them. Record thresholds/data.
@@ -134,3 +233,161 @@ Primary electrical references include
 [Espressif GPIO](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/gpio.html),
 [LED driver](https://components.espressif.com/components/espressif/led_strip),
 [TI level buffer](https://www.ti.com/product/SN74AHCT1G125).
+
+## Historical and optional BerryIMU identity path (not selected for the first pet)
+
+The WROOM firmware now uses the **already initialized body Wire bus** to check
+WHO_AM_I register 0x0F at the maker's known BerryIMU address candidates.
+It briefly disconnects downstream TCA9548A ports for the probe; subsequent
+ToF polls select their own channels again. The published chip pairs used only
+for classification are: **V1 LSM9DS0** gyro 0xD4 and accel/mag 0x49,
+**V2 LSM9DS1** gyro/accel 0x68 and magnetometer 0x3D, and
+**V3 LSM6DSL/LIS3MDL** gyro/accel 0x6A and magnetometer 0x3D.
+The board may use either documented address option, and a nonmatching pair
+remains `family=0`, not an assumed driver or a claimed functioning IMU.
+
+A bounded `status.imu` object exposes `family`, `gyro_id` and `aux_id`
+for the direct USB inspection tool and through the existing Sense UART bridge.
+Firmware now additionally configures the matching V1/V2/V3 accelerometer and
+gyro at conservative data rates and samples six raw signed axes every 50ms.
+The `status.imu` object retains the three original identity fields and adds
+`valid`, `acc`, `gyro` and `age_ms`. Samples older than 200ms become invalid.
+The same read-only fields appear in the existing local USB serial bench tool,
+which reports `raw_six_axis_available=true` only for a currently
+valid raw sample. This optional BerryIMU inspection does not qualify the
+selected MPU6050 software attitude guard, and
+`physical_qualification_pass=false` remains explicit. Raw counts alone
+do not mean tilt is safe or calibrated.
+Nothing grants movement, changes the five-sensor cliff decisions or clears
+the locally latched faults.
+
+The V1 candidate has mature reusable
+[Adafruit LSM9DS0 Arduino code](https://github.com/adafruit/Adafruit_LSM9DS0_Library)
+with a BSD license and
+[SparkFun LSM9DS0 Arduino code](https://github.com/sparkfun/SparkFun_LSM9DS0_Arduino_Library)
+with explicit Beerware reuse terms. Their I2C addresses and error handling must still be checked against the
+**actual** chip and the existing 15ms I2C timeout. The selected code adapts
+the OzzMaker register mappings directly rather than loading a second competing
+sensor library. Keep its provenance and upstream terms under review.
+V2/V3 use their respective chip register layouts, never V1 registers.
+
+Qualification still needs a real stationary gravity sample, known PCB axes,
+gyro bias, tilt/shake vibration rejection with steppers and servos operating,
+pickup/setdown fusion with four downward ranges, timing and a local drive
+inhibit when unsafe. None of those physical A11 tests has been performed.
+
+
+## Six-axis sampling and actual mounting qualification
+
+The latest WROOM code reuses `TofBus::probe_imu` rather than probing the I2C
+bus twice. After identifying the model and addresses, the `BerryImu` adapter
+reads three accelerometer and three gyroscope register pairs using the same
+upstream 3.3V GPIO21/22 Wire bus. No second I2C controller, new user-facing
+server or sensor-to-motor permission is created. The 320G family is explicitly
+unsupported pending a matching register mapping and verification.
+
+All values are raw signed register counts. They are **not** tilt degrees or
+meters per second squared. First verify the breakout supply and printed pins,
+then test a stationary gravity sample, each known physical axis, motion
+vibration, motor noise, disconnect/reconnect, and the actual ages through
+`code/scripts/serial_bench.py --inspect` with the robot on a catch tray.
+The selected full WROOM firmware now includes a local measured-upright MPU6050
+motor veto, separate from the raw data driver and the five ToF cliff guard.
+It cannot qualify a physically held robot whose gravity vector and floor
+range readings remain indistinguishable from the desk. Physical pickup and
+putdown detection still requires mounting and floor fusion trials; a host
+test alone does not authorize motion.
+
+
+## Required raw IMU heartbeat before local arm
+
+The selected ESP32 WROOM full firmware requires an identified fresh MPU6050
+six-axis sample before accepting `arm`; a missing, invalid or older than
+200ms sensor sample rejects arming. If it becomes missing or stale during an
+armed movement, WROOM freezes servo targets, zeros both tracks and disarms
+before its separate 500ms communication watchdog. The Mac checks the identical
+raw readout through the existing authenticated head status before an operator
+permit and again before a controlled job. Bench tests include a mid-drive
+expired sample and verify that neither a fresh network request nor a status
+read can resume motion automatically.
+
+The freshness heartbeat alone never measures tilt or held state. The
+separate local `BodyControl` attitude guard compares two **distinct** valid
+MPU6050 conversions against the installed unit's measured upright
+accelerometer vector, gravitational magnitude envelope and minimum upright
+projection. A single transient outlier cannot latch a stop, while sustained
+unsafe orientation latches both tracks off without waiting for the Mac.
+A real low-g interrupt or a stale/contradictory IMU sample retains its own
+independent, stricter fail-closed path. All five guarded ToF conversions
+must remain healthy; successful IMU observations never override a floor
+fault. Putdown and reacquired healthy data do not automatically resume
+canceled movement. Local USB rearm requires two new upright conversions
+and healthy floor evidence, and still does not arm or resume old targets.
+
+**Default full firmware remains attitude-unqualified and motion-inert.**
+`code/firmware/body/src/main.cpp` calls
+`require_imu_attitude_guard(true)` for every full sensor build. It prints
+`WARN imu_attitude_unqualified wheels_locked` and rejects motion until the
+installed unit has measured calibration. Do not copy the host test values
+into production. For a physically measured assembly only, set
+`DESK_ROBOT_ATTITUDE_LIMITS_QUALIFIED=1` and provide all six required
+compile-time values: `DESK_ROBOT_UPRIGHT_ACCEL_X`,
+`DESK_ROBOT_UPRIGHT_ACCEL_Y`, `DESK_ROBOT_UPRIGHT_ACCEL_Z`,
+`DESK_ROBOT_UPRIGHT_PROJECTION_PERMILLE`,
+`DESK_ROBOT_ACCEL_MIN_NORM_RAW` and `DESK_ROBOT_ACCEL_MAX_NORM_RAW`.
+The boot guard validates a bounded raw norm and an upright projection of
+500 through 990 per mille; these are input sanity bounds and **not** a
+measured safe maximum tilt. Motor cutoff, power, charger, bumper, gripper
+and floor calibration gates still apply.
+
+For A11 qualification, disconnect drive power and record the exact MPU6050
+carrier revision, I2C address, mounting axes, stationary raw axes, six-axis
+signs under controlled pitch/roll and an upright desk reference. Measure
+upright acceleration distributions and outliers for each installed unit at
+rest, with tracks and both MG90S servos operating, and over expected
+temperatures. Choose projection and norm boundaries only from those
+observations and the measured stopping margin, recording the values beside
+the flashed commit and serial logs. Then, on a tethered catch tray, verify
+one-sample vibration rejection, sustained static unsafe tilt with
+`low_g_irq=false`, stale/replayed IMU, contradictory axes, a cliff during
+attitude recovery, a level robot still held above the desk, putdown,
+explicit USB rearm, and measured loaded stopping distance. Capture raw
+samples, elapsed time and floor/IMU freshness for each case.
+**A11 remains open** until actual physical handling trials pass. Source
+tests and compilation are not physical acceptance.
+
+
+### BerryIMU upstream identity collision handling
+
+This build adapts the paired WHO_AM_I approach from the existing OzzMaker
+BerryIMU Arduino `detectIMU()` implementation. It scans both possible
+acceleration/gyro addresses and the three known accessory addresses. Multiple
+recognized devices on either side now produce **unknown**, rather than
+selecting the first reply and driving potentially mismatched registers.
+A 320G WHO_AM_I value `0x73` is observed for diagnosis but deliberately
+cannot arm the V1/V2/V3 sampler. This is not equivalent to a physical revision
+check or to a board voltage measurement. See OzzMaker's original quick-start
+for V3 I2C versus SPI jumper settings.
+
+
+### Extra inputs now connected to event provenance, not to motor permission
+
+The WROOM `extras` status object includes an enabled physical mask, debounced
+bumper/magnet/PIR rising counters, and current levels. A single real bumper
+HIGH/LOW electrical contact trips motion locally before debounce, while the
+same event can later cancel a Mac coordinator job. PIR reports an infrared
+*change*, not an identified visitor; reed reports a magnetic closure, not a
+particular hat. A Mac robot records these as that robot's firsthand events and
+optional fleet sharing retains its reported source. Unplugged or unenabled
+sensor inputs cannot invent an event. This does not establish physical
+accuracy, installed pin voltage, or reliable detached/held handling.
+
+Both the AT42QT1010's HIGH-on-touch hardware output and MPU6050's WHO_AM_I
+are reviewed against vendor data. The selected BMP280 already has a dedicated Bosch compensation implementation
+on accessory mux lane 3; it does not reuse six-axis MPU registers. No additional body sensor
+board was purchased or claimed functional.
+
+
+## Single-robot CAP1188 read-only USB diagnostics
+
+The existing `code/scripts/serial_bench.py --inspect --samples 10` now reports `cap_touch.reported`, `cap_touch.valid`, `cap_touch.zone_mask` (0..255) and `cap_touch.rising_zone_events` from *actual* WROOM CAP1188 telemetry. It rejects partial, forged or out-of-range fields and always reports `physical_qualification_pass=false`; it never arms or recovers the local guard. This is the same USB inspection path used for five VL53L0X, MPU6050, bumper, PIR and reed. New Python tests include an 8-zone mask, missing fields, invalid types and counts. The actual electrode padding and through-shell physical trial remains open.

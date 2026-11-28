@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "built_at": "2026-10-28",
   "flashed": false,
   "head_bridge_token": "empty; disabled in verification build",

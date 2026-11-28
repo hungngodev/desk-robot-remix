@@ -1,4 +1,8 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
+  "purchase_ready": false,
+  "scope_note": "Superseded pre-photo-audit procurement snapshot; not current wiring, procurement or release authority. Use docs/hardware/full-feature-plan.json for current quantities and code/scripts/procurement_release.py for release gates.",
   "currency": "USD",
   "checked_at": "2026-11-04",
   "cap_usd": 50,

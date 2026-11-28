@@ -1,7 +1,9 @@
-> Design update 2026-11-03: these are preserved CoreS3/Freenove build references.
-> The separate Sense/PDM/SSD1306/8 MB board now compiles; see sense/README.md.
-> See `docs/guides/modular-head.md`. The user reports purchasing a XIAO Sense bundle;
-> arrival/revision and physical acceptance remain unconfirmed. No hardware is flashed.
+> Historical CoreS3 reference only. This README is copied into the CoreS3
+> overlay, not the selected XIAO ESP32S3 Sense profile. In the desk-robot-remix
+> repository, see `code/firmware/head/sense/README.md` and
+> `docs/guides/modular-head.md` for the paid Sense bundle and current wiring.
+> Carrier delivery was reported; actual revision, inspection, flashing and
+> physical acceptance remain unverified. Never flash CoreS3 firmware to Sense.
 
 # Desk robot CoreS3 Lite
 

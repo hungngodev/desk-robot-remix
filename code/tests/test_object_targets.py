@@ -1,0 +1,524 @@
+"""Offline Guide 60 truthful object target selection and origin fencing."""
+
+from dataclasses import replace
+
+import pytest
+from desk_robot.object_targets import (
+    ObjectEvidence,
+    ObjectOwner,
+    ObjectQuery,
+    resolve_object_target,
+)
+
+
+def fixtures():
+    q = ObjectQuery("robot-01", "key", "session-2", "turn-7", "origin-3", 8,
+                    "tag-4", "cal-5", 101, "mac-boot-5", 12, 900_000, 1_500_000)
+    owner = ObjectOwner("robot-01", "session-2", "turn-7", "origin-3", 8,
+                        "tag-4", "cal-5", 101, "mac-boot-5", 12, True, True)
+    seen = ObjectEvidence(
+        "robot-01", "key", "camera_seen", 1800000000.1,
+        receipt_us=950_000, captured_us=950_000, origin_id="origin-3", epoch=8, anchor_id="tag-4",
+        calibration_id="cal-5", camera_boot=101,
+        host_boot_id="mac-boot-5", camera_grant=12, frame_seq=23,
+        floor_mm=(120, 220), projection_qualified=True, confidence=0.92,
+    )
+    return q, owner, seen
+
+
+def resolve(rows=None, query=None, owner=None, *, now_us=1_000_000, **kwargs):
+    q, o, seen = fixtures()
+    return resolve_object_target(query or q, owner or o,
+                                 rows if rows is not None else [seen],
+                                 now_us=now_us, **kwargs)
+
+
+def test_fresh_calibrated_sighting_is_not_an_arrival_or_motor_permit():
+    result = resolve()
+    assert (result.status, result.reason, result.confirmed_floor_mm) == (
+        "current_sighting", "fresh_projected_view", (120, 220))
+    assert result.search_hint_mm is None
+    assert not result.arrived and not result.may_execute
+    assert result.request_fence == fixtures()[0]
+
+
+@pytest.mark.parametrize("label", ["coin", "key", "card"])
+def test_flat_object_floor_projection_does_not_authorize_grasp(label):
+    query, owner, seen = fixtures()
+    result = resolve([replace(seen, label=label)], query=replace(query, label=label), owner=owner)
+    assert result.confirmed_floor_mm == seen.floor_mm
+    assert not result.arrived and not result.may_execute
+
+
+def test_fresh_unprojected_view_is_not_a_metric_target():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, projection_qualified=False)])
+    assert result.status == "current_sighting"
+    assert result.reason == "fresh_view_no_metric_projection"
+    assert result.confirmed_floor_mm is None
+    assert not result.may_execute
+
+
+def test_stale_key_is_last_seen_hint_not_current_location():
+    result = resolve(now_us=1_300_001)
+    assert result.status == "last_seen"
+    assert result.reason == "historical_sighting_only"
+    assert result.confirmed_floor_mm is None
+    assert result.search_hint_mm == (120, 220)
+
+
+def test_latest_camera_not_seen_invalidates_current_sighting_not_memory():
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", receipt_us=955_000,
+                     frame_seq=24, floor_mm=None, projection_qualified=False)
+    result = resolve([seen, absent])
+    assert (result.status, result.reason) == ("last_seen", "not_currently_confirmed")
+    assert result.confirmed_floor_mm is None
+    assert result.search_hint_mm == (120, 220)
+    # Later fresh positive can restore current *evidence*, but not arrival.
+    newer = replace(seen, receipt_us=970_000, frame_seq=25)
+    assert resolve([seen, absent, newer]).status == "current_sighting"
+
+
+@pytest.mark.parametrize(
+    ("positive_seq", "positive_receipt", "negative_seq", "negative_receipt",
+     "current"),
+    [
+        (23, 975_000, 24, 955_000, False),  # Old positive finishes last.
+        (25, 955_000, 24, 975_000, True),   # Old negative finishes last.
+        (24, 975_000, 24, 955_000, False),  # Contradictory same-frame results.
+        (25, 975_000, 24, 955_000, True),   # Genuine new positive restores view.
+    ],
+)
+def test_capture_sequence_overrules_out_of_order_detection_completion(
+    positive_seq, positive_receipt, negative_seq, negative_receipt, current,
+):
+    _, _, seen = fixtures()
+    positive = replace(seen, frame_seq=positive_seq,
+                       receipt_us=positive_receipt)
+    negative = replace(seen, source="camera_not_seen",
+                       frame_seq=negative_seq, receipt_us=negative_receipt,
+                       floor_mm=None, projection_qualified=False)
+    for evidence in ([positive, negative], [negative, positive]):
+        result = resolve(evidence)
+        if positive_seq == negative_seq:
+            assert (result.status, result.reason) == ("unknown", "contradictory_camera_frame")
+            assert result.search_hint_mm is None
+        else:
+            assert result.status == ("current_sighting" if current else "last_seen")
+            assert result.reason == (
+                "fresh_projected_view" if current else "not_currently_confirmed"
+            )
+        assert result.confirmed_floor_mm == ((120, 220) if current else None)
+        assert result.arrived is False and result.may_execute is False
+
+
+def test_oversized_camera_sequence_cannot_resurrect_a_hidden_object():
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", receipt_us=960_000,
+                     frame_seq=24, floor_mm=None, projection_qualified=False)
+    forged = replace(seen, receipt_us=970_000, frame_seq=0x1_0000_0000)
+    for rows in ([seen, absent, forged], [forged, absent, seen]):
+        result = resolve(rows)
+        assert result.status == "last_seen"
+        assert result.reason == "not_currently_confirmed"
+        assert result.confirmed_floor_mm is None
+        assert result.search_hint_mm == (120, 220)
+        assert result.arrived is False and result.may_execute is False
+
+
+def test_uint32_max_camera_sequence_is_accepted():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, frame_seq=0xFFFFFFFF)])
+    assert result.status == "current_sighting"
+    assert result.confirmed_floor_mm == (120, 220)
+    assert not result.arrived and not result.may_execute
+
+
+def test_seen_from_an_old_camera_boot_or_origin_is_only_historical():
+    _, _, seen = fixtures()
+    for e in [replace(seen, camera_boot=100), replace(seen, origin_id="prior")]:
+        result = resolve([e])
+        assert result.status == "last_seen"
+        assert result.confirmed_floor_mm is None
+    assert resolve([replace(seen, origin_id="prior")]).search_hint_mm is None
+
+
+def test_foreign_robot_is_not_queried_even_if_high_confidence():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, robot_id="robot-02")])
+    assert result.status == "unknown"
+    assert result.confirmed_floor_mm is None
+
+
+@pytest.mark.parametrize(("changed", "reason"), [
+    ({"turn_id": "turn-8"}, "turn_or_robot_changed"),
+    ({"session_id": "new-session"}, "turn_or_robot_changed"),
+    ({"robot_id": "robot-02"}, "turn_or_robot_changed"),
+    ({"epoch": 9}, "origin_map_or_camera_changed"),
+    ({"origin_id": "picked-up"}, "origin_map_or_camera_changed"),
+    ({"calibration_id": "cal-6"}, "origin_map_or_camera_changed"),
+    ({"camera_boot": 102}, "origin_map_or_camera_changed"),
+    ({"host_boot_id": "mac-boot-6"}, "origin_map_or_camera_changed"),
+    ({"camera_grant": 13}, "origin_map_or_camera_changed"),
+])
+def test_new_turn_origin_or_camera_cancels_prior_request(changed, reason):
+    _, owner, _ = fixtures()
+    result = resolve(owner=replace(owner, **changed))
+    assert result.status == "rejected"
+    assert result.reason == reason
+
+
+def test_cancel_deadline_and_monotonic_rollback_fail_closed():
+    q, _, _ = fixtures()
+    assert resolve(query=replace(q, cancelled=True)).reason == "cancelled"
+    assert resolve(now_us=1_500_000).reason == "deadline_or_clock_invalid"
+    assert resolve(now_us=800_000).reason == "deadline_or_clock_invalid"
+    assert resolve(query=replace(q, deadline_us=True)).reason == "invalid_request_or_evidence_budget"
+
+
+def test_consent_revocation_blocks_live_and_private_recall():
+    _, owner, _ = fixtures()
+    assert resolve(owner=replace(owner, memory_allowed=False)).reason == "memory_consent_revoked"
+    result = resolve(owner=replace(owner, camera_allowed=False))
+    assert result.status == "last_seen" and result.confirmed_floor_mm is None
+
+
+def test_newer_user_report_does_not_become_camera_fact_or_metric_goal():
+    _, _, seen = fixtures()
+    report = ObjectEvidence("robot-01", "key", "user_reported", 1800000001.0)
+    result = resolve([replace(seen, receipt_us=100, captured_us=100), report])
+    assert result.status == "user_reported"
+    assert result.source == "user_reported"
+    assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+    assert not result.may_execute
+
+
+def test_newer_witnessed_candy_beats_old_user_report():
+    q, _, seen = fixtures()
+    candy_q = replace(q, label="wrapped candy")
+    candy = replace(seen, label="wrapped candy", receipt_us=200_000,
+                    captured_us=200_000)
+    report = ObjectEvidence("robot-01", "wrapped candy", "user_reported", 1700000000.0)
+    result = resolve([candy, report], query=candy_q)
+    assert result.status == "last_seen"
+    assert result.source == "camera_seen"
+
+
+def test_future_replayed_low_confidence_and_malformed_predictions_never_confirm():
+    _, _, seen = fixtures()
+    invalid = [
+        replace(seen, receipt_us=2_000_000),
+        replace(seen, receipt_us=899_999),
+        replace(seen, confidence=0.20),
+        replace(seen, confidence=float("nan")),
+        replace(seen, floor_mm=(float("inf"), 100)),
+        replace(seen, frame_seq=True),
+        replace(seen, camera_boot=True),
+        replace(seen, projection_qualified="yes"),
+    ]
+    for candidate in invalid:
+        result = resolve([candidate])
+        assert result.status != "current_sighting"
+        assert result.confirmed_floor_mm is None
+
+
+def test_unqualified_foreign_or_reported_floor_never_yields_a_route_goal():
+    _, _, seen = fixtures()
+    unknown = resolve([replace(seen, robot_id="robot-02")])
+    assert unknown.status == "unknown"
+    report = ObjectEvidence("robot-01", "key", "user_reported", 1800000000.0,
+                            floor_mm=(90, 90), projection_qualified=True)
+    assert resolve([report]).status == "unknown"
+
+
+def test_unbounded_result_set_and_untrusted_labels_fail_closed():
+    q, _, seen = fixtures()
+    assert resolve([seen] * 129).reason == "invalid_request_or_evidence_budget"
+    assert resolve(query=replace(q, label="../../etc")).status == "rejected"
+    assert resolve([replace(seen, source="motor_arrived")]).status == "unknown"
+    assert resolve([replace(seen, confidence=10**1000)]).status == "unknown"
+
+
+def test_persisted_mac_receipt_is_not_current_after_host_reboot_or_grant_reset():
+    _, _, seen = fixtures()
+    for replay in (replace(seen, host_boot_id="older-mac-boot"),
+                   replace(seen, camera_grant=11)):
+        result = resolve([replay])
+        assert result.status == "last_seen"
+        assert result.confirmed_floor_mm is None
+        assert result.arrived is False
+
+
+def test_malformed_query_is_safe_rejection_not_attribute_error():
+    _, owner, seen = fixtures()
+    invalid = resolve_object_target(None, owner, [seen], now_us=1_000_000)
+    assert invalid.status == "rejected" and not invalid.may_execute
+
+
+def test_huge_wall_time_and_threshold_do_not_crash_target_resolution():
+    _, _, seen = fixtures()
+    assert resolve([replace(seen, seen_at_wall_s=10**1000)]).status == "unknown"
+    assert resolve(min_confidence=10**1000).status == "rejected"
+
+
+def test_target_results_bind_exact_request_but_refusals_do_not():
+    query, owner, seen = fixtures()
+    assert resolve([seen], query=query, owner=owner).request_fence == query
+    assert resolve([seen], query=query, owner=owner, now_us=1_300_001).request_fence == query
+    denied = resolve([seen], query=query, owner=replace(owner, turn_id="other"))
+    assert denied.status == "rejected"
+    assert denied.request_fence is None
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+@pytest.mark.parametrize("other_floor", [(240, 320), None])
+def test_same_frame_ambiguous_projection_never_selects_a_metric_target(now_us, other_floor):
+    _, _, seen = fixtures()
+    other = replace(seen, receipt_us=960_000, floor_mm=other_floor,
+                    projection_qualified=other_floor is not None)
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=now_us)
+        assert result.status == ("current_sighting" if now_us == 1_000_000 else "last_seen")
+        assert result.reason == "ambiguous_projected_view"
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert result.arrived is False and result.may_execute is False
+
+
+def test_same_frame_identical_projection_is_not_ambiguous():
+    _, _, seen = fixtures()
+    duplicate = replace(seen, receipt_us=960_000)
+    assert resolve([seen, duplicate]).confirmed_floor_mm == seen.floor_mm
+    assert resolve([seen, duplicate], now_us=1_300_001).search_hint_mm == seen.floor_mm
+
+
+def test_new_distinct_frame_can_confirm_after_ambiguous_view():
+    _, _, seen = fixtures()
+    other = replace(seen, floor_mm=(240, 320))
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, seen_at_wall_s=1800000001.0)
+    for rows in ([seen, other, newer], [newer, other, seen]):
+        assert resolve(rows).confirmed_floor_mm == newer.floor_mm
+        assert resolve(rows, now_us=1_300_001).search_hint_mm == newer.floor_mm
+
+def test_future_same_host_receipt_cannot_be_a_historical_search_hint():
+    _, _, seen = fixtures()
+    future = replace(seen, receipt_us=1_000_001, floor_mm=(240, 320),
+                     seen_at_wall_s=1800000001.0)
+    result = resolve([future])
+    assert result.status == "unknown"
+    assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+    assert not result.arrived and not result.may_execute
+
+    historical = replace(seen, receipt_us=100, captured_us=100)
+    for rows in ([historical, future], [future, historical]):
+        result = resolve(rows)
+        assert result.status == "last_seen"
+        assert result.search_hint_mm == historical.floor_mm
+
+
+def test_other_host_clock_is_not_compared_to_current_monotonic_time():
+    _, _, seen = fixtures()
+    historical = replace(seen, host_boot_id="older-host", receipt_us=9_000_000)
+    result = resolve([historical])
+    assert result.status == "last_seen"
+    assert result.reason == "search_hint_expired"
+    assert result.search_hint_mm is None
+    assert result.confirmed_floor_mm is None
+
+@pytest.mark.parametrize("other_floor", [(240, 320), None])
+def test_staggered_same_frame_freshness_does_not_remove_ambiguity(other_floor):
+    _, _, seen = fixtures()
+    other = replace(seen, receipt_us=960_000, floor_mm=other_floor,
+                    projection_qualified=other_floor is not None)
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=1_205_001)
+        assert result.status == "last_seen"
+        assert result.reason == "ambiguous_projected_view"
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_staggered_same_frame_identical_projection_stays_usable():
+    _, _, seen = fixtures()
+    duplicate = replace(seen, receipt_us=960_000)
+    result = resolve([seen, duplicate], now_us=1_205_001)
+    assert result.status == "last_seen"
+    assert result.search_hint_mm == seen.floor_mm
+    assert result.confirmed_floor_mm is None
+    assert not result.arrived and not result.may_execute
+
+
+def test_legacy_receipt_only_evidence_is_not_a_live_sighting():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=None)])
+    assert result.status == "last_seen"
+    assert result.confirmed_floor_mm is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("capture", [True, -1, 960_000, "950000"])
+def test_malformed_capture_metadata_cannot_supply_a_metric_hint(capture):
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=capture)])
+    assert result.status == "unknown"
+    assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+
+
+def test_pre_request_capture_with_new_receipt_is_historical_only():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=899_999)])
+    assert result.status == "last_seen"
+    assert result.confirmed_floor_mm is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("new_wall", [1800000000.0, 1800000001.0])
+def test_stale_same_stream_frame_order_survives_wall_clock_rollback_or_tie(new_wall):
+    _, _, seen = fixtures()
+    older = replace(seen, seen_at_wall_s=1800000001.0)
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, captured_us=960_000,
+                    seen_at_wall_s=new_wall, floor_mm=(240, 320))
+    for rows in ([older, newer], [newer, older]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen"
+        assert result.search_hint_mm == newer.floor_mm
+        assert result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_incomparable_old_host_streams_do_not_select_arbitrary_metric_hint():
+    _, _, seen = fixtures()
+    first = replace(seen, host_boot_id="prior-one")
+    second = replace(seen, host_boot_id="prior-two", captured_us=9_000_000,
+                     receipt_us=9_100_000, floor_mm=(240, 320))
+    for rows in ([first, second], [second, first]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen"
+        assert result.reason == "historical_order_uncertain"
+        assert result.seen_at_wall_s is None
+        assert result.search_hint_mm is None and result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_running_host_history_takes_precedence_over_incomparable_older_boot():
+    _, _, seen = fixtures()
+    prior = replace(seen, host_boot_id="prior-host", captured_us=9_000_000,
+                    receipt_us=9_100_000, seen_at_wall_s=1800000002.0,
+                    floor_mm=(240, 320))
+    for rows in ([prior, seen], [seen, prior]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen" and result.search_hint_mm == seen.floor_mm
+        assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+@pytest.mark.parametrize("negative_capture", [950_000, None])
+def test_conflicting_frame_never_supplies_sighting_or_hint(now_us, negative_capture):
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", receipt_us=960_000,
+                     captured_us=negative_capture, floor_mm=None,
+                     projection_qualified=False)
+    for rows in ([seen, absent], [absent, seen]):
+        result = resolve(rows, now_us=now_us)
+        assert (result.status, result.reason) == ("unknown", "contradictory_camera_frame")
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert result.source is None and result.seen_at_wall_s is None
+        assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+def test_newer_distinct_positive_recovers_from_conflict(now_us):
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", floor_mm=None,
+                     projection_qualified=False)
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, captured_us=960_000,
+                    floor_mm=(240, 320))
+    for rows in ([seen, absent, newer], [newer, absent, seen]):
+        result = resolve(rows, now_us=now_us)
+        location = result.confirmed_floor_mm if now_us == 1_000_000 else result.search_hint_mm
+        assert location == newer.floor_mm
+        assert not result.arrived and not result.may_execute
+
+
+def test_different_camera_boot_is_not_same_frame():
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", camera_boot=100,
+                     floor_mm=None, projection_qualified=False)
+    assert resolve([seen, absent]).confirmed_floor_mm == seen.floor_mm
+
+
+@pytest.mark.parametrize("changes", [
+    {"camera_boot": 1 << 32},
+    {"camera_grant": 1 << 32},
+    {"origin_id": "origin\x00"},
+])
+def test_recall_rejects_invalid_matching_owner_identity(changes):
+    q, owner, _ = fixtures()
+    result = resolve_object_target(
+        replace(q, **changes), replace(owner, **changes), [], now_us=1_000_000,
+    )
+    assert result.reason == "invalid_request_or_evidence_budget"
+    assert result.status == "rejected" and result.request_fence is None
+    assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize(
+    ("query_changes", "owner_changes", "now_us", "reason"),
+    [
+        ({"cancelled": True, "deadline_us": True}, {"memory_allowed": False},
+         1_500_000, "invalid_request_or_evidence_budget"),
+        ({"cancelled": True}, {"turn_id": "other", "memory_allowed": False},
+         1_500_000, "cancelled"),
+        ({}, {"turn_id": "other", "memory_allowed": False},
+         1_500_000, "deadline_or_clock_invalid"),
+        ({}, {"turn_id": "other", "epoch": 99, "memory_allowed": False},
+         1_000_000, "turn_or_robot_changed"),
+        ({}, {"epoch": 99, "memory_allowed": False},
+         1_000_000, "origin_map_or_camera_changed"),
+    ],
+)
+def test_overlapping_rejections_preserve_precedence(query_changes, owner_changes, now_us, reason):
+    query, owner, seen = fixtures()
+    result = resolve([seen], query=replace(query, **query_changes),
+                     owner=replace(owner, **owner_changes), now_us=now_us)
+    assert (result.status, result.reason) == ("rejected", reason)
+    assert result.request_fence is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("capture", [None, 950_000, 960_000])
+def test_historical_stream_selection_uses_unique_capture_time(capture):
+    query, _, seen = fixtures()
+    other = replace(seen, camera_grant=11, captured_us=capture, receipt_us=970_000,
+                    floor_mm=(240, 320))
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.request_fence == query
+        assert result.status == "last_seen"
+        if capture == 960_000:
+            assert result.reason == "historical_sighting_only"
+            assert result.search_hint_mm == other.floor_mm
+        else:
+            assert result.reason == "historical_order_uncertain"
+            assert result.seen_at_wall_s is None and result.search_hint_mm is None
+        assert result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("wall_time", [1800000000.1, 1800000001.0])
+def test_user_report_must_strictly_postdate_all_unordered_history(wall_time):
+    query, _, seen = fixtures()
+    first = replace(seen, host_boot_id="prior-one")
+    second = replace(seen, host_boot_id="prior-two")
+    report = ObjectEvidence(query.robot_id, query.label, "user_reported", wall_time)
+    for rows in ([first, report, second], [second, first, report]):
+        result = resolve(rows)
+        expected = (
+            ("user_reported", "unverified_user_location")
+            if wall_time > seen.seen_at_wall_s
+            else ("last_seen", "historical_order_uncertain")
+        )
+        assert (result.status, result.reason) == expected
+        assert result.request_fence == query
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert not result.arrived and not result.may_execute

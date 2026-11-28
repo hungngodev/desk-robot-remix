@@ -1,0 +1,859 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-11-11",
+  "target_robots": 5,
+  "decision": "selected_full_five_pet_electrical_and_module_architecture_not_physically_qualified",
+  "fixed_scope": "Five distinct autonomous tracked desk pets with independent memory and speech, ordinary-speech interruption, consented camera, touch and handling, safe operator-enabled exploration, real key and wrapped-candy lift/grip, and one dedicated independently qualified charging dock per pet; one read-only room station shared by the fleet. The FIRST complete unit must also find, record and retrieve supported stationary objects using calibrated map anchoring, verified wheel displacement, safe known support and fresh arrival checks. Reuse existing 49 parent roles and 14 overlapping linked decisions. One fully featured core is physically qualified before the remaining four.",
+  "architecture": "Mac owner for fleet/memory/AI; XIAO ESP32S3 Sense for camera, microphone, display, speaker and facial response; WROOM32 local actuator/safety controller; two isolated I2C multiplexers and reusable plug-in sensor harness.",
+  "range_breakout_power_contract": {
+    "selected_chip": "VL53L0X",
+    "generic_module_family": "GY-530",
+    "mux_address_7bit": 112,
+    "modules_per_robot": 8,
+    "module_vin_v": 3.3,
+    "tca9548a_vcc_v": 3.3,
+    "upstream_pullup_target_v": 3.3,
+    "downstream_pullup_target_v": 3.3,
+    "exact_vendor_pcb_verified": false,
+    "physical_release": "HOLD for actual GY-530 board revision, pin order, soldered pullup rail, 3.3V sourcing and powered edge trials",
+    "references": ["https://www.st.com/resource/en/datasheet/vl53l0x.pdf", "https://www.ti.com/product/TCA9548A", "https://www.espboards.dev/sensors/gy530/"]
+  },
+  "audio_output_power_contract": {
+    "amplifier_ic": "MAX98357A",
+    "amplifier_vdd_v": 5.0,
+    "speaker_nominal_impedance_ohm": 8,
+    "speaker_nominal_rating_w": 2,
+    "selection": "fixed_active_challenge_CS20_02P110_04_1X_2W_with_max98357a_5V_supply_pending_physical_trial",
+    "rail_source": "qualified isolated and current-rated 5 V audio supply, never a directly paralleled USB VBUS or an MCU GPIO power pin",
+    "output_connection": "bridge_tied_OUTP_to_speaker_plus_OUTN_to_speaker_minus_neither_to_ground",
+    "physical_release": "HOLD until exact 5 V audio regulator and amplifier PCB gain, peak distortion, 2 W speaker temperature, acoustic enclosure and cable thermal trials",
+    "silicon_reference": "https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf"
+  },
+  "haptic_output_contract": {
+    "timer_ic": "CD74HC123",
+    "logic_supply_v": 3.3,
+    "mux_address_7bit": 113,
+    "mux_channel": 5,
+    "expander_address_7bit": 32,
+    "trigger_gpio": "GPB2",
+    "trigger_pin": 2,
+    "trigger_default": "LOW",
+    "input_a_pin": 1,
+    "input_a_level": "LOW",
+    "reset_pin": 3,
+    "reset_level": "HIGH",
+    "pulse_q_pin": 13,
+    "inverted_q_pin": 4,
+    "inverted_q_connection": "NC",
+    "vcc_pin": 16,
+    "gnd_pin": 8,
+    "timing_cx_pin": 14,
+    "timing_rxcx_pin": 15,
+    "timing_resistor_to": "3V3",
+    "timing_resistor_ohm": 180000,
+    "timing_capacitor_nf": 1000,
+    "decoupling_capacitor_nf": 100,
+    "driver_ic": "AO3400",
+    "driver_topology": "low_side",
+    "gate_series_resistor_required": true,
+    "trigger_pulldown_required": true,
+    "gate_pulldown_required": true,
+    "motor_nominal_v": 3,
+    "motor_positive_connection": "rated_motor_supply",
+    "motor_negative_connection": "mosfet_drain",
+    "mosfet_source_connection": "common_ground",
+    "flyback_anode_connection": "mosfet_drain",
+    "flyback_cathode_connection": "motor_positive",
+    "physical_qualified": false,
+    "physical_release": "HOLD pending exact board, pulse width, stall current, thermal and held-high bus trials"
+  },
+  "parts": [
+    {
+      "id": "xiao_sense",
+      "name": "XIAO ESP32S3 Sense camera + microphone",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "At least one ordered; do not duplicate order",
+      "group": "pet",
+      "ordered_unreceived_total": 1
+    },
+    {
+      "id": "wroom",
+      "name": "ESP32 WROOM32 development board",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "Already reported at least one",
+      "group": "pet"
+    },
+    {
+      "id": "oled",
+      "name": "SSD1306 0.96 inch OLED",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "Already reported at least one",
+      "group": "pet"
+    },
+    {
+      "id": "stepper",
+      "name": "28BYJ48 5V stepper motor",
+      "per_robot": 2,
+      "reported_owned_total": 5,
+      "notes": "5 reported owned; do not order missing five until loaded drivetrain selection",
+      "group": "pet",
+      "shopping_decision": "hold_until_drivetrain_selected_and_physically_tested"
+    },
+    {
+      "id": "uln2003",
+      "name": "ULN2003 driver for 28BYJ48",
+      "per_robot": 2,
+      "reported_owned_total": 5,
+      "notes": "5 reported owned; do not order missing five until loaded drivetrain selection",
+      "group": "pet",
+      "shopping_decision": "hold_until_drivetrain_selected_and_physically_tested"
+    },
+    {
+      "id": "mg90s",
+      "name": "MG90S positional servo",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "About 10 estimated owned; recount before buying",
+      "group": "pet",
+      "estimated_owned_total": 10
+    },
+    {
+      "id": "imu",
+      "name": "MPU6050 GY521 compatible six axis breakout",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "At least one reported; BerryIMU preserved as spare",
+      "group": "pet"
+    },
+    {
+      "id": "head_touch",
+      "name": "AT42QT1010 momentary capacitive head touch",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "At least one photographed; retain as independent local stop",
+      "group": "pet"
+    },
+    {
+      "id": "max30102",
+      "name": "MAX30102 optical heartbeat paw pad breakout",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Original user HTML says this is APPROVED as a robot-mounted paw pad and claims about five are already owned. Independent photo audit did not establish exact stock. No purchase before recount and module voltage check. Use WROOM I2C 0x57, not Sense GPIO41/42 PDM mic.",
+      "group": "pet",
+      "estimated_owned_total": 5
+    },
+    {
+      "id": "cliff_obstacle",
+      "name": "VL53L0X GY-530 small carrier candidate ElectroPeak SEN-19-006",
+      "per_robot": 8,
+      "reported_owned_total": 0,
+      "notes": "Four downward cliff sensors, one front and three read-only directions (8 total per robot). One exact low-price SOURCE CANDIDATE: ElectroPeak SEN-19-006 GY-530 VL53L0X, advertised 10.5 x 13.3 mm, 2.8 to 5V carrier power, 30mm to 2m sensing and USD $1.44 listed 2026-11-18 before shipping and tax. This vendor page does not verify physical SDA/SCL 3.3V pullups, cloned IC or motor-loaded 30-80mm optical desk safety. Buy or borrow one sample to qualify, NEVER order all 40 without measurements. Rejected $80 premium VL53L4CD.",
+      "group": "pet"
+    },
+    {
+      "id": "i2c_mux",
+      "name": "TCA9548A 8 channel 3.3V compatible I2C multiplexer",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "One at 0x70 for optical, one at 0x71 for interaction",
+      "group": "pet"
+    },
+    {
+      "id": "amp",
+      "name": "MAX98357A I2S mono amplifier",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Direct Sense audio; do not buy an analog DAC for owned PAM8403",
+      "group": "pet"
+    },
+    {
+      "id": "speaker",
+      "name": "Challenge Electronics CS20-02P110-04-1X 8 ohm 2 watt 20 x 16 mm speaker",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Current fixed source candidate is active Challenge Electronics CS20-02P110-04-1X, 8 ohm rated 2W, 20 x 16 x 4.7 mm, DigiKey 2603-CS20-02P110-04-1X-ND. MAX98357A 5V output can deliver about 1.8W into 8 ohm, within 2W nominal rating but still needs verified volume, transients, thermal and acoustic baffle. Manufacturer performance quotes 1cc sealed enclosure, not the existing open 20mm round grille. The rectangular geometry and lead routing are only a printed prototype fit until physically measured. Differential speaker + and - must NEVER be grounded. Manufacturer datasheet: https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf",
+      "group": "pet"
+    },
+    {
+      "id": "cap1188",
+      "name": "CAP1188 8 zone capacitive touch breakout",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Choose generic 3.3V CAP1188 I2C breakout at common 0x29 or strapped 0x28; range 0x70 mux is verified off before 0x71 lane0 opens",
+      "group": "pet"
+    },
+    {
+      "id": "touch_electrodes",
+      "name": "Copper tape touch electrode and insulating backing set",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Eight zones per pet, not more controllers",
+      "group": "pet"
+    },
+    {
+      "id": "apds9960",
+      "name": "APDS9960 gesture proximity color light module",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "One multifunction optical sensor",
+      "group": "pet"
+    },
+    {
+      "id": "fsr",
+      "name": "FSR402 type force sensing resistor",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "One belly, one gripper; not proof of loaded grip without calibration",
+      "group": "pet"
+    },
+    {
+      "id": "ads1115",
+      "name": "ADS1115 4 channel ADC breakout",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "3.3V analog input for two FSR dividers",
+      "group": "pet"
+    },
+    {
+      "id": "rgb",
+      "name": "Single diffused WS2812B RGB pixel",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Sense GPIO9, dedicated logic buffer",
+      "group": "pet"
+    },
+    {
+      "id": "logic_level",
+      "name": "74AHCT1G125 3.3V to 5V RGB buffer",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "5V part and input threshold from vendor spec",
+      "group": "pet"
+    },
+    {
+      "id": "as5600",
+      "name": "AS5600 magnetic rotary angle breakout",
+      "per_robot": 3,
+      "reported_owned_total": 0,
+      "notes": "Three AS5600 roles per pet: two actual measured wheel-angle/displacement channels for first-unit remembered-object navigation and one twist-nose input, on isolated mux segments. Wheel coupling, actual gear ratio, wrap rate, magnetic gap, source timing and encoder-to-wheel transmission remain unqualified. AS5600 board alone is not a complete mounted encoder.",
+      "group": "pet"
+    },
+    {
+      "id": "encoder_magnets",
+      "name": "Diametric AS5600 compatible magnets",
+      "per_robot": 3,
+      "reported_owned_total": 0,
+      "notes": "Three diametric magnets per pet, mechanically paired with AS5600 only when shaft coupling and axial gap are physically measured. Require the correct magnet size, polarity, bracket clearance and drive-shaft support; do not order either the final wheel encoder hardware or its brackets before selected drivetrain and mount compatibility are checked.",
+      "group": "pet"
+    },
+    {
+      "id": "ina226",
+      "name": "INA226 current voltage monitor with rated external shunt",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Existing INA226 0x40 firmware now has a dedicated signed pack-line current source in opt-in esp32_dc_integrated_lab for EXACT five milliohm Kelvin shunt. Candidate resistor Vishay WSL25125L000FEA18, 0.005 ohm 1 percent 2 watt 2512, LCSC C844694 around $0.52 each before shipping versus DigiKey around $1.78 each. Exact resistor pinout and rating source https://www.lcsc.com/product-detail/C844694.html. This selects the low-cost RESISTOR VALUE and reference SKU, not an electrically qualified generic INA226 breakout or charger board. Check actual installed shunt, proper Kelvin layout, high current 2W copper dissipation, connector, source calibration and polarity before installing battery.",
+      "group": "pet"
+    },
+    {
+      "id": "max17048",
+      "name": "MAX17048 single cell fuel gauge",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Connect to matched protected 1S battery rail",
+      "group": "pet"
+    },
+    {
+      "id": "cap_power",
+      "name": "Matched protected rechargeable 1S power assembly with charge and load sharing",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Regulated 5V distribution, fused wiring and properly rated continuous boost; exact module after measured load",
+      "group": "pet"
+    },
+    {
+      "id": "sensor_3v3",
+      "name": "Dedicated regulated 3.3V expansion sensor supply",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Regulator and bulk/decoupling based on verified sensor power",
+      "group": "pet"
+    },
+    {
+      "id": "switch_power",
+      "name": "Rated switch, fuse, power leads, JST style keyed connectors, decoupling",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "One rated assembly kit; no high current DuPont wires. Include a rated Schottky diode only in the external 5V feed to XIAO Sense (anode on fused robot boost, cathode on XIAO 5V) so USB flashing cannot backfeed servos. Source reuse: Seeed official XIAO external 5V instructions and MIT cgro00/desk-robot 1N5817 diode plus 470uF local 5V servo bulk. These are reference components, NOT proof this robot\u0027s two motor plus two servo supply is adequately sized. Design a local MAX98357A 0.1uF plus 10uF bypass per manufacturer, separately verify diode current and heat, power rail ripple, connector polarity and boost transients.",
+      "group": "pet"
+    },
+    {
+      "id": "bumper",
+      "name": "Normally closed micro bumper switch",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "Two NC in series to WROOM GPIO35 with external pullup",
+      "group": "pet"
+    },
+    {
+      "id": "reed",
+      "name": "Magnetic reed switch",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "One owned; optional read-only MCP23017 GPIOB0 active-low reed input on mux 0x71 lane 5. WROOM GPIO36 is reserved exclusively for left terminal IR receiver.",
+      "group": "pet"
+    },
+    {
+      "id": "pir",
+      "name": "PIR thermal motion sensor",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "One owned; optional read-only MCP23017 GPIOB1 active-high PIR input on mux 0x71 lane 5, level verified <=3.3V. WROOM GPIO39 is reserved exclusively for right terminal IR receiver.",
+      "group": "pet"
+    },
+    {
+      "id": "bmp280",
+      "name": "BMP280 pressure and temperature module",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "One photographed; do not mistake for humidity sensor",
+      "group": "pet"
+    },
+    {
+      "id": "sht41",
+      "name": "SHT41 humidity and temperature module",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Breath reaction with condensation resistant mounting",
+      "group": "pet"
+    },
+    {
+      "id": "pn532",
+      "name": "PN532 I2C NFC reader module with IRQ/reset pins",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Select genuine 3.3V I2C PN532 breakout at 0x24; WROOM already has bounded read-only Seeed-derived SAM and tag polling. Current source polls without controlling reset/IRQ pins through MCP23017. Verify the exact carrier mode straps, startup/reset requirements, I2C readiness and mechanical antenna fit before physical qualification.",
+      "group": "pet"
+    },
+    {
+      "id": "mcp23017",
+      "name": "MCP23017 16 channel I2C GPIO expander",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Required MCP23017 GPIOA dock seating/charger status is a local fail-closed WROOM motion interlock. GPIOB0 reed and GPIOB1 PIR are read-only optional signals. I2C expander never directly drives motors or charging.",
+      "group": "pet"
+    },
+    {
+      "id": "haptic_motor",
+      "name": "3V coin vibration motor",
+      "per_robot": 1,
+      "reported_owned_total": 1,
+      "notes": "One photographed; buy further units after count",
+      "group": "pet"
+    },
+    {
+      "id": "haptic_driver",
+      "name": "AO3400 haptic driver with CD74HC123 hardware one-shot, flyback and pulldown",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "MCP23017 GPB2 triggers a generic 3.3V HC123 hardware one-shot into a MOSFET motor stage; CAP1188 local petting event, dock-first source gating and OLATB readback are implemented in opt-in esp32_full_haptic_lab and esp32_dc_integrated_lab, NOT production power-qualified. Verify exact timer board, pulse bound, motor current/thermal and fail-off during I2C stall. See docs/hardware/haptic-one-shot-wiring.md.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_ir_receivers",
+      "name": "Two 38 kHz demodulated IR receivers, Vishay TSOP38438 reference, mounted behind separate directional baffles",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "One receiver to WROOM GPIO36 and one to GPIO39; 3.3V supply, active LOW, external bias and the correct physical TSOP pin order. Reuse reference Vishay TSOP38438 datasheet and ESP32 RMT receiver source. Receiver chip candidate only, no measured sunlight immunity, range or fit.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_ir_beacon_controller",
+      "name": "Independent powered 38 kHz classic NEC dock beacon controller and programmable board",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "One per dock, not a second robot MCU. Source reuse candidate: Arduino-IRremote MIT sendNEC on supported AVR, or design adaptation of Apache-2.0 OOMWOO CH32V003 dock PCB. OOMWOO's 20V 4S power and contact switching CANNOT be reused for this robot's 1S/5V charger. Source-reused Arduino Nano ATmega328P BENCH emitter now exists at code/firmware/dock (Arduino-IRremote 4.7.1). Exact final compact controller, flashing/debug provision, physical carrier and optical/thermal behavior remain unqualified; no production SKU.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_ir_emitter_channels",
+      "name": "Two independently aimed 940 nm 38 kHz infrared LED emitter channels with rated transistor driver and current limiting per dock",
+      "per_robot": 2,
+      "reported_owned_total": 0,
+      "notes": "Two aimed LED channels per dock driven simultaneously with the SAME classic NEC frame, because current WROOM DualIrEvidence requires equal code at both receivers. Based on OOMWOO IR BEACON KiCad Apache-2.0 design, but OOMWOO separate left/right codes are NOT compatible unchanged; number of LEDs per channel, driver, resistor and final 5V supply must be dimensioned, no naked LED wired to MCU pin. Protocol and baffle must be measured against WROOM dual receiver RMT NEC decoder, never authorize charging by light.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_contacts",
+      "name": "Keyed charging contacts and alignment switch set",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Matched protected 1S charger INPUT only, never directly to bare cell. Include two independent normally closed seat/position switches and independently sampled charger PGOOD, with protected unpowered recessed contacts until safe charger netlist is reviewed.",
+      "group": "pet"
+    },
+    {
+      "id": "dock_fixture",
+      "name": "Printed docking cradle, printed camera marker and 5V charging input",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Physical autonomous docking unqualified; separately mounted dock per pet",
+      "group": "pet"
+    },
+    {
+      "id": "assembly",
+      "name": "Filament, printed chassis/head/gripper mounts, fasteners, inserts, insulated harness",
+      "per_robot": 1,
+      "reported_owned_total": 0,
+      "notes": "Parent assembly includes reported filament, printed chassis/head/gripper, two physical wheel-encoder brackets or qualified integrated mounts, magnet fixtures, optic and camera alignment, each pet's dock fit fixtures, fasteners/inserts/insulated cables and proper rated power connectors. These passive parts are owned here and MUST NOT be charged again as linked encoder purchases. Exact printed mass, actual mount, revision, pack fit and delivered consumables remain unresolved.",
+      "group": "pet"
+    }
+  ],
+  "bus": {
+    "body_gpio": {
+      "left_stepper": [
+        13,
+        14,
+        25,
+        26
+      ],
+      "right_stepper": [
+        27,
+        32,
+        33,
+        23
+      ],
+      "lift_servo": 18,
+      "grip_servo": 19,
+      "head_uart_rx": 16,
+      "head_uart_tx": 17,
+      "sda": 21,
+      "scl": 22,
+      "head_touch": 34,
+      "bumper_nc_series": 35,
+      "terminal_ir_left_reserved": 36,
+      "terminal_ir_right_reserved": 39
+    },
+    "mcp23017_optional_inputs": {
+      "reed_input": "GPB0 active low",
+      "pir_input": "GPB1 active high",
+      "required_dock_gpioa_is_separate": true,
+      "source_implemented": true,
+      "physical_qualified": false,
+      "note": "Read only GPIOB 0x13 for slow reed and PIR after a fresh required GPIOA 0x12 dock read. Reserved WROOM GPIO36 and 39 are for two direct terminal IR receivers, and source now implements two legacy ESP-IDF 4.4 RMT read-only receivers and bounded full 34-symbol NEC decoder. No final movement/charging authorizer or physically verified board, optical baffle or RTC ADC glitch filtering exists."
+    },
+    "sense_gpio": {
+      "oled_sda": 5,
+      "oled_scl": 6,
+      "amp_bclk": 4,
+      "amp_lrclk": 7,
+      "amp_din": 8,
+      "head_uart_tx": 2,
+      "head_uart_rx": 1,
+      "rgb_data": 9
+    },
+    "upstream": [
+      {
+        "device": "MPU6050",
+        "address": 104
+      },
+      {
+        "device": "TCA9548A ranges",
+        "address": 112
+      },
+      {
+        "device": "TCA9548A interactions",
+        "address": 113
+      }
+    ],
+    "mux_ranges": {
+      "address": 112,
+      "channels": [
+        {
+          "channel": 0,
+          "position": "floor_front_left",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented"
+        },
+        {
+          "channel": 1,
+          "position": "floor_front_right",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented"
+        },
+        {
+          "channel": 2,
+          "position": "floor_rear_left",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented"
+        },
+        {
+          "channel": 3,
+          "position": "floor_rear_right",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented"
+        },
+        {
+          "channel": 4,
+          "position": "front_obstacle",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented"
+        },
+        {
+          "channel": 5,
+          "position": "left_obstacle",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L0X acquisition and Mac side event consumers. Never grants drive or backward movement permission."
+        },
+        {
+          "channel": 6,
+          "position": "right_obstacle",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L0X acquisition and Mac side event consumers. Never grants drive or backward movement permission."
+        },
+        {
+          "channel": 7,
+          "position": "rear_obstacle",
+          "devices": [
+            {
+              "name": "VL53L0X",
+              "address": 41
+            }
+          ],
+          "firmware": "implemented_read_only_esp32_full_not_physically_qualified",
+          "note": "Source has actual VL53L0X acquisition and Mac side event consumers. Never grants drive or backward movement permission."
+        }
+      ]
+    },
+    "mux_extras": {
+      "address": 113,
+      "channels": [
+        {
+          "channel": 0,
+          "purpose": "Eight petting electrodes plus owned/unverified approved heartbeat pad",
+          "devices": [
+            {
+              "name": "CAP1188",
+              "address": 41
+            },
+            {
+              "name": "MAX30102 paw pad",
+              "address": 87
+            }
+          ],
+          "firmware": "implemented_cap1188_and_max30102_raw_plus_seq_confirmed_opt_in_paw_contact_not_physically_qualified",
+          "note": "Common CAP1188 0x29 is now supported by verified 0x70 off then isolated 0x71 lane0, with 0x28 strapped alternative. Physical mux faults and electrical levels still need testing."
+        },
+        {
+          "channel": 1,
+          "purpose": "gesture + twist nose",
+          "devices": [
+            {
+              "name": "APDS9960",
+              "address": 57
+            },
+            {
+              "name": "AS5600 nose",
+              "address": 54
+            }
+          ],
+          "firmware": "implemented_apds9960_and_as5600_raw_not_physically_qualified"
+        },
+        {
+          "channel": 2,
+          "purpose": "force feedback",
+          "devices": [
+            {
+              "name": "ADS1115",
+              "address": 72
+            }
+          ],
+          "firmware": "implemented_ads1115_raw_force_not_physically_qualified"
+        },
+        {
+          "channel": 3,
+          "purpose": "humidity + reported pressure board",
+          "devices": [
+            {
+              "name": "SHT41",
+              "address": 68
+            },
+            {
+              "name": "BMP280",
+              "address": 118
+            }
+          ],
+          "firmware": "implemented_sht41_raw_seq_plus_opt_in_ambient_events_and_bmp280_raw_not_physically_qualified",
+          "note": "BMP280 chip address may be 0x76 or 0x77; inspect actual breakout"
+        },
+        {
+          "channel": 4,
+          "purpose": "current and battery fuel gauge",
+          "devices": [
+            {
+              "name": "INA226",
+              "address": 64
+            },
+            {
+              "name": "MAX17048",
+              "address": 54
+            }
+          ],
+          "firmware": "implemented_max17048_ina226_raw_no_calibrated_current"
+        },
+        {
+          "channel": 5,
+          "purpose": "NFC and auxiliary digital control",
+          "devices": [
+            {
+              "name": "PN532 I2C",
+              "address": 36
+            },
+            {
+              "name": "MCP23017",
+              "address": 32
+            }
+          ],
+          "firmware": "implemented_mcp23017_dock_gpio_and_pn532_read_only_unverified",
+          "note": "PN532 7-bit 0x24 read only bounded status polling now sourced in WROOM. Confirm 3.3V breakout, actual I2C timing and whether reset or IRQ pins need wiring before declaring function qualified"
+        },
+        {
+          "channel": 6,
+          "purpose": "left wheel rotation",
+          "devices": [
+            {
+              "name": "AS5600",
+              "address": 54
+            }
+          ],
+          "firmware": "implemented_as5600_wheel_raw_not_physical_odometry"
+        },
+        {
+          "channel": 7,
+          "purpose": "right wheel rotation",
+          "devices": [
+            {
+              "name": "AS5600",
+              "address": 54
+            }
+          ],
+          "firmware": "implemented_as5600_wheel_raw_not_physical_odometry"
+        }
+      ]
+    },
+    "critical_policy": "Firmware in code/firmware/body/TofBus and AccessorySensors already implements eight VL53L0X in esp32_full and bounded raw reads for the listed 0x71 channels including bounded PN532 toy NFC scans and a read only UID game token, but all remain unqualified on actual breakouts. 0x71 mux is quiesced ahead of critical 0x70 ToF reads; failed quiesce faults the local guard. The complete esp32_full profile additionally REQUIRES an installed fresh MCP23017 dock monitor; missing/invalid/stale GPIOA data or either seat contact locally blocks or stops motion. All source drivers require real breakout-specific voltage, lens, time, and behavior measurements and camera, remembered text, peer messages and AI must never arm the local motor guard or certify charging.",
+    "head_policy": "Sense camera/mic are fixed; GPIO9 can be RGB only after confirming SD disabled and actual shipped board routing. Face bus 5/6 never connected to body Wire.",
+    "power_policy": "One protected 1S cell/pack and charger with load sharing, 5V regulator sized to measured concurrent head/WROOM/steppers/servo/audio current, independent 3.3V sensor regulator. No bare cell charger contacts or 5V MCU GPIO.",
+    "voltage_policy": "Only 3.3V I2C/GPIO at WROOM. Check every generic carrier VCC rail, pullups and level shifting. GPIO34 to 39 have no internal pulls. Bumper is two NC contacts in series to ground with external 3.3V pullup; normal LOW, collision or disconnected cable HIGH, local raw trip immediately. GPIO35 is input only and has no internal pullup.",
+    "pca9685_policy": "Not in selected fixed head and two servo system; moving ears, tail or head pan/tilt would require separate validated actuator variant, not a surprise third servo on occupied pins.",
+    "implementation_evidence": {
+      "ranges": "code/firmware/body/lib/TofBus/TofBus.cpp",
+      "raw_expansion": "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp",
+      "touch": "code/firmware/body/lib/ExpansionTouch/ExpansionTouch.cpp",
+      "pulse": "code/firmware/body/lib/PulsePad/PulsePad.cpp",
+      "dock": "code/firmware/body/lib/BodyControl/BodyControl.cpp",
+      "dual_ir_rx": "code/firmware/body/lib/TerminalIr/TerminalIr.cpp",
+      "dual_ir_nec": "code/firmware/body/lib/TerminalIr/NecBurst.h",
+      "dual_ir_mac": "code/laptop/src/desk_robot/dock_ir.py",
+      "dual_ir_physical_qualified": false,
+      "pet_consumer": "code/laptop/src/desk_robot/pet.py",
+      "side_consumer": "code/laptop/src/desk_robot/side_ranging.py",
+      "full_profile": "code/firmware/body/platformio.ini",
+      "test_contracts": "code/firmware/body/tests/optional_i2c_io_tests.cpp",
+      "sensor_hardware_qualified": false,
+      "charging_current_electrically_verified": false,
+      "room_station_audio_video_verified": false
+    }
+  },
+  "room_pod": {
+    "compute": "Reuse the owned Feather nRF52840 by USB as a stationary room pod if it has a suitable UART and I2C allocation; otherwise one generic ESP32C3 module, not five new MCUs.",
+    "power_reference": {
+      "room_controller": {
+        "candidate": "owned Feather nRF52840 Express",
+        "usb_nominal_v_min": 4.5,
+        "usb_nominal_v_max": 5.2,
+        "regulator_3v3_peak_ma": 500,
+        "regulator_500ma_continuous_from_5v_qualified": false,
+        "exact_board_current_qualified": false
+      },
+      "scd40": {
+        "rail_candidate_v": 3.3,
+        "supply_v_min": 2.4,
+        "supply_v_max": 5.5,
+        "peak_ma_at_3v3_max": 205,
+        "periodic_average_ma_at_3v3_max": 18,
+        "exact_carrier_current_qualified": false
+      },
+      "bme688": {
+        "rail_candidate_v": 3.3,
+        "vdd_min": 1.71,
+        "vdd_max": 3.6,
+        "custom_mode_current_ma_max": 12,
+        "exact_carrier_current_qualified": false
+      },
+      "amg8833": {
+        "rail_candidate_v": 3.3,
+        "reference_current_ma_typ": 4.5,
+        "exact_carrier_current_qualified": false
+      },
+      "ld2410c": {
+        "rail_candidate_v": 5.0,
+        "supply_capacity_ma_must_exceed": 200,
+        "reference_average_current_ma": 79,
+        "io_logic_v": 3.3,
+        "exact_carrier_current_qualified": false
+      },
+      "soil_probe": {
+        "rail_candidate_v": 3.3,
+        "exact_carrier_current_ma": null,
+        "exact_carrier_current_qualified": false
+      },
+      "physical_release": "HOLD until the exact fitted carriers run simultaneously while 3.3 V and 5 V minima, USB input current, cable drop, regulator temperature, resets and serial continuity are measured. Datasheet silicon or reference module currents do not include unknown carrier regulators, LEDs, pullups or the Feather own load.",
+      "references": [
+        "https://sensirion.com/media/documents/48C4B7FB/64E950BF/CD_DS_SCD40_SCD41_Datasheet_D1.pdf",
+        "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme688-ds000.pdf",
+        "https://industry.panasonic.com/global/en/products/control/sensor/infrared/number/AMG8833",
+        "https://github.com/ncmreynolds/ld2410/tree/v0.2.2",
+        "https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/power-management"
+      ]
+    },
+    "modules": [
+      {
+        "id": "scd40",
+        "name": "SCD40 real CO2",
+        "quantity_per_room": 1,
+        "location": "ventilated stationary desk"
+      },
+      {
+        "id": "bme688",
+        "name": "BME688 VOC gas and ambient",
+        "quantity_per_room": 1,
+        "location": "ventilated stationary desk"
+      },
+      {
+        "id": "ld2410c",
+        "name": "LD2410C mmWave presence module",
+        "quantity_per_room": 1,
+        "location": "fixed room pod UART"
+      },
+      {
+        "id": "soil_probe",
+        "name": "Capacitive soil probe",
+        "quantity_per_room": 1,
+        "location": "external plant accessory"
+      },
+      {
+        "id": "nfc_game_props",
+        "name": "NFC game tags and magnets",
+        "quantity_per_room": 10,
+        "purchase_status": "conditional_optional",
+        "location": "conditional optional shared game props; preserve the game feature but do not add loose tags to the default checkout"
+      },
+      {
+        "id": "amg8833",
+        "name": "AMG8833 thermal array",
+        "quantity_per_room": 1,
+        "purchase_status": "conditional_optional",
+        "location": "conditional optional separate thermal station; not selected for the core first robot or default fleet checkout"
+      },
+      {
+        "id": "room_controller",
+        "name": "Station controller with timestamped USB serial protocol, reuse owned Feather nRF52840 if feasible",
+        "quantity_per_room": 1,
+        "location": "ventilated stationary USB enclosure; no motor or charge authority; reported-owned Feather nRF52840 is a candidate, not yet an approved controller",
+        "reported_owned_total": 1
+      }
+    ],
+    "transport": "Room pod presents timestamped named readings to Mac over USB; no safety or motor control and no assumption that a missing pod means a person is present.",
+    "privacy": "BLE heart rate, room presence and desktop app data must be explicit opt-in; don't infer personal identity from PIR/radar."
+  },
+  "linked_subassemblies_note": "These 14 entries are motor, battery, charging, dock and station details or alternatives linked to the counted 49 visible roles, not 14 extra automatic purchases. Selected physical subparts require an explicit qualified decision and vendor, fit and electrical receipts. room_amg8833 and room_nfc_game_tokens remain visible as currently deferred conditional options and are not default checkout items.",
+  "linked_subassemblies": [
+    {"id": "n20_motor_candidate", "parent_role": "stepper", "fleet_quantity": 10, "name": "N20 100:1 MP 6V motor alternative", "disposition": "unresolved"},
+    {"id": "drv8833_driver_candidate", "parent_role": "uln2003", "fleet_quantity": 5, "name": "DRV8833 dual H bridge alternative", "disposition": "unresolved"},
+    {"id": "bq24075_charger_candidate", "parent_role": "cap_power", "fleet_quantity": 5, "name": "BQ24075 power path plus BQ27441 gauge alternative", "disposition": "unresolved"},
+    {"id": "boost_5v_candidate", "parent_role": "cap_power", "fleet_quantity": 5, "name": "5V switching regulator", "disposition": "unresolved"},
+    {"id": "protected_ntc_pack", "parent_role": "cap_power", "fleet_quantity": 5, "name": "Protected 1S pack with connected NTC", "disposition": "unresolved"},
+    {"id": "dock_5v_adapter", "parent_role": "dock_fixture", "fleet_quantity": 5, "name": "Independent rated 5V dock adapter", "disposition": "unresolved"},
+    {"id": "dock_ir_transistor_channels", "parent_role": "dock_ir_emitter_channels", "fleet_quantity": 10, "name": "Dock IR transmitter transistor and resistor channels", "disposition": "unresolved"},
+    {"id": "shared_room_controller", "parent_role": "room_controller", "fleet_quantity": 1, "name": "Shared room controller actual board", "disposition": "unresolved"},
+    {"id": "room_scd40", "parent_role": "scd40", "fleet_quantity": 1, "name": "Shared station SCD40", "disposition": "unresolved"},
+    {"id": "room_bme688", "parent_role": "bme688", "fleet_quantity": 1, "name": "Shared station BME688", "disposition": "unresolved"},
+    {"id": "room_ld2410c", "parent_role": "ld2410c", "fleet_quantity": 1, "name": "Shared station LD2410C", "disposition": "unresolved"},
+    {"id": "room_amg8833", "parent_role": "amg8833", "fleet_quantity": 1, "name": "Shared station AMG8833", "disposition": "deferred_optional"},
+    {"id": "room_soil_probe", "parent_role": "soil_probe", "fleet_quantity": 1, "name": "Shared station soil probe", "disposition": "unresolved"},
+    {"id": "room_nfc_game_tokens", "parent_role": "nfc_game_props", "fleet_quantity": 10, "name": "Shared NFC toy tokens", "disposition": "deferred_optional"}
+  ],
+  "owned_not_to_rebuy": [
+    "BerryIMU spare",
+    "MAX9814 analog microphone",
+    "separate unknown camera",
+    "GY61 analog accelerometer",
+    "PAM8403 analog speaker amp for non-I2S use",
+    "DRV8833 H bridge for other motor variant",
+    "IR obstacle/remote receiver if not needed",
+    "Feather nRF52840 for optional room pod"
+  ],
+  "separate_variants_not_in_fixed_head_spec": [
+    "Animated servo ears or tail",
+    "Pan tilt neck",
+    "Second display",
+    "Unqualified thermal camera onboard",
+    "Continuous peer chasing without measured side/rear stopping"
+  ],
+  "qualified_assumptions": false,
+  "prices_complete": false,
+  "physical_trial_count": 0,
+  "source_urls": [
+    "https://www.ti.com/lit/ds/symlink/tca9548a.pdf",
+    "https://www.microchip.com/en-us/product/CAP1188",
+    "https://www.microchip.com/en-us/product/mcp23017",
+    "https://www.ti.com/product/ADS1115",
+    "https://www.ti.com/product/INA226",
+    "https://www.analog.com/en/products/max17048.html",
+    "https://sensirion.com/products/catalog/SHT41",
+    "https://www.nxp.com/products/MPR121",
+    "https://www.st.com/en/imaging-and-photonics-solutions/vl53l0x.html",
+    "https://look.ams-osram.com/m/3ac60b27c91075b5/original/AS5600-FS000133-2-00.pdf",
+    "https://www.nxp.com/docs/en/user-guide/141520.pdf",
+    "https://www.analog.com/en/products/max30102.html"
+  ]
+}

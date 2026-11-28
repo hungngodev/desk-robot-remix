@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "currency": "USD",
+  "cap_usd": 50.00,
+  "purpose": "Canonical reviewed prior spending baseline for first-unit prototype accounting; archived bom.json never overrides this ledger.",
+  "reported_already_purchased_usd": 13.67,
+  "all_project_prior_spend_reconciled": false,
+  "paid_reconciliation": {
+    "reviewed_at": "2026-11-22",
+    "item_scope": "one XIAO ESP32S3 Sense only",
+    "source": "private seller order confirmation plus independent processor payment receipt",
+    "payment_total_usd": 13.67,
+    "payment_total_verified": true,
+    "carrier_delivery_notice_date": "2026-11-07",
+    "inspected_usable_hardware": false,
+    "all_project_prior_spend_reconciled": false,
+    "redacted_receipts_not_public": true
+  }
+}

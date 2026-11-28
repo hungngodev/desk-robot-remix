@@ -1,0 +1,116 @@
+#pragma once
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+// Narrow host fake for real BerryImu.cpp compiled under ARDUINO=1.
+// Captures register writes, simulates repeated-start readback and models
+// the MPU6050 INT_STATUS read-to-clear event contract.
+class TwoWire {
+ public:
+  struct Write {
+    std::uint8_t address;
+    std::uint8_t reg;
+    std::uint8_t value;
+  };
+  std::vector<Write> writes;
+  std::array<std::uint8_t, 256> registers{};
+  std::array<std::uint8_t, 256> extra_registers{};
+  bool reject_writes = false;
+  int reject_read_reg = -1;
+  int ignore_write_reg = -1;
+  int partial_read_reg = -1;
+  std::uint8_t next_stop_status = 0;
+
+  // Devices are absent until explicitly attached by a fixture. Disconnecting
+  // preserves the simulated register contents for recovery tests.
+  void set_connected(std::uint8_t address, bool connected) {
+    connected_[address] = connected;
+  }
+
+  void beginTransmission(std::uint8_t address) {
+    address_ = address;
+    bytes_.clear();
+    read_pending_ = false;
+  }
+  std::size_t write(std::uint8_t value) {
+    if (reject_writes) return 0;
+    bytes_.push_back(value);
+    return 1;
+  }
+  std::uint8_t endTransmission(bool stop = true) {
+    // Like the main bus fake, defer combined-transfer validation to requestFrom.
+    if (!stop) {
+      read_address_ = address_;
+      read_pending_ = true;
+      return 0;
+    }
+    read_pending_ = false;
+    if (next_stop_status != 0) {
+      const auto status = next_stop_status;
+      next_stop_status = 0;
+      return status;
+    }
+    if (!connected_[address_]) return 2; // address NACK
+    if (bytes_.size() != 2) return 4;
+    writes.push_back({address_, bytes_[0], bytes_[1]});
+    if (static_cast<int>(bytes_[0]) != ignore_write_reg)
+      bank(address_)[bytes_[0]] = bytes_[1];
+    return 0;
+  }
+  std::size_t requestFrom(std::uint8_t address, std::size_t count,
+                          bool = true) {
+    // A matching read replaces the RX buffer even on failure, as Wire.cpp
+    // in Arduino-ESP32 2.0.17 does before i2cWriteReadNonStop.
+    // An address mismatch is rejected before Wire resets its RX buffer
+    // or consumes the pending repeated START.
+    if (read_pending_ && address != read_address_) return 0;
+    remaining_ = 0;
+    rx_pos_ = 0;
+    const bool pending = read_pending_;
+    read_pending_ = false;
+    if (!pending || bytes_.size() != 1 || count == 0 ||
+        count > rx_buffer_.size() || !connected_[address]) return 0;
+    const auto read_register = bytes_[0];
+    if (count > 256U - read_register ||
+        static_cast<int>(read_register) == reject_read_reg) return 0;
+    remaining_ = static_cast<int>(read_register) == partial_read_reg
+        ? count - 1U : count;
+    auto& values = bank(read_address_);
+    for (std::size_t i = 0; i < remaining_; ++i) {
+      const auto reg = static_cast<std::uint8_t>(read_register + i);
+      rx_buffer_[i] = values[reg];
+      // The device clears INT_STATUS on the bus read, not CPU consumption.
+      if (reg == 0x3a && (address == 0x68 || address == 0x69))
+        values[reg] = 0;
+    }
+    return remaining_;
+  }
+  int available() const { return static_cast<int>(remaining_); }
+  int read() {
+    if (!remaining_) return -1;
+    --remaining_;
+    return rx_buffer_[rx_pos_++];
+  }
+  bool wrote(std::uint8_t address, std::uint8_t reg,
+             std::uint8_t value) const {
+    for (const auto& op : writes)
+      if (op.address == address && op.reg == reg && op.value == value)
+        return true;
+    return false;
+  }
+
+ private:
+  std::array<std::uint8_t, 256>& bank(std::uint8_t address) {
+    return address < 0x20 ? extra_registers : registers;
+  }
+  std::array<bool, 256> connected_{};
+  std::uint8_t address_ = 0;
+  std::uint8_t read_address_ = 0;
+  std::array<std::uint8_t, 14> rx_buffer_{};
+  std::size_t rx_pos_ = 0;
+  std::size_t remaining_ = 0;
+  bool read_pending_ = false;
+  std::vector<std::uint8_t> bytes_;
+};

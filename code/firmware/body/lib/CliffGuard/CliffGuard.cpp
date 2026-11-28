@@ -1,22 +1,33 @@
 #include "CliffGuard.h"
+#include "../../include/TofWireLimits.h"
 
 namespace desk_robot {
 
-bool CliffGuard::valid_config(const CliffConfig& config) {
-  // This ceiling only rejects implausible policies. Actual freshness must be
-  // much more restrictive if measured lead/latency/stopping margins require it.
-  if (!config.calibrated || config.freshness_ms == 0 ||
-      config.freshness_ms > 1000 || config.front_obstacle_mm == 0 ||
+bool CliffGuard::valid_config(const CliffConfig& config) noexcept {
+  // Enforce the SAME 30..200 ms admissible range as the local USB
+  // "calfresh" command. This guard also validates calibration restored from
+  // NVS, so its former 1000 ms ceiling could silently accept a stored
+  // policy that the operator command rightly refuses. Actual certified
+  // freshness may need to be STRICTER given sensor cadence and wheel speed.
+  if (!valid_stored_calibrated_flag(config) || config.freshness_ms < 30U ||
+      config.freshness_ms > kTofCriticalExpiryMs ||
+      !tof_range_in_bounds(config.front_obstacle_mm) ||
+      !tof_range_in_bounds(config.front_max_mm) ||
       config.front_obstacle_mm >= config.front_max_mm) return false;
   for (const auto& floor : config.floor) {
-    if (floor.min_mm == 0 || floor.min_mm > floor.max_mm) return false;
+    // Match the active VL53L0X TofBus 30..1300mm valid range; never
+    // accept a staged calibration no actual sensor sample can satisfy.
+    if (!tof_range_in_bounds(floor.min_mm) || floor.min_mm > floor.max_mm ||
+        !tof_range_in_bounds(floor.max_mm)) return false;
   }
   return true;
 }
 
-bool CliffGuard::configure(const CliffConfig& config) {
-  config_ = config;
+bool CliffGuard::configure(const CliffConfig& config) noexcept {
+  // Reject malformed bool representations before copying or reading them.
   configured_ = valid_config(config);
+  config_ = configured_ ? config : CliffConfig{};
+  initial_sweep_pending_rearm_ = true;
   for (auto& sample : samples_) sample = Sample{};
   // Replacing calibration cannot retain a clear/armed state or old readings.
   fault_ = configured_ ? CliffFault::MissingSample : CliffFault::Unconfigured;
@@ -24,14 +35,28 @@ bool CliffGuard::configure(const CliffConfig& config) {
   return configured_;
 }
 
-void CliffGuard::latch(CliffFault reason, std::uint8_t sensor) {
+void CliffGuard::latch(CliffFault reason, std::uint8_t sensor) noexcept {
   if (fault_ == CliffFault::None && reason != CliffFault::None) {
     fault_ = reason;
     fault_sensor_ = sensor;
   }
 }
 
-CliffFault CliffGuard::sample_fault(std::uint8_t channel) const {
+void CliffGuard::classify_complete_initial_sweep(
+    CliffFault reason, std::uint8_t sensor) noexcept {
+  // Only the initial boot placeholder may change, after all five distinct
+  // channels have produced a sample. An actual bus or runtime fault never
+  // becomes a replaceable initial fault, and this cannot rearm the guard.
+  if (!initial_sweep_pending_rearm_ || fault_ != CliffFault::MissingSample ||
+      reason == CliffFault::None || reason == CliffFault::MissingSample)
+    return;
+  for (const auto& sample : samples_)
+    if (!sample.present) return;
+  fault_ = reason;
+  fault_sensor_ = sensor;
+}
+
+CliffFault CliffGuard::sample_fault(std::uint8_t channel) const noexcept {
   const auto& sample = samples_[channel];
   if (!sample.present) return CliffFault::MissingSample;
   if (!sample.valid || sample.mm == 0) return CliffFault::InvalidSample;
@@ -47,17 +72,24 @@ CliffFault CliffGuard::sample_fault(std::uint8_t channel) const {
 }
 
 bool CliffGuard::current_health(std::uint32_t now_ms, CliffFault& reason,
-                                std::uint8_t& sensor) const {
+                                std::uint8_t& sensor) noexcept {
   reason = CliffFault::Unconfigured;
   sensor = kNoFaultSensor;
   if (!configured_) return false;
+  // Mark every expired conversion even when another lane already faults.
+  // A 32-bit millisecond clock repeats after about 49.7 days; without this
+  // sticky per-sample bit an old cached conversion can appear fresh again.
+  for (auto& sample : samples_) {
+    if (sample.present && now_ms - sample.at_ms >= config_.freshness_ms)
+      sample.expired = true;
+  }
   for (std::uint8_t i = 0; i < kCliffSensorCount; ++i) {
     sensor = i;
     reason = sample_fault(i);
     if (reason != CliffFault::None) return false;
-    // Unsigned elapsed arithmetic works across millis rollover; the adapter
-    // must supply monotonic samples/evaluations without a full wrap hiatus.
-    if (now_ms - samples_[i].at_ms >= config_.freshness_ms) {
+    // Unsigned elapsed arithmetic handles ordinary rollover. Observed
+    // expiry stays sticky until a distinct newer conversion replaces it.
+    if (samples_[i].expired) {
       reason = CliffFault::StaleSample;
       return false;
     }
@@ -68,52 +100,108 @@ bool CliffGuard::current_health(std::uint32_t now_ms, CliffFault& reason,
 }
 
 void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
-                        bool valid, std::uint32_t now_ms) {
-  // A newly arriving sample must not erase evidence that earlier data already
-  // expired during a stalled loop. Check pre-update health before replacement.
+                        bool valid, std::uint32_t now_ms) noexcept {
+  // Reject out-of-order completion BEFORE checking freshness at its older
+  // timestamp. Otherwise unsigned subtraction misattributes a backward
+  // clock to StaleSample, hiding the true InvalidSample diagnostic. Preserve
+  // the existing newer observation and the sticky local STOP policy.
+  if (channel < kCliffSensorCount && samples_[channel].present &&
+      (now_ms == samples_[channel].at_ms ||
+       static_cast<std::uint32_t>(
+           now_ms - samples_[channel].at_ms) >= 0x80000000U)) {
+    // Reject duplicate or backward per-channel timestamps. Preserve the last
+    // raw millimeters/timestamp for diagnostics, but
+    // invalidate their clearance authority. Otherwise an explicit try_rearm
+    // can immediately clear this fault from the old cached good reading,
+    // without any fresh result from the affected physical sensor.
+    samples_[channel].valid = false;
+    latch(CliffFault::InvalidSample, channel);
+    return;
+  }
+  // A newly arriving valid-order sample must not erase evidence that earlier
+  // data expired during a stalled loop. Check before replacement.
   CliffFault previous_reason;
   std::uint8_t previous_sensor;
-  if (fault_ == CliffFault::None &&
-      !current_health(now_ms, previous_reason, previous_sensor))
+  if (!current_health(now_ms, previous_reason, previous_sensor))
     latch(previous_reason, previous_sensor);
   if (channel >= kCliffSensorCount) {
+    // The caller's sensor routing is untrustworthy. Do not rearm using the
+    // five old good readings from before the wrong-channel event. Keep raw
+    // distances for diagnosis but require a complete fresh safety sweep.
+    for (auto& sample : samples_) sample.valid = false;
     latch(CliffFault::InvalidChannel);
     return;
   }
   auto& sample = samples_[channel];
   sample.present = true;
   sample.valid = valid;
+  sample.expired = false;
   sample.mm = distance_mm;
   sample.at_ms = now_ms;
   if (configured_) latch(sample_fault(channel), channel);
 }
 
-void CliffGuard::bus_fault() {
-  latch(CliffFault::BusFailure);
+void CliffGuard::bus_fault() noexcept {
+  // MissingSample is only the configured boot placeholder. If the mux or
+  // sensor bus actually fails before the first complete sweep, report the
+  // concrete failure without waiting for unavailable floor samples. Once
+  // rearmed, preserve the original first-fault-sticky runtime policy.
+  if (initial_sweep_pending_rearm_ && fault_ == CliffFault::MissingSample) {
+    fault_ = CliffFault::BusFailure;
+    fault_sensor_ = kNoFaultSensor;
+  } else {
+    latch(CliffFault::BusFailure);
+  }
   // Even a transient bus recovery requires all-new observations before rearm.
   for (auto& sample : samples_) sample = Sample{};
 }
 
-bool CliffGuard::evaluate(std::uint32_t now_ms) {
-  CliffFault reason;
-  std::uint8_t sensor;
-  if (!current_health(now_ms, reason, sensor)) latch(reason, sensor);
-  return fault_ == CliffFault::None;
+RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
+                                       std::uint32_t now_ms) const noexcept {
+  if (channel >= kCliffSensorCount) return {};
+  const auto& sample = samples_[channel];
+  RangeDiagnostic result;
+  result.present = sample.present;
+  result.distance_mm = sample.mm;
+  result.age_ms = sample.present ? now_ms - sample.at_ms : 0U;
+  // Status JSON must not advertise an expired measurement as live sensor
+  // evidence. Raw mm and age remain available to diagnose a stale lane.
+  // Motor permission still comes ONLY from the independent latched guard.
+  // A fresh, chip-valid measurement can still violate the calibrated desk
+  // envelope. Retain its raw value but never mark unsafe geometry as valid
+  // sensor evidence in status.ranges.valid_mask.
+  result.valid = sample.present && sample.valid && !sample.expired &&
+                 configured_ &&
+                 result.age_ms < config_.freshness_ms &&
+                 sample_fault(channel) == CliffFault::None;
+  return result;
 }
 
-bool CliffGuard::try_rearm(std::uint32_t now_ms) {
+bool CliffGuard::evaluate(std::uint32_t now_ms) noexcept {
   CliffFault reason;
   std::uint8_t sensor;
   if (!current_health(now_ms, reason, sensor)) {
+    classify_complete_initial_sweep(reason, sensor);
+    latch(reason, sensor);
+  }
+  return fault_ == CliffFault::None;
+}
+
+bool CliffGuard::try_rearm(std::uint32_t now_ms) noexcept {
+  CliffFault reason;
+  std::uint8_t sensor;
+  if (!current_health(now_ms, reason, sensor)) {
+    classify_complete_initial_sweep(reason, sensor);
     latch(reason, sensor);
     return false;
   }
   fault_ = CliffFault::None;
   fault_sensor_ = kNoFaultSensor;
+  initial_sweep_pending_rearm_ = false;
   return true;
 }
 
-const char* CliffGuard::fault_name(CliffFault fault) {
+const char* CliffGuard::fault_name(CliffFault fault) noexcept {
   switch (fault) {
     case CliffFault::None: return "none";
     case CliffFault::Unconfigured: return "unconfigured";

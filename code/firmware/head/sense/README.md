@@ -1,16 +1,154 @@
 # XIAO ESP32S3 Sense head target
 
-Active board: **Seeed XIAO ESP32S3 Sense, SKU 113991115**, with its camera/mic
-expansion attached. The user reports ordering at least one full Sense bundle;
-receipt quantity, arrival and delivered revision remain unconfirmed. This target is
-separate from the preserved CoreS3 and Freenove targets. No board is flashed.
+Active target: **Seeed XIAO ESP32S3 Sense, SKU 113991115**, with its
+camera/microphone expansion. The November 3, 2026 seller order and independent
+payment receipt confirm **one bundle paid at USD 13.67**; the carrier reported
+delivery November 7. The actual board, accessories, camera, microphone, PCB
+markings, revision, working condition and assembled fit remain **uninspected**.
+A delivery notice is not a hardware acceptance test. This target is separate
+from the preserved CoreS3 and Freenove targets. No board is flashed.
 
 Keep this purchased board. [RIO reuse research](../../../../docs/research/2026-11-03-sense-realtime-reuse.md)
-identifies software playback-reference/AEC code for Sense; it is not integrated
-in this compiled baseline. Ordinary-speech interruption must still pass the
+identifies software playback-reference/AEC code for Sense. The current
+SenseReferenceCodec is integrated, compiling, and supplies real microphone
+plus playback-reference PCM to the selected AFE. Acoustic timing remains
+unmeasured on the user's hardware. Ordinary-speech interruption must still pass the
 [audio gate](../../../../docs/guides/audio-barge-in.md). Do not set `input_reference` true
 without supplying actual synchronized mic/reference data. RIO's speaker pins
 differ from the table below; do not mix the two wiring maps.
+
+## Guarded RGB heart using upstream Xiaozhi state LED
+
+The Sense board now exposes the **existing pinned Xiaozhi `SingleLed` / Espressif
+`led_strip` WS2812 implementation** as its audio/conversation heart on GPIO9,
+but only when `CONFIG_DESK_ROBOT_RGB_HEART_ENABLED=y` in the **Sense-only**
+Kconfig. The default is `n`. The upstream application calls `GetLed()`
+on device state changes; its existing implementation displays low-brightness
+listening, speaking, WiFi and error/idle states. No additional LED driver,
+camera worker, VAD process or motor output is created.
+
+**DO NOT ENABLE OR WIRE THIS YET.** GPIO9 shares the shipped Sense expansion
+microSD J3 routing; confirm Seeed's documented physical J3 isolation on the
+actual board revision, verify the logic buffer that translates XIAO 3.3V data
+for the chosen 5V WS2812, common-ground wiring, regulator loading and signal
+integrity with an instrument. The opt-in flag is deliberately insufficient as
+electrical authorization. This is a source implementation, not a passed
+hardware trial. Sense audio, native JPEG and OLED still own their own pins.
+
+## Native JPEG for natural live video
+
+The selected Sense firmware now asks the pinned `Esp32Camera` for
+`PIXFORMAT_JPEG` at VGA, with two PSRAM frame buffers and
+`CAMERA_GRAB_LATEST`. The upstream pinned
+[`Esp32Camera::Capture`](https://github.com/78/xiaozhi-esp32/blob/c435f99a88066029ec2dbd2d758c8cc9d051565b/main/boards/common/esp32_camera.cc)
+handles sensor JPEG without copying VGA RGB565 and reencoding it in software.
+The existing `modular_snapshot.inc` passes through the already compressed JPEG
+under the camera mutex and now checks both JPEG boundary markers and a 512 KiB
+size cap. The OLED is used for emotional expressions, not the upstream LVGL
+camera preview, which the pinned upstream explicitly skips for JPEG.
+A separate read-only body-polling task now protects the 100 ms local
+Stackchan face renderer from a 350 ms WROOM UART timeout. A coherent body
+health snapshot and a 1.2 second freshness gate prevent a missing controller
+from appearing healthy. WROOM touch counters are observations for the Mac;
+they do not directly trigger a local mood or nod.
+The actual five-minute unplugged face responsiveness test remains open.
+
+A physical non-motion camera/status stress probe is in
+`code/scripts/bench_head_camera.py`. With a real camera-connected XIAO,
+a real Xiaozhi device identity, and private hardware TOML configured:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_camera.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --stream --status-period 0.2 \
+  --report data/private/head-bench/sense-camera-bench-local.json
+```
+
+All three Sense bench commands write to the ignored `code/data/private/head-bench/`
+directory (created with mode 0700 if missing). Choose a new report filename for
+repeat trials; existing files and paths containing `..` are rejected.
+
+It makes authenticated GET requests only, records JPEG and body status
+timing without writing any pictures or voice, and rejects stale/replayed
+source metadata through the existing `HttpHead` transport. Its report
+always leaves actual acoustic interruption, sensor exposure synchronization,
+charging and assembly acceptance FALSE. Run an independent sound recording
+and real interrupt trials for those separate release gates.
+
+The head now exposes one authenticated, long-lived
+`GET /api/camera.mjpg` multipart JPEG stream, adapting Espressif's
+`esp32-camera` CameraWebServer pattern using the **existing pinned Xiaozhi
+`SnapshotJpeg` camera owner**. The selected camera can emit up to four native
+VGA JPEG frames per second; the Mac consumes them on one persistent connection,
+checks boot/sequence/completion identity and frame integrity, and samples at
+most two frames per second for lightweight change detection. The existing
+proactive pet, VAD, direct look, image selection and local VLM reuse the same
+three-frame RAM ring. No additional camera/model/motor service is created.
+
+In hardware mode, `voice_vision_tools_enabled=true` starts the real stream.
+For automatic visible-scene reactions also set `pet_autostart_enabled=true`
+and configure an installed local `vision_model`. These settings are existing
+operator camera consent gates, not defaults. If the stream is disconnected,
+visual mode reports the outage and refuses a silent fallback to
+`/api/camera.jpg`; the Mac reconnects with bounded delay. Standalone
+non-stream camera bench tools may still use the original snapshot endpoint
+when no stream is active. Mic AEC, Opus and emergency speech interruption
+remain with pinned Xiaozhi. Four FPS is a software ceiling, NOT physically
+measured performance. Two PSRAM frame buffers with latest-frame acquisition are the current
+source configuration, pending real simultaneous camera, microphone, heat,
+JPEG age and WiFi measurements. The stream bench rejects gaps longer than
+1.2 seconds, including a delayed first frame or stale final frame; this is
+transport continuity evidence, not a measured exposure rate. The report also
+checks elapsed camera completion times from the Sense device itself, rejects
+capture gaps and unexpected boot changes during the bench, and reports
+network arrival intervals separately. These per-device intervals do not
+synchronize the camera exposure clock with microphone PCM or the Mac.
+
+## Continuous microphone is a separate explicit permit
+
+The native audiovisual thinker cannot hear ambient sounds until the existing
+Xiaozhi audio channel enters its `realtime` listening mode. On the selected
+Sense board the upstream `Application::ToggleChatState()` already opens that
+channel using full-duplex ESP-SR device AEC. A new Sense-only
+`CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED` switch reuses this existing
+code after boot, without another PDM driver or competing Opus connection.
+
+It defaults to **off**. For a private production build the operator must
+explicitly supply `--continuous-audio` to
+`firmware/head/private_config.py --board sense` along with the existing
+private credentials, selected robot and Mac server address. The physical BOOT button is also an immediate codec-level microphone privacy
+control, including while the robot is speaking or its network channel is
+still connecting. The first press gates the actual PDM read before it may reach
+Opus, invalidates old in-flight microphone reads and destroys any optional
+private AEC capture window; it then requests the original Xiaozhi channel
+stop. The second deliberate press unmutes and may reopen the same Xiaozhi
+session. Neither press allows automatic microphone reactivation later in this
+boot, including a WiFi reconnect. Power cycling permits the original explicit
+build-level setting to start another session.
+
+The selected Sense Xiaozhi application also checks the same physical mute
+flag before every queued Opus send, drops remaining encoded microphone packets,
+rejects stale start/listen tasks and closes the existing channel. The codec
+does not feed newly sampled PDM data while muted. This is a **source-based
+privacy fence**, not a measured upper bound on a packet already inside an
+in-flight network send before the physical press. On the assembled head,
+press BOOT during idle listening, active speech, pending slow WiFi connection,
+AEC capture and reconnection. Verify microphone packet cutoff, that a late
+network open cannot restart listening, and that explicit manual unmute is
+required; record the measured intervals and do not claim instant network
+revocation or physical audio silence from host tests alone.
+This is a software privacy control, **not an electrically qualified microphone
+mute switch**. Confirm the OLED listening state, AEC, silence-stream continuity
+and actual headset interruption with instruments before production.
+
+For actual continuous camera transport (not single-photo polling), run the
+existing read-only bench with `--stream`. This consumes exactly one
+authenticated `/api/camera.mjpg` connection while polling status separately,
+reports actual receiving FPS, JPEG identity continuity, frame interval and
+connection stalls, and never stores any photo or microphone recording. The
+`--camera-period` option applies only to legacy snapshot mode. A successful
+stream bench does not certify sound, inference, docking or electrical safety.
 
 ## Pin source and allocation
 
@@ -25,6 +163,7 @@ add autofocus controls or establish optical/pickup performance.
 | --- | --- | --- |
 | SSD1306 SDA / SCL | 5 / 6 | D4 / D5, head-owned I²C1, 128×64, address0x3C |
 | MAX98357 BCLK / LRC / DIN | 4 / 7 / 8 | D3 / D8 / D9 |
+| MAX98357A SD_MODE | Not connected to MCU | Module-specific enable/channel strap; verify actual carrier |
 | Body UART TX / RX | 2 / 1 | D1 / D0 → WROOM RX16 / TX17, 3.3V1152008N1 |
 | Onboard microphone clock / data | 42 / 41 | PDM, internal expansion connection |
 | Camera D0–D7 | 15,17,18,16,14,12,11,48 | Stock Sense camera |
@@ -35,32 +174,162 @@ add autofocus controls or establish optical/pickup performance.
 
 Native USB19/20, debug UART43/44, strapping GPIO3 and flash/PSRAM pins are not
 assigned to external peripherals. Amplifier7/8 reuse SD signals, so never insert
-an SD card or initialize SD. No touch pad is allocated. Floor/obstacle sensors
-belong to the WROOM bus, not this head's display bus.
+an SD card or initialize SD.
+
+**Required real-board mod for the chosen audio+RGB pins:** The microSD slot shares S3 GPIO7, GPIO8 and GPIO9 via the Sense expansion's **J3 solder bridge, shipped enabled by default**. Merely disabling SD software does **not** electrically remove the slot. Before connecting speaker amp on GPIO7/8 or optional RGB on GPIO9, use Seeed's [official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) on the actual shipped expansion revision: remove camera to protect the lens, open J3 for SPI header use, then electrically inspect and confirm no microSD routing is active. **No SD card**, no SD.begin(). The current firmware compile does not verify physical J3.
+
+No touch pad GPIO is allocated on Sense. The physical head-touch input is
+owned by WROOM; floor/obstacle sensors also belong to the body, not the head's
+display bus.
 
 SSD1306 pin order/voltage, address, orientation and the rounded Sparky bezel fit still need
 checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
-limit volume for the selected8Ω1W speaker. Use qualified supplies/grounds and
+use the selected Challenge Electronics CS20-02P110-04-1X 8 ohm 2 W rectangular speaker, not the retired 1 W candidate; actual MAX98357A 5V output and enclosure acoustic/thermal margins must still be qualified. Use qualified supplies/grounds and
 rated actuator wiring. Do not join independent USB5V sources blindly.
+
+## Reconnecting consented realtime listening
+
+When the private firmware setting `CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED`
+is enabled, the Sense board uses the original Xiaozhi `ToggleChatState`
+and its one Opus microphone/speaker session. The initial attempt waits until
+at least ten seconds after boot, connected WiFi, idle device state and device
+AEC. A WiFi loss resets the initial-attempt latch. A changed Xiaozhi audio
+failure epoch also permits a retry after a channel closure or open failure
+even if WiFi remains associated. All attempts share a minimum five-second
+interval; an ordinary healthy transition to idle alone does not trigger a
+restart. No new microphone owner, custom audio WebSocket or model-response
+retry is created. An operator pressing BOOT disables unattended audio restart
+until the board reboots. Verify recovery and consent in the physical network
+loss, server-channel closure and manual mute trials before qualification.
+
+## Physical BOOT microphone privacy verification
+
+With the real flashed Sense head, an operator-approved listening session,
+and the normal authenticated Mac head transport configured, run:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_privacy.py \
+  --config config/local.toml --robot robot-01 --seconds 15 \
+  --report data/private/head-bench/sense-boot-privacy-local.json
+```
+
+The bench first waits for successful microphone reads, then prompts for the
+**actual BOOT button**. Press once to mute, hold for at least one second, and
+press again only when prompted to unmute. The source-backed `/api/audio.reference`
+receipt must show the same boot identity, a new BOOT privacy epoch, no further
+PDM reads after a short in-flight grace period, a second epoch after unmute,
+and resumed microphone reads. The report uses an exclusively created private
+0600 JSON file and never stores speech, images, audio buffers or tokens.
+The existing audio integrity bench also now **fails** if BOOT mute was observed
+during a supposedly continuous full-duplex trial.
+
+This verifies observable **software microphone gate behavior**, not network
+packet cutoff, physical speaker playback, or acoustic AEC quality. A real
+packet capture or Xiaozhi server transmit trace must separately demonstrate
+that no stale Opus packets can follow the physical mute beyond the measured
+in-flight send. Repeat the BOOT trial during a delayed WiFi connect, active
+speech, an optional private AEC capture, and a reconnect. Verify the second
+physical tap is required to unmute and that the first tap destroys the private
+PCM capture. Record actual hardware measurements before acceptance; no
+automatic voice restart is allowed after operator BOOT intervention this boot.
+
+## Live AEC reference integrity bench
+
+After flashing the selected Sense build and enabling the existing authenticated
+head transport, run this read only check without capturing microphone audio:
+
+```sh
+cd code
+uv run --no-sync python scripts/bench_head_audio.py \
+  --config config/local.toml --robot robot-01 --seconds 60 \
+  --report data/private/head-bench/sense-aec-reference-local.json
+```
+
+The actual `GET /api/audio.reference` receipt includes the Sense boot identity,
+reference underflow and ring overwrite counts, stale post cancellation writes,
+`short_output_writes` from incomplete I2S speaker writes, successful PDM
+microphone frames read, and I2S speaker frames accepted. The Mac rejects
+foreign identities, invalid counters, changed boot identities, or decreasing
+counters. Software integrity fails if any fault counter advances, the firmware
+reports a sticky integrity fault, or measured counter throughput differs by
+more than 1% from 16 kHz PDM and 32 kHz I2S, including the 2:1 count ratio.
+Start the consented Xiaozhi listening session and sustain playback throughout
+the trial; idle speech gaps are not a valid rate qualification window. Rates
+are estimates over the first and last valid Mac receipt timestamps, not
+physical LRCLK/PDM clock measurements; scheduling or network jitter can
+invalidate a trial. Raw frame progress proves
+neither AEC alignment nor that the speaker was audible. This endpoint exposes no
+microphone PCM, grants no motor authority and **never** claims physical speaker
+playback, AEC quality, or natural barge in. Do not reset the head in the middle
+of a trial to erase failure evidence. Save the actual bench report and the
+independent acoustic waveform/stop timing trials before A2 approval.
+
+## Bounded I2S write under urgent speech interruption
+
+`EnableOutput(false)` disables the digital I2S output and invalidates the
+software reference. The selected pin map has no MCU-controlled SD_MODE or
+switched amplifier supply. Do not equate a decoder reset, I2S disable or
+BOOT privacy mute with amplifier rail isolation, pop-free shutdown or
+measured acoustic silence. The [MAX98357A datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX98357A-MAX98357B.pdf)
+identifies SD_MODE as shutdown/channel select; verify the actual carrier
+strap, clock stop/restart behavior, differential speaker output and supply
+current on the bench. Do not allocate another GPIO or change the BOM here.
+
+The exact pinned Xiaozhi `NoAudioCodec::Write` normally calls the ESP-IDF
+`i2s_channel_write` with `portMAX_DELAY` while holding its codec mutex.
+An urgent decoder reset and `EnableOutput(false)` cannot reliably interrupt
+a stalled write until that lock is released. The **Sense-only disposable
+overlay** in `install_overlay.py` now reuses the same native I2S writer with
+a 120 ms TX wait ceiling, preserves its actual accepted sample count so the
+playback AEC reference is not fabricated, and returns a transient write fault
+instead of rebooting the head with `ESP_ERROR_CHECK`. The tighter bound
+reserves time for VAD detection, network dispatch and head decoder flushing;
+it is not evidence that audible STOP meets 500 ms. Physical trials must
+also rule out speech underruns at the selected amplifier and load. Other Xiaozhi boards
+retain the original upstream writer. The overlay test checks the pinned
+upstream anchor and reversibility, but this software bound alone does not
+certify audible interruption: WiFi, AFE/VAD, output DMA, codec locking and
+speaker-to-PDM acoustic coupling must still be timed with real equipment.
+See [voice acceptance](../../../../docs/guides/audio-barge-in.md).
 
 ## Driver reuse and isolation
 
 This adapter uses the pinned Xiaozhi `Esp32Camera`, `OledDisplay`, IDF SSD1306
 panel driver, `NoAudioCodecSimplexPdm` input and I²S speaker output. It retains
-our authenticated bridge, fresh-camera snapshot lock and disabled-by-default
-raw motion tools. No new camera/audio driver, RoboEyes/GPL face code or custom
-animation is incorporated. Stock OLED emotion/text UI is used initially.
+our authenticated bridge, single live camera owner and disabled-by-default
+raw motion tools. No second camera, microphone, speaker or OLED driver is added.
+
+The selected local expression stack uses the vendored MIT Stackchan HSM
+(`overlay/stackchan_behavior.hpp`) with the original
+`overlay/face_eye_animator.hpp` and `overlay/face_eye_display.hpp`.
+The real Sense `FaceTask` passes `Action.motion` into `FaceEyeAnimator::Step`,
+then updates bounded blinking and gaze pixels inside Xiaozhi's existing
+LVGL emotion slot under `DisplayLockGuard`. Primary blinks use a seeded
+3–6 second pseudorandom interval; occasional double blinks have 500 ms
+onset spacing. Safety priority and HSM sleep/low battery cancel the overlay
+and restart the blink interval on recovery. The upstream speaking,
+listening and safety status remains separately owned; WROOM faults suppress
+optional moods, and this face code cannot command a motor. GPL RoboEyes is a
+design reference only and was not imported.
+
+This source integration does not qualify the actual 128 by 64 OLED,
+fitted acoustic/display timing, or the registered twenty-expression
+repertoire. Gate A1 and feature G001 remain open until the assembled Sense
+passes the five-minute Mac-offline face and zero-motion observation and the
+remaining expressions are demonstrated.
 
 Camera SCCB must be I²C0 and OLED I²C1; compile guards reject the known conflicting
-camera setting. The8MB partition table is `partitions/v2/8m.csv`: two0x2f0000
-OTA slots and2MB assets at0x600000. Actual app/assets size and a successful build
+camera setting. The 8 MB partition table is `partitions/v2/8m.csv`: two 0x2f0000
+OTA slots and 2 MB assets at 0x600000. Actual app/assets size and a successful build
 are required; never truncate the old16MB merged image.
 
 ## Build only
 
-From the project root:
+From the repository root:
 
 ```sh
+cd code
 python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-sense
 bash scripts/build_head.sh --board sense
 ```
@@ -72,14 +341,28 @@ python3 firmware/head/install_overlay.py --board sense --target firmware/head/bu
 ```
 
 The installer rejects drift and different-board overlays. It never edits the
-source clone. `--remove` restores only unchanged generated files. Private
-settings remain under the ignored build copy, with mode0600 and the selected
+source clone. Its recipe digest includes copied Markdown, so even a change to
+this README can require a remove/reinstall. Preserve private settings securely
+outside the disposable build directory first. `--remove` restores journaled
+original bytes and removes unchanged generated files; it refuses modified
+journaled files. Reapply to the same pinned checkout with `--target` after
+removal, or create a new disposable clone using `--output`. Private settings
+are written under the ignored build copy, with mode 0600 and the selected
 robot's existing credential:
 
 ```sh
-python3 firmware/head/private_config.py --board sense --config config/local.toml --robot robot-01 --server-ip MAC_LAN_IP
+python3 firmware/head/private_config.py --board sense \
+  --config config/local.toml --robot robot-01 \
+  --server-ip "${MAC_LAN_IP:?Set MAC_LAN_IP to the Mac LAN IPv4}"
 bash scripts/build_head.sh --board sense --private
 ```
+
+Add `--continuous-audio` to the private configuration command only with explicit
+operator consent. For a temporary private AEC capture build, all three flags
+are required: `--continuous-audio --bench-aec-capture --aec-delay-ms 0` and follow the per-capture physical BOOT
+consent procedure in the [AEC guide](../../../../docs/guides/sense-aec-port.md).
+Neither option is implied by `--private`. The default 90 ms reference delay
+is not a measured acoustic calibration.
 
 These commands require valid existing private configuration; no credentials are
 embedded in the generic verification build. That build uses an empty bridge

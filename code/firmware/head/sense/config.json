@@ -17,7 +17,10 @@
         "CONFIG_SCCB_HARDWARE_I2C_PORT1=n",
         "CONFIG_SCCB_HARDWARE_I2C_DRIVER_NEW=y",
         "CONFIG_DESK_ROBOT_ID=\"robot-01\"",
-        "CONFIG_DESK_ROBOT_TOKEN=\"\""
+        "CONFIG_DESK_ROBOT_TOKEN=\"\"",
+        "CONFIG_USE_AUDIO_PROCESSOR=y",
+        "CONFIG_USE_DEVICE_AEC=y",
+        "CONFIG_USE_SERVER_AEC=n"
       ]
     }
   ]

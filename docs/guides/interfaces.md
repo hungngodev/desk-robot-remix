@@ -1,8 +1,9 @@
-> Design update 2026-11-03: this documents the existing DC-body/Freenove protocol.
-> Body status now adds protocol2, backend and safety state. Stepper/guard policy
-> compiles but real sensor I/O/calibration is absent, so the stepper build cannot arm.
-> `rearm` is local body USB only, rejected by the bridge/laptop; ordinary arm
-> cannot clear a fault. Face events/pet lease remain planned. See firmware-foundation.md.
+> Updated 2026-11-12. The esp32_full firmware targets eight VL53L0X
+> channels (five local safety plus three independent read-only directions) through TCA9548A 0x70, local fault latching, USB-only measured
+> calibration, touch interruption and read-only range diagnostics. This is
+> source files and target build profiles, not a verified compile at the current PR head, flashed, fitted or physically qualified assembly. Use the exact current PR head and its workflow results; older runner failures are historical.
+> `rearm` is local WROOM USB only, never the head, Mac or model; ordinary arm
+> cannot clear a fault. See firmware-foundation.md and the verification record.
 
 # Integration contract (implementation baseline)
 
@@ -21,11 +22,17 @@ Use a separate regulated supply for motors/servos, never GPIO power.
 Each command is one ASCII line, at most 95 characters, terminated by CRLF.
 Responses are one `OK ...`, `ERR ...`, or (for status) one JSON line. Ignore `EVT`
 and startup logs when waiting for an ACK; do not accept an unrelated ACK.
+`BodyControl.cpp` owns these JSON keys; `BodyReplyFormat.h` clears the
+reply buffer on a formatting failure or truncation. A status frame that does
+not fit becomes `ERR status response_too_long` if the fallback fits, never
+partial JSON.
 
 | Command | Behavior |
 | --- | --- |
 | `ping` | Link check; does not renew motion authority |
-| `status` | JSON with `armed`, `motor.m0/m1`, `servo.lift/grip`, `watchdog_ms` |
+| `status` | JSON protocol 2: `armed`, `motor.m0/m1`, `servo.lift/grip`, `servo.position_source=commanded`, `watchdog_ms`, `drive_ms`, `backend`, `touch`, `extras`, `side_ranges`, `imu`, `safety`, `ranges` |
+| `aux` | JSON with raw accessory, 1S fuel and independent charger seat signals; never proves charging |
+| `ir` | JSON with independent direct left/right 34-symbol NEC frames, 200ms freshness, matched code and zero movement/charging authority |
 | `arm` / `disarm` | Operator-only session enable; start disarmed, never auto-arm |
 | `drive L R MS` | Atomic signed wheel percentages (-100..100 input), capped to 40% by default; duration 1..250 ms |
 | `drive L R` | Same, default 250 ms, unlike unbounded upstream behavior |
@@ -55,11 +62,23 @@ access; reject oversized bodies and commands. Never auto-arm from an MCP tool.
 - `POST /api/command`, JSON `{ "command": "drive 20 20 150" }`:
   `{ "ok": true, "reply": "OK drive ...", "robot_id": "robot-01" }`.
   Body ERR => HTTP400; UART failure/timeout => 503/504, never pretend success.
-- `GET /api/camera.jpg`: fresh JPEG using the existing camera implementation and
-  image-to-JPEG helpers. No new sensor driver. Return failure if capture fails.
+- `GET /api/aux`: raw body sensor data with independent dock seat GPIOA, no net battery charging assertion.
+- `GET /api/ir`: WROOM two-channel read-only RMT NEC evidence; 34-symbol classic NEC, code checksum and fresh per-side sequences. A matched code never authorizes movement or charging.
+- `GET /api/pose`: authenticated, bounded read-only WROOM pose v1. Old body firmware returns HTTP 501, not guessed coordinates.
+- `GET /api/camera.jpg`: standalone fresh JPEG using the existing camera implementation and
+  image-to-JPEG helpers. Return failure if capture fails or the camera is busy.
+- `GET /api/camera.mjpg`: persistent authenticated multipart JPEG stream; the Mac
+  owns one remote reader per robot and reuses fresh stream frames for snapshot consumers.
+  A competing camera acquisition is refused. Enable continuous perception only with
+  operator consent; a disconnected stream is not live perception.
+- `GET /api/camera.identity`: read-only initialized sensor PID and head boot nonce;
+  Mac docking calibration checks these against the accepted frame identity.
 
-The active modular implementation uses `desk-robot-modular-s3` and an
-`Esp32Camera` snapshot adapter; the previous `desk-robot-core-s3` reference remains
+The active modular implementation uses `desk-robot-modular-s3` and the existing
+`Esp32Camera` capture adapter for both snapshot and continuous MJPEG routes;
+see [head bridge](../../code/firmware/head/overlay/robot_bridge.cc) and
+[Mac transport](../../code/laptop/src/desk_robot/transport.py).
+The previous `desk-robot-core-s3` reference remains
 separate. The modular board uses its own audio/display pins and camera I²C0 versus
 OLED I²C1, with a camera-driver Kconfig guard. Token/robot ID go in private build
 configuration. Both variants retain the same API and shared camera lock. Existing
@@ -75,8 +94,8 @@ silently maintains an abandoned movement. Manual operator arming via HTTP/USB.
 
 ## Laptop
 
-Python package `desk_robot` under `laptop/src/desk_robot`, project-level
-`pyproject.toml`, tests under `tests/`. No real movement by default. A simulated
+Python package `desk_robot` under [code/laptop/src/desk_robot](../../code/laptop/src/desk_robot/), project-level
+[code/pyproject.toml](../../code/pyproject.toml), tests under [code/tests](../../code/tests/). No real movement by default. A simulated
 head/body transport must exercise the same coordinator logic in tests.
 
 Per-robot configuration: ID, display name/persona, head URL, environment-token
@@ -84,7 +103,8 @@ name, camera/pickup calibration, and explicit `motion_enabled` (default false).
 Never label examples as measured calibration. Refuse pickup without valid
 calibration and explicit motion enable. Use POST for movement and operator arms.
 
-Controller uses the head API, stops in `finally` on cancel/error/lost detection,
+Controller uses the existing head API (including read-only WROOM telemetry),
+stops in `finally` on cancel/error/lost detection,
 never retries an uncertain drive ACK, bounds attempts/time, and serializes jobs
 per robot. Capture -> YOLO-World detections -> calibrated pixel/ground alignment
 -> short drive pulses -> grip/lift -> separate visual verification. A detection
@@ -96,10 +116,26 @@ two-to-five-robot conversation. Default localhost. Use the existing Xiaozhi serv
 an overlay/plugin to route spoken pickup requests to the right robot/coordinator.
 Keep model/vision/speech imports optional so base tests run without model weights.
 Measured calibration is a private JSON file; human physical trials are recorded
-in the CSV and summarized by `scripts/check_trials.py`, separately from the API.
-Operator `/enable` grants a 30-second one-use permit for one bounded job. The
-body is actually armed only when the job starts. Model tools have a separate
+in the CSV and summarized by [code/scripts/check_trials.py](../../code/scripts/check_trials.py), separately from the API.
+Operator `/enable` grants a 30-second one-use permit for one bounded job.
+For hardware mode, the coordinator first fetches the existing authenticated
+Sense `/api/status` response and refuses a permit unless the actual WROOM
+reports the per-robot configured guarded motor backend (`stepper_28byj48` or
+`dc_pwm_guarded`), correct robot identity, disarmed state,
+unpressed touch, clear local five-channel safety and five present, valid,
+recent readings, and recognized fresh six-axis IMU telemetry (age at most 200 ms).
+These raw IMU samples do not prove a calibrated attitude. It checks **again
+immediately before the job arms**; a touch,
+disconnect, stale reading or fault between permit and execution therefore
+fails the job without requesting motor power. Missing fields fail closed.
+The body itself remains the sole safety authority and rechecks sensors before
+every motor output; a successful Mac preflight is not a replacement for local
+USB calibration, manual safety rearm or measured stop distance.
+
+The body is actually armed only when the job starts. Model tools have a separate
 token and cannot grant permits. Keepalive runs only while the job is active.
+Simulation deliberately skips physical preflight but must never count as a
+physical trial.
 
 Conversation: shared speaker lock, independent robot histories, distinct IDs,
 maximum six **utterances total** for two/three participants, eight for four,
@@ -111,3 +147,249 @@ paid API use. A backend/provider failure must surface, not become a fake reply.
 Acceptance: real keys including a flat key, and candy; >=8/10 **physical** trials
 per category, recorded separately from software/simulation results. No tests
 generated by this task may claim actual gripping or success rates.
+
+
+### Mac REST route inventory
+
+The following table covers the handlers declared in `api.py`,
+`api_dock_routes.py` and `api_memory_routes.py`; separately registered
+telemetry, spatial and native model routes are described in their own sections
+and guides. A tool bearer is not an operator bearer. A 202 response is job
+admission, not physical completion. The success column is the normal HTTP
+status, not a guarantee that a request passes consent or runtime checks.
+
+<!-- mac-rest-inventory:start -->
+| Method and path | Bearer | Success | Contract |
+| --- | --- | --- | --- |
+| `GET /v1/health` | operator | 200 | `mode`, `runtime_ready`, `physical_acceptance_pass` (false), `warnings`; 503 if not ready |
+| `GET /v1/robots/{robot_id}/camera.jpg` | operator | 200 | JPEG, not JSON |
+| `POST /v1/robots/{robot_id}/enable` | operator | 200 | Bounded one-use operator permit, not arm confirmation |
+| `POST /v1/robots/{robot_id}/move` | operator | 202 | JSON `command` (max 95 characters); job |
+| `POST /v1/robots/{robot_id}/explore` | operator | 202 | Job |
+| `POST /v1/robots/{robot_id}/pickup` | tool or operator | 202 | JSON `target` (key or candy); job, existing permit required |
+| `POST /v1/robots/{robot_id}/stop` | tool or operator | 200 | STOP acknowledgement, not physical acceptance |
+| `GET /v1/pet/{robot_id}` | tool or operator | 200 | Pet status |
+| `POST /v1/pet/{robot_id}/start` | operator | 200 | Start pet mode, not motor authorization |
+| `POST /v1/pet/{robot_id}/pause` | tool or operator | 200 | Pause pet mode |
+| `POST /v1/pet/{robot_id}/quiet` | operator | 200 | JSON `quiet` |
+| `GET /v1/pet/{robot_id}/vision-status` | tool or operator | 200 | Vision status |
+| `POST /v1/pet/{robot_id}/look` | tool or operator | 200 | JSON `question`, 3 to 280 characters |
+| `POST /v1/pet/{robot_id}/share` | operator | 200 | JSON `to_robot`, `event_id`; text only |
+| `POST /v1/pet/{robot_id}/interrupt` | tool or operator | 200 | Interrupt pet speech |
+| `GET /v1/robots/{robot_id}/jobs/latest-pickup` | tool or operator | 200 | `available`; absent job is not success |
+| `GET /v1/jobs/{job_id}` | tool or operator | 200 | Job data; unknown job returns 404 |
+| `POST /v1/conversation` | operator | 200 | JSON `robot_ids`, `topic`, optional `utterances`; response `mode`, `transcript`, `physical_playback_verified` (false) |
+| `POST /v1/conversation/stop` | tool or operator | 200 | `stopped` |
+| `POST /v1/robots/{robot_id}/dock/approach` | operator | 202 | Guarded job admission, not charging authorization |
+| `GET /v1/robots/{robot_id}/dock/observe` | tool or operator | 200 | Passive marker observation; camera consent required (403); changed grant (409) |
+| `GET /v1/robots/{robot_id}/dock/ir` | tool or operator | 200 | Simulation: `available`, `physical_qualified`, `motor_authorized`, `charging_authorized` all false |
+| `GET /v1/robots/{robot_id}/dock/evidence` | tool or operator | 200 | Simulation: `state=no_physical_hardware`, `charging_verified=false`, `motor_authorized=false`, `charging_authorized=false` |
+| `GET /v1/pet/{robot_id}/memories` | operator | 200 | Query `limit` 1 to 50 (default 12); `robot_id`, `records` |
+| `GET /v1/pet/{robot_id}/core-memory` | operator | 200 | `robot_id`, `operator_curated_only`, `core_facts` |
+| `PUT /v1/pet/{robot_id}/core-memory/{slot}` | operator | 200 | JSON `value` (1 to 200 characters); `changed`, `operator_curated`, `motor_authorized=false` |
+| `DELETE /v1/pet/{robot_id}/core-memory/{slot}` | operator | 200 | `robot_id`, `slot`, `removed` |
+| `PATCH /v1/pet/{robot_id}/memories/{event_id}` | operator | 200 | JSON `summary` (1 to 300 characters); `corrected`, `provenance_preserved`, `local_only`, `motor_authorized=false` |
+| `DELETE /v1/pet/{robot_id}/memories/{event_id}` | operator | 200 | `robot_id`, `event_id`, `removed`, `local_only` |
+| `GET /v1/pet/{robot_id}/voice-context` | tool or operator | 200 | Optional query `query` (max 240 characters); `private_memory_generation`, `core_facts`, `memories`, `retrieval`, `matched`; independent consent required |
+<!-- mac-rest-inventory:end -->
+
+Both memory mutation request schemas reject extra fields. Memory correction
+and deletion can return 409 for a superseded mutation or 422 for invalid
+input. Voice context is untrusted data, not instructions, and its
+`no_new_motion_permission` field never grants authority. Missing or revoked
+consent and invalidated private memory revisions are rejected rather than
+silently returning the earlier context.
+
+The Mac FastAPI handlers above are REST, not a second Xiaozhi WebSocket
+server. The existing Xiaozhi server owns the authenticated head WebSocket.
+Its local speech bridge exposes HTTP `GET /events` to the Mac voice event
+listener; this is a separate bridge URL, not `/v1/events` on FastAPI.
+The speech event feed does not carry raw microphone audio, camera images
+or motor permits.
+
+### Local USB serial port admission
+
+The WROOM USB bench and Feather room feed accept direct macOS `/dev/cu.*` or
+`/dev/tty.*` and Linux `/dev/ttyUSB*` or `/dev/ttyACM*` names. Configuration
+checks syntax; the hardware opener additionally requires an existing character
+node and refuses symlinks, including Linux `/dev/serial/by-id/` aliases.
+Baud remains fixed at 115200. This is path admission, not cryptographic board
+identity or physical safety qualification. No automatic port substitution or
+motor rearm follows a rejected path.
+
+### Read-only INA226 monitor diagnostics
+
+The WROOM `aux` response and head `GET /api/aux` may include
+`power.monitor_fault`: `none`, `math_overflow`, or `shunt_saturated`.
+The Mac `GET /v1/robots/{robot_id}/aux` adds `power.monitor_warning`
+when the fault field exists. It is null for `none`; older firmware
+without the field does not gain a fabricated warning. An overflow or
+saturated shunt requires `monitor_valid=false` and, when present,
+`pack_valid=false`. Unknown or contradictory fault evidence is rejected
+as HTTP 503 with `{"error":"Invalid INA226 monitor fault provenance"}`
+before a conversational sensor receipt is admitted.
+
+These diagnostics describe the last observed conversion fault, not a
+fresh current measurement, a shunt calibration, or permission to charge
+or move. A subsequent clean acquisition can clear the reported fault.
+
+### Independent read-only terminal dock IR API
+
+The selected WROOM `esp32_full` target installs two independent legacy ESP-IDF 4.4 RMT RX channels on **GPIO36 and GPIO39**, after moving the slow magnetic reed and PIR to MCP23017 GPIOB0/B1. The receiver code in `lib/TerminalIr` checks polarity, complete NEC 34-symbol mark/space timing, inverse address/command bytes, per-side acquisition sequences, 200ms freshness and dual matching 120ms separation. These are bounded read-only observations, not a bearing measurement or a motor permit. RMT snapshots are stamped when WROOM consumes packets, not optical exposure timestamps.
+
+The existing XIAO serial parser explicitly permits read-only `ir`; the XIAO authenticates `GET /api/ir`, validates the JSON and forwards the correct robot ID. The Mac `HttpHead.ir_status()` rechecks the reply identity and per-side freshness and returns bounded typed data; the Mac adds `GET /v1/robots/{robot_id}/dock/ir` under the existing private bearer-token gate. No extra MCP server, ROS2 motor owner, charger, WiFi stack or direct HTTP-to-WROOM bridge exists. `code/tests/test_dock_ir.py`, `code/firmware/body/tests/terminal_ir_tests.cpp`, and head protocol tests cover the source protocol.
+
+The terminal beacon's actual chosen transmitter and receiver carrier, 3.3V bias, ESP32 GPIO36/39 erratum, mechanical baffle, differential bearing geometry and charger remain physically unverified. **The source returns `physical_qualified=false`, `motor_authorized=false`, `charging_authorized=false` on every IR query.** Do not use the new endpoint as an instruction to drive toward live contacts.
+
+### Guarded dock approach stall and operator assistance
+
+A dock approach has at most sixteen short forward pulses overall. The first
+accepted marker range establishes the progress baseline. Three consecutive
+subsequent observations without a new closest marker range end the approach
+before another drive. Each progress observation must pass the existing fresh
+camera source, assigned IR, WROOM health, consent and seat checks first. A
+retired camera stream or a physical fault retains its own failure reason.
+
+The job result exposes `phase=hold`, `help_requested=true`, and
+`motor_authorized=false` for the stalled approach. Its event records that
+operator help is needed; the result is published only after the parent job's
+terminal STOP acknowledgement. This is not a speech-delivery receipt or an
+electrical standby measurement. A fresh operator request remains subject to
+all existing qualification and permit gates. Autonomous low-battery retries
+remain limited by the existing per-robot persisted episode reservation.
+
+No reverse or turning pulse is authorized to retreat from a cradle: the rear
+and side readings have no qualified swept-footprint authority. The observed
+marker range is not an odometry or physical-motion measurement. Actual
+retreat, low-power standby and charging remain subject to physical
+qualification.
+
+### Independent capture sequence over the existing Sense camera endpoint
+
+Each newly encoded JPEG from `/api/camera.jpg` now reports its Sense boot
+nonce, monotonic per-boot frame sequence and device clock completion time in
+`X-Desk-Camera-Boot`, `X-Desk-Camera-Sequence` and
+`X-Desk-Camera-Complete-Us`. The existing Mac `HttpHead` serializes capture
+calls within one robot, independently of its motor/status lock, and refuses
+missing or replayed metadata on physical hardware. A new Sense boot nonce
+correctly resets the counter. A reboot does **not** silently start pet mode.
+These headers say when JPEG encoding finished on the head, not the sensor's
+precise exposure time. Device and Mac monotonic clocks are not synchronized;
+actual capture lag and camera/audio coexistence still require hardware tests.
+Only current frames reach proactive comparison and the pickup controller.
+
+
+### Read-only pose v1
+
+This is the source-implemented guide 20 to guide 30 UART interface, with
+real wheel/IMU displacement and mounted geometry still uncalibrated. A caller must not
+treat any sample as movement authority. The head issues the exact ASCII
+`pose\r\n` command on the existing 115200 baud 8N1 UART mutex; the body
+returns one complete JSON line. There is no arbitrary UART tunnel, background
+keepalive or retry. The same per-robot bearer authentication and currently
+configured head `robot_id` apply as `GET /api/ir`. The head appends
+`robot_id` and a head-local `head_boot` (its Sense boot nonce) to the
+nine validated body fields without modifying body timestamps or coordinates.
+The Mac source reader uses `head_boot` to invalidate old pose continuity
+if Sense alone reboots while WROOM remains powered.
+
+The exact required nine body fields are `v=1`, `body_boot` (nonzero uint32),
+`origin` (uint32 origin identity), `seq` (uint32 sample sequence),
+`sample_us` (body monotonic sample-start microseconds, at most the exact
+JSON integer range 2^53-1), `x_mm`, `y_mm` (signed 32 bit millimeters),
+`yaw_mrad` (signed 32 bit milliradians), and `quality` (only `valid`,
+`degraded`, or `unavailable`). All fields are integers except quality.
+A valid/degraded reading requires nonzero origin, sequence and sample time. Every quality, including unavailable, requires a nonzero sequence and source sample time. Coordinates are restricted to ±1,000,000 mm and yaw to ±3,142 mrad for the current Mac pose decoder.
+Unrecognized versions, omitted or extra fields, nonintegral/out-of-range
+values, malformed JSON and foreign acknowledgments cannot become a pose.
+No wrap/age conversion from body to head clocks is inferred by the head.
+
+Illustrative wire fixtures only, NOT observations from installed hardware:
+
+* Same boot and origin, first sample:
+  `{"v":1,"body_boot":42,"origin":3,"seq":100,"sample_us":15000000,"x_mm":120,"y_mm":-20,"yaw_mrad":157,"quality":"valid"}`
+* Later sample, same boot and origin:
+  `{"v":1,"body_boot":42,"origin":3,"seq":101,"sample_us":15050000,"x_mm":121,"y_mm":-20,"yaw_mrad":158,"quality":"degraded"}`
+* Rebooted body, new boot and new origin, first sample:
+  `{"v":1,"body_boot":43,"origin":4,"seq":1,"sample_us":1000000,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"valid"}`
+* Body available but pose not localized:
+  `{"v":1,"body_boot":43,"origin":0,"seq":2,"sample_us":1100000,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"unavailable"}`
+
+A body reboot invalidates the old frame even if its new sequence happens to
+match. A new origin also invalidates old spatial coordinates. Mac guide 50
+must validate robot identity, boot/origin, sequence and age, and must not
+promote a degraded/unavailable or uncalibrated pose to safe navigation.
+
+For a legacy WROOM reply `ERR input unknown_command`, the head sends
+HTTP 501 and `{"ok":false,"reply":"pose unsupported by body firmware","robot_id":"robot-01"}`.
+An explicit, unique numeric wire version outside v1 (within uint32) also
+returns HTTP 501; no fields from that unknown version are interpreted.
+Missing or ambiguous versions, malformed pose JSON, or other body-side pose
+errors return HTTP 503; an uncertain
+no-reply returns HTTP 504 after the existing 350 ms UART bound. One pending
+read shares the existing nonurgent telemetry latch; urgent STOP preempts
+nonurgent UART reads at the current polling boundary. No `pose` query
+renews the 500 ms body watchdog.
+
+
+The Mac's separate operator-only `GET /v1/robots/{robot_id}/pose` endpoint
+uses the existing authenticated `HttpHead.pose_status()` reader. This is a
+diagnostic read, not a new UART bridge or a Xiaozhi model motion tool. It
+requires the coordinator operator bearer; an ordinary tool bearer is refused.
+From a locally running coordinator with the default CLI port, an operator with
+their token already configured may inspect one sample without arming motors:
+
+```sh
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DESK_ROBOT_API_TOKEN}" \
+  http://127.0.0.1:8765/v1/robots/robot-01/pose
+```
+
+Legacy head/body firmware that responds with HTTP 404 or 501 is represented
+as HTTP 501 at this Mac route. A head response with the correct robot identity
+and an explicit non-v1 unsigned 32-bit integer wire version also returns 501.
+Both outcomes invalidate cached pose continuity; the next supported readings
+must establish a new baseline. Missing, malformed or duplicate version fields,
+foreign identities, replayed body sequences and other failed head requests
+do not return a usable pose. Additional unknown fields in a v1 head response
+are ignored by the Mac's typed decoder; the body UART schema remains exact.
+No pose compatibility outcome grants movement or disables unrelated routes.
+A legacy status protocol missing current safety evidence remains rejected;
+compatibility never bypasses the current WROOM motor permit or safety latch. A successful diagnostic
+response includes the version-one body values, head boot, quality and the
+`PoseFence` continuity result. Its `available: true` means that the
+head returned a typed packet, **not** calibrated displacement or localization.
+The first valid receipt is only a baseline. Two continuous fresh valid
+receipts can establish `local_odometry_continuous: true`, but the route
+still reports `needs_reanchor: true`, `map_anchored: false`,
+`navigation_authorized: false`, `motor_authorized: false`,
+`charging_authorized: false` and `physical_acceptance_pass: false`.
+An `unavailable` quality remains diagnostic only. Never use this route's
+values as an execution permit, a completed arrival or physical acceptance.
+Synthetic API fixtures: `code/tests/test_api_spatial_pose.py`.
+
+Camera JPEG identity is separate. Three illustrative accepted JPEG header
+fixtures, with independent headset monotonic microseconds, are:
+
+* A: `X-Desk-Camera-Boot: 123`, `X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 250000`
+* B: `X-Desk-Camera-Boot: 123`, `X-Desk-Camera-Sequence: 2`, `X-Desk-Camera-Complete-Us: 500000`
+* C after Sense reboot: `X-Desk-Camera-Boot: 124`, `X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 10000`
+
+The last value is head monotonic microseconds at completed JPEG encoding,
+not optical exposure time or body `sample_us`. A head reboot resets its
+camera sequence but changes both the JPEG boot and `GET /api/pose`
+`head_boot`. The Mac must not compare microsecond epochs across devices.
+The camera can bracket one stationary, motor-disarmed pose estimate only
+with fresh ordered pose before and after the JPEG, equal body boot and
+origin, equal head boot, no intervening movement or pickup, and measured
+source-to-optical latency bounds. Never treat an uncalibrated bracket as
+navigation authorization. Actual optical lag and audio/camera coexistence
+require physical measurement and remain unqualified.
+
+### Spatial navigation, recall, and voice-deferred routes
+
+- `GET /v1/robots/{robot_id}/spatial/grid` (tool/operator bearer): read-only `SpatialGrid` summary (origin/epoch, anchor status, cell counts, expiry); always returns `navigation_authorized=false`, `motor_authorized=false`, `charging_authorized=false`, `physical_acceptance_pass=false`.
+- `GET /v1/robots/{robot_id}/spatial/memory?object_key=<key>` (tool/operator bearer): read-only `SpatialMemory` recall respecting `voice_memory_tools_enabled` consent in `hardware` mode; distinguishes `pending_localization`, `historical`, `stale`, `invalid_origin`, and `unknown`.
+- `POST /v1/robots/{robot_id}/navigate` (operator bearer, `202`): bounded route or object-search execution via `Coordinator.navigate()`. Requires `motion_enabled=true`, `spatial_navigation_qualified=true` (both `false` by default), anchored/current `SpatialGrid`, valid preflight, and live `PoseFence` + WROOM status revalidation before every drive pulse. Halts on pickup (`handling_tilt`), WROOM fault, voice barge-in, replayed/mismatched pose, or unanchored cells.
+- `?defer_on_voice=true` on `/move`, `/explore`, `/pickup`, and `/navigate`: enqueues one bounded deferred motion request while human speech is active, consuming and retiring any pre-speech permit and re-running fresh hardware preflight after `speech_end`. Any `STOP`, voice monitor outage, fault, dock seating contact, or revoked consent discards the queued entry without driving.
+- Fail-closed `RobotConfig` flags defaulting to `false`: `autonomous_low_battery_dock_enabled`, `spatial_navigation_qualified`, and `object_detector_qualified`.

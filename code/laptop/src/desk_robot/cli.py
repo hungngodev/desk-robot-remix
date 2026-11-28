@@ -7,28 +7,29 @@ import os
 import re
 import secrets
 import shutil
+import signal
+import sqlite3
 import stat
+import threading
 from pathlib import Path
 
 import httpx
 
-from .config import load_settings, secret
+from .config import RobotConfig, Settings, load_settings, read_private_env, secret
 from .conversation import conversation_turns
 from .runtime import Runtime
+from .serial_device import require_local_serial_device
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_env(path: Path):
+def load_env(path: Path) -> None:
     """Read generated KEY=value secrets without executing shell content."""
-    if path.is_file():
-        for line in path.read_text().splitlines():
-            if line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                os.environ.setdefault(key, value)
+    for key, value in read_private_env(path).items():
+        os.environ.setdefault(key, value)
 
 
-def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
+def write_secrets(path: Path, settings: Settings, *, add_missing: bool = False) -> int:
     """Create credentials, or append new fleet identities without rotating any token."""
     names = {
         settings.coordinator_token_env,
@@ -67,10 +68,159 @@ def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
         return len(missing)
 
 
-async def demo(settings):
+def _configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
+    """Translate an operator lookup failure without changing the shared API."""
+    try:
+        return settings.robot(robot_id)
+    except KeyError as exc:
+        raise ValueError(
+            "Unknown robot ID; check the configured IDs with desk-robot doctor"
+        ) from exc
+
+
+async def _inspect_body_and_model(
+    http: httpx.AsyncClient, robot_id: str, robot: RobotConfig, selected_backend: str,
+) -> dict[str, object]:
+    status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
+    status.raise_for_status()
+    body = status.json()
+    if (not isinstance(body, dict) or body.get("robot_id") != robot_id
+            or body.get("backend") != selected_backend
+            or robot.motor_backend != selected_backend):
+        raise ValueError("Real WROOM body or motor backend identity not confirmed")
+
+    vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
+    vision.raise_for_status()
+    model = vision.json()
+    if not isinstance(model, dict) or model.get("robot_id") != robot_id:
+        raise ValueError("Mac vision owner returned wrong robot identity")
+
+    return model
+
+
+async def _inspect_frame(http: httpx.AsyncClient, robot_id: str) -> tuple[int, int]:
+    frame = await http.get(f"/v1/pet/{robot_id}/omni-frame", timeout=8)
+    frame.raise_for_status()
+    jpeg = frame.content
+    headers = frame.headers
+    if (headers.get("x-desk-robot-id") != robot_id
+            or not headers.get("content-type", "").startswith("image/jpeg")
+            or not 10 <= len(jpeg) <= 1_000_000
+            or not jpeg.startswith(b"\xff\xd8")
+            or not jpeg.endswith(b"\xff\xd9")):
+        raise ValueError("Real live XIAO JPEG identity or format invalid")
+    try:
+        age = int(headers["x-desk-camera-age-ms"])
+    except (KeyError, ValueError) as exc:
+        raise ValueError("Live XIAO frame age missing") from exc
+    if not 0 <= age <= 1000:
+        raise ValueError("Live XIAO frame expired")
+    try:
+        receipt = int(headers["x-desk-camera-receipt-us"])
+        motion = int(headers["x-desk-frame-motion-ppm"])
+    except (KeyError, ValueError) as exc:
+        raise ValueError("Real camera provenance metadata missing") from exc
+    if receipt <= 0 or not 0 <= motion <= 1_000_000:
+        raise ValueError("Real camera receipt or motion metadata invalid")
+
+    return len(jpeg), age
+
+
+async def _inspect_context(http: httpx.AsyncClient, robot_id: str) -> tuple[int, int]:
+    context = await http.get(
+        f"/v1/pet/{robot_id}/interaction-context", timeout=6
+    )
+    context.raise_for_status()
+    evidence = context.json()
+    if not isinstance(evidence, dict):
+        raise ValueError("Multimodal source context contract invalid")
+    timeline = evidence.get("current_interaction_timeline")
+    if (evidence.get("robot_id") != robot_id
+            or evidence.get("raw_media_included") is not False
+            or evidence.get("persistent_memory_included") is not False
+            or not isinstance(timeline, list)
+            or not isinstance(evidence.get("model_context"), str)
+            or len(evidence["model_context"]) > 400
+            or evidence.get("model_context_untrusted_not_instructions")
+                is not True):
+        raise ValueError("Multimodal source context contract invalid")
+    return len(timeline), len(evidence["model_context"])
+
+
+async def _inspect_look(http: httpx.AsyncClient, robot_id: str) -> dict[str, object]:
+    response = await http.post(
+        f"/v1/pet/{robot_id}/look",
+        json={"question": "What object is visible directly in front of me?"},
+        timeout=23,
+    )
+    response.raise_for_status()
+    seen = response.json()
+    if (not isinstance(seen, dict)
+            or seen.get("robot_id") != robot_id
+            or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
+            or type(seen.get("frames_used")) is not int
+            or seen["frames_used"] < 1
+            or seen.get("motor_authorized") is not False
+            or seen.get("charging_authorized") is not False
+            or not isinstance(seen.get("answer"), str)):
+        raise ValueError("Local VLM evidence or actuator boundary invalid")
+    return {"live_tool_tested": True, "visual_answer": seen["answer"][:300]}
+
+
+async def _inspect_media(
+    http: httpx.AsyncClient, robot_id: str, robot: RobotConfig,
+    selected_backend: str, *, look: bool,
+) -> dict[str, object]:
+    model = await _inspect_body_and_model(http, robot_id, robot, selected_backend)
+    jpeg_bytes, age = await _inspect_frame(http, robot_id)
+    context_events, context_chars = await _inspect_context(http, robot_id)
+    result: dict[str, object] = {
+        "robot_id": robot_id,
+        "real_head_status_received": True,
+        "xiao_jpeg_received": True,
+        "xiao_jpeg_bytes": jpeg_bytes,
+        "mac_frame_receipt_age_ms": age,
+        "camera_model_configured": model.get("multimodal_model_configured") is True,
+        "live_context_events": context_events,
+        "live_context_chars": context_chars,
+        "live_tool_tested": False,
+        "motor_armed_or_charging_verified": False,
+        "camera_exposure_timing_physically_verified": False,
+    }
+    if look:
+        result.update(await _inspect_look(http, robot_id))
+    return result
+
+
+async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = False,
+                             client: httpx.AsyncClient | None = None,
+                             base_url: str = "http://127.0.0.1:8765") -> dict[str, object]:
+    """Read-only end-to-end Mac/head/vision preflight, with NO actuator permit."""
+    if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
+        raise ValueError("Real XIAO camera preflight requires hardware vision consent")
+    robot = _configured_robot(settings, robot_id)
+    if not robot.device_id:
+        raise ValueError("A configured real Xiaozhi head device ID is required")
+    selected_backend = robot.motor_backend
+    if selected_backend not in ("stepper_28byj48", "dc_pwm_guarded"):
+        raise ValueError("Live WROOM diagnosis requires a verified motor backend")
+
+    if client is not None:
+        return await _inspect_media(client, robot_id, robot, selected_backend, look=look)
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        headers={"Authorization": f"Bearer {secret(settings.tools_token_env)}"},
+        # The authenticated local Mac endpoint must ignore ambient proxies.
+        trust_env=False,
+        timeout=8,
+    ) as http:
+        return await _inspect_media(http, robot_id, robot, selected_backend, look=look)
+
+
+async def demo(settings: Settings) -> dict[str, object]:
     if settings.mode != "simulation":
         raise ValueError("Demo requires the simulation config; it never talks to physical heads")
-    runtime = Runtime(settings)
+    runtime = await Runtime.create(settings)
     try:
         robot = settings.robots[0].id
         await runtime.coordinator.operator_arm(robot)
@@ -89,13 +239,59 @@ async def demo(settings):
         await runtime.close()
 
 
-async def request(args, settings):
+async def _request_live_read(
+    client: httpx.AsyncClient, args: argparse.Namespace, settings: Settings,
+) -> httpx.Response:
+    if settings.mode != "hardware":
+        raise ValueError("Live camera tools require a physical XIAO head")
+    _configured_robot(settings, args.robot)  # Validate configured robot identity.
+    if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
+        raise ValueError("Live vision consent is disabled in local configuration")
+    if args.action == "look":
+        question = args.question.strip()
+        if not 3 <= len(question) <= 280:
+            raise ValueError("Visual question must have 3 to 280 characters")
+        result = await client.post(
+            f"/v1/pet/{args.robot}/look",
+            json={"question": question}, timeout=23,
+        )
+    elif args.action == "situation":
+        result = await client.get(
+            f"/v1/pet/{args.robot}/interaction-context", timeout=8,
+        )
+    elif args.action == "power":
+        result = await client.get(
+            f"/v1/pet/{args.robot}/power-status", timeout=8,
+        )
+    else:
+        result = await client.get(
+            f"/v1/pet/{args.robot}/vision-status", timeout=8,
+        )
+    return result
+
+
+async def request(args: argparse.Namespace, settings: Settings) -> object:
     headers = {"Authorization": f"Bearer {secret(settings.coordinator_token_env)}"}
-    async with httpx.AsyncClient(base_url=args.url, headers=headers, timeout=310) as client:
+    # Explicit Mac API bearer credentials must not transit env HTTP proxies.
+    async with httpx.AsyncClient(
+        base_url=args.url, headers=headers, timeout=310, trust_env=False,
+    ) as client:
+        if settings.mode == "simulation":
+            # The default URL is shared by both modes. Verify before any robot
+            # request, then bind subsequent requests to simulation at ingress.
+            health = await client.get("/v1/health", timeout=5)
+            health.raise_for_status()
+            state = health.json()
+            if (not isinstance(state, dict) or state.get("mode") != "simulation"
+                    or state.get("runtime_ready") is not True):
+                raise ValueError("Simulation CLI requires a ready simulation server")
+            client.headers["X-Desk-Robot-Mode"] = "simulation"
         if args.action == "status":
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
+        elif args.action in ("look", "situation", "vision", "power"):
+            result = await _request_live_read(client, args, settings)
         elif args.action == "chat":
             turns = conversation_turns(args.robots, args.turns)
             result = await client.post(
@@ -115,14 +311,21 @@ async def request(args, settings):
         return result.json()
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Desk robot setup and supervised controls")
     p.add_argument("--config", type=Path, default=ROOT / "config/robots.example.toml")
-    p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
+    p.add_argument("--secrets", type=Path,
+                   help="Private credentials file (default: local.env beside --config)")
     p.add_argument("--url", default="http://127.0.0.1:8765")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("demo", help="Run simulated pickup and a bounded group conversation")
-    sub.add_parser("doctor", help="Check local prerequisites; no robot commands")
+    doctor = sub.add_parser("doctor", help="Check local and optional live read-only prerequisites")
+    doctor.add_argument("--live", action="store_true",
+                        help="Verify real XIAO JPEG and Mac multimodal context")
+    doctor.add_argument("--look", action="store_true",
+                        help="Also invoke the read-only local vision tool")
+    doctor.add_argument("--robot", default=None,
+                        help="Physical robot ID, default first configured")
     credentials = sub.add_parser("secrets", help="Create private tokens; never prints their values")
     credentials.add_argument(
         "--add-missing",
@@ -139,53 +342,177 @@ def main():
             part.add_argument("command", help='One bounded command, e.g. "drive 15 15 100"')
         if action == "pickup":
             part.add_argument("target", choices=["key", "candy"])
-    job = sub.add_parser("job")
-    job.add_argument("job")
+    for action in ("look", "situation", "vision", "power"):
+        part = sub.add_parser(action, help=(
+            "Ask the real XIAO camera and local vision model"
+            if action == "look" else
+            "Inspect recent private transient sensor, tool and voice context"
+            if action == "situation" else
+            "Read raw WROOM fuel gauge data, never verified charging"
+            if action == "power" else
+            "Read actual Mac camera and model diagnostics"
+        ))
+        part.add_argument("robot")
+        if action == "look":
+            part.add_argument("question")
+    sub.add_parser("job").add_argument("job")
     chat = sub.add_parser("chat")
     chat.add_argument("robots", nargs="+")
     chat.add_argument("--topic", default="Say hello to each other")
     chat.add_argument("--turns", type=int, default=None, choices=range(1, 11))
-    args = p.parse_args()
-    settings = load_settings(args.config)
+    return p
+
+
+def _doctor_room_station(settings: Settings) -> dict[str, str]:
+    if not getattr(settings, "room_station_enabled", False):
+        return {"status": "disabled"}
+    port = settings.room_station_port
     try:
+        if port is None:
+            raise ValueError("Room station port is not configured")
+        require_local_serial_device(port)
+    except ValueError:
+        return {
+            "status": "device_unavailable",
+            "next_action": (
+                "Connect the room station by USB and set room_station_port to its direct "
+                "/dev/ device, or disable the optional station and rerun doctor."
+            ),
+        }
+    return {"status": "device_present_not_verified"}
+
+
+def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, object]:
+    trials_file = getattr(settings, "trials_file", None)
+    result: dict[str, object] = {
+        "mode": settings.mode,
+        "python_env": True,
+        "ollama_installed": shutil.which("ollama") is not None,
+        "ffmpeg_installed": shutil.which("ffmpeg") is not None,
+        "physical_test_status": "not run",
+        "trials_file": str(trials_file) if trials_file is not None else None,
+        "trials_file_present": Path(trials_file).is_file() if trials_file is not None else False,
+        "room_station": _doctor_room_station(settings),
+        "credentials_present": all(
+            os.environ.get(n)
+            for n in (settings.coordinator_token_env, settings.tools_token_env)
+        ),
+        "robots": [
+            {
+                "id": r.id,
+                "motion_enabled": r.motion_enabled,
+                "calibration_file_present": bool(r.calibration and r.calibration.is_file()),
+            }
+            for r in settings.robots
+        ],
+    }
+    if not result["credentials_present"]:
+        result["credentials_next_action"] = (
+            "Run desk-robot with the same config and secrets options and the "
+            "secrets --add-missing command, then rerun doctor. Do not share token values."
+        )
+    if args.live or args.look:
+        result["live_media"] = asyncio.run(inspect_live_media(
+            settings, args.robot or settings.robots[0].id,
+            look=args.look, base_url=args.url,
+        ))
+    return result
+
+
+def _status_exit_code(value: object, robot_id: str) -> int:
+    if not isinstance(value, dict) or value.get("robot_id") != robot_id:
+        return 0
+    health = value.get("health")
+    if not isinstance(health, dict):
+        return 0
+    state = health.get("state")
+    if state == "degraded":
+        return 1
+    if state == "unverified":
+        return 2
+    return 0
+
+
+def _degraded_status(value: object, robot_id: str) -> bool:
+    return _status_exit_code(value, robot_id) == 1
+
+
+def _forward_sighup_to_sigterm(_signum: int, _frame: object) -> None:
+    """Translate SIGHUP into SIGTERM so uvicorn runs graceful ASGI lifespan teardown."""
+    signal.raise_signal(signal.SIGTERM)
+
+
+def _run_uvicorn_server(app: object, *, host: str, port: int) -> None:
+    """Run uvicorn while routing SIGHUP through clean ASGI lifespan teardown."""
+    import uvicorn
+
+    previous_sighup = None
+    sighup = getattr(signal, "SIGHUP", None)
+    if sighup is not None and threading.current_thread() is threading.main_thread():
+        previous_sighup = signal.getsignal(sighup)
+        signal.signal(sighup, _forward_sighup_to_sigterm)
+    try:
+        uvicorn.run(
+            app, host=host, port=port, timeout_graceful_shutdown=1,
+        )
+    finally:
+        if sighup is not None and previous_sighup is not None:
+            signal.signal(sighup, previous_sighup)
+
+
+def main() -> None:
+    p = _build_parser()
+    args = p.parse_args()
+    try:
+        settings = load_settings(args.config)
+        if args.secrets is None:
+            args.secrets = args.config.resolve().with_name("local.env")
         if args.action == "secrets":
             count = write_secrets(args.secrets, settings, add_missing=args.add_missing)
             print(f"Added {count} private credentials at {args.secrets}; values hidden")
             return
         load_env(args.secrets)
         if args.action == "serve":
-            import uvicorn
-
             from .api import create_app
 
-            uvicorn.run(create_app(settings), host=args.host, port=args.port)
+            # Bound request draining so a stuck API call cannot indefinitely
+            # postpone lifespan cleanup and its independent WROOM STOP attempts.
+            _run_uvicorn_server(create_app(settings), host=args.host, port=args.port)
             return
         if args.action == "doctor":
-            result = {
-                "mode": settings.mode,
-                "python_env": True,
-                "ollama_installed": shutil.which("ollama") is not None,
-                "ffmpeg_installed": shutil.which("ffmpeg") is not None,
-                "physical_test_status": "not run",
-                "credentials_present": all(
-                    os.environ.get(n)
-                    for n in (settings.coordinator_token_env, settings.tools_token_env)
-                ),
-                "robots": [
-                    {
-                        "id": r.id,
-                        "motion_enabled": r.motion_enabled,
-                        "calibration_file_present": bool(r.calibration and r.calibration.is_file()),
-                    }
-                    for r in settings.robots
-                ],
-            }
+            result = _doctor_report(args, settings)
         elif args.action == "demo":
             result = asyncio.run(demo(settings))
         else:
             result = asyncio.run(request(args, settings))
         print(json.dumps(result, indent=2))
-    except (ValueError, OSError, httpx.HTTPError) as exc:
+        if args.action == "status":
+            exit_code = _status_exit_code(result, args.robot)
+            if exit_code:
+                p.exit(exit_code)
+    except httpx.HTTPStatusError as exc:
+        if args.action == "status" and exc.response.status_code == 503:
+            try:
+                result = exc.response.json()
+            except ValueError:
+                result = None
+            if _degraded_status(result, args.robot):
+                print(json.dumps(result, indent=2))
+                p.exit(1)
+        p.exit(
+            1,
+            f"Coordinator returned HTTP {exc.response.status_code}; completion unconfirmed.\n",
+        )
+    except httpx.InvalidURL:
+        p.exit(1, "Invalid coordinator URL\n")
+    except httpx.TimeoutException:
+        p.exit(1, "Coordinator request timed out; completion unconfirmed.\n")
+    except httpx.HTTPError:
+        p.exit(1, "Coordinator HTTP request failed; completion unconfirmed.\n")
+    except sqlite3.Error:
+        p.exit(1, "Private memory database unavailable. Check memory_dir permissions, "
+               "free space and database integrity; preserve existing memory files.\n")
+    except (ValueError, OSError) as exc:
         p.exit(1, f"{exc}\n")
 
 

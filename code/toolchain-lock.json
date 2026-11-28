@@ -3,13 +3,104 @@
   "esp_idf": {
     "url": "https://github.com/espressif/esp-idf.git",
     "branch": "release/v6.1",
-    "commit": "9a97f6c54ec638111ce55cd36581b3c192f15207"
+    "commit": "9a97f6c54ec638111ce55cd36581b3c192f15207",
+    "docker_image": "espressif/idf:v6.1@sha256:81893c71bb5e570088901f21def8684c25cd2a9020281bd01b843a7655edb18c"
   },
   "body": {
     "platformio": "6.1.18",
     "espressif32": "6.9.0",
-    "arduino_esp32": "2.0.17"
+    "arduino_esp32": "2.0.17",
+    "vl53l0x_arduino": {
+      "url": "https://github.com/pololu/vl53l0x-arduino.git",
+      "version": "1.3.1",
+      "commit": "9f3773cb48d4e4e844d689cfc529a06f96d1d264"
+    },
+    "platform_packages": {
+      "platformio/framework-arduinoespressif32": "3.20017.241212+sha.dcc1105b",
+      "espressif/toolchain-xtensa-esp32": "8.4.0+2021r2-patch5"
+    }
   },
-  "python": "3.12.2",
-  "head_verification_wake_word": "disabled"
+  "python": "3.11",
+  "head_verification_wake_word": "disabled",
+  "dock": {
+    "atmelavr": "5.1.0",
+    "platform_packages": {
+      "platformio/framework-arduino-avr": "5.2.0",
+      "platformio/toolchain-atmelavr": "1.70300.191015"
+    },
+    "direct_libraries": {
+      "IRremote": {
+        "url": "https://github.com/Arduino-IRremote/Arduino-IRremote.git",
+        "version": "4.7.1",
+        "commit": "498dc591b255d8ba2e239c875804bdab2ab0fe91"
+      }
+    }
+  },
+  "room_station": {
+    "nordicnrf52": "10.6.0",
+    "platform_packages": {
+      "platformio/framework-arduinoadafruitnrf52": "1.10601.0",
+      "platformio/framework-cmsis": "2.50700.210515",
+      "platformio/toolchain-gccarmnoneeabi": "1.70201.0"
+    },
+    "platformio": "6.1.18",
+    "inventory_baseline_run": 46051423168,
+    "direct_libraries": {
+      "Sensirion I2C SCD4x": {
+        "url": "https://github.com/Sensirion/arduino-i2c-scd4x.git",
+        "version": "1.1.0",
+        "commit": "fd169d39a3dd342ba05feef92d69c36fb3a340ee",
+        "notice": "https://github.com/Sensirion/arduino-i2c-scd4x/blob/fd169d39a3dd342ba05feef92d69c36fb3a340ee/LICENSE"
+      },
+      "Adafruit BME680 Library": {
+        "url": "https://github.com/adafruit/Adafruit_BME680.git",
+        "version": "2.0.5",
+        "commit": "f0c5494a6eff3abcf94e7548cc61f9787aea50f5",
+        "notice": "https://github.com/adafruit/Adafruit_BME680/blob/f0c5494a6eff3abcf94e7548cc61f9787aea50f5/README.md",
+        "additional_notices": [
+          "https://github.com/adafruit/Adafruit_BME680/blob/f0c5494a6eff3abcf94e7548cc61f9787aea50f5/bme68x.c"
+        ]
+      },
+      "ld2410": {
+        "url": "https://github.com/ncmreynolds/ld2410.git",
+        "version": "0.2.2",
+        "commit": "9e202ad6f2340bc79ee0dd802e1ef58b0ae2cfa2",
+        "notice": "https://github.com/ncmreynolds/ld2410/blob/9e202ad6f2340bc79ee0dd802e1ef58b0ae2cfa2/LICENSE"
+      },
+      "Adafruit AMG88xx Library": {
+        "url": "https://github.com/adafruit/Adafruit_AMG88xx.git",
+        "version": "1.3.2",
+        "commit": "d857b8e68dd52026c3dd8e792e7424812ec77043",
+        "notice": "https://github.com/adafruit/Adafruit_AMG88xx/blob/d857b8e68dd52026c3dd8e792e7424812ec77043/README.md"
+      }
+    },
+    "transitive_libraries": {
+      "Sensirion Core": "0.7.3",
+      "Adafruit Unified Sensor": "1.1.15",
+      "Adafruit GFX Library": "2.0.0",
+      "Adafruit BusIO": "1.17.4",
+      "Adafruit SSD1306": "2.5.17",
+      "Adafruit ST7735 and ST7789 Library": "1.12.0",
+      "Adafruit seesaw Library": "1.7.10",
+      "Adafruit ILI9341": "1.7.0",
+      "Adafruit STMPE610": "1.1.6",
+      "Adafruit TouchScreen": "1.1.6",
+      "Adafruit TSC2007": "1.1.2",
+      "Adafruit SH110X": "2.1.15"
+    },
+    "transitive_notice_sources": {
+      "Sensirion Core": "https://github.com/Sensirion/arduino-core/blob/6c087aae9e11c66e2b01a0c79d9f1632e1821b65/LICENSE",
+      "Adafruit Unified Sensor": "https://github.com/adafruit/Adafruit_Sensor/blob/0a9127a1e886ff1adb4c1b6f5958b24108d55aa6/LICENSE.txt",
+      "Adafruit GFX Library": "https://github.com/adafruit/Adafruit-GFX-Library/blob/249bc2b105bdeb0022f7e4762e77a38e94aa0d7b/license.txt",
+      "Adafruit BusIO": "https://github.com/adafruit/Adafruit_BusIO/blob/3b8364267c3ee6e16bad91bc2101aefbd5b5915f/LICENSE",
+      "Adafruit SSD1306": "https://github.com/adafruit/Adafruit_SSD1306/blob/d94f699451d72286357cba7259055ffff2c2940b/license.txt",
+      "Adafruit ST7735 and ST7789 Library": "https://github.com/adafruit/Adafruit-ST7735-Library/blob/d568339f957380ceb05dda57f6712c2704a6394f/README.txt",
+      "Adafruit seesaw Library": "https://github.com/adafruit/Adafruit_Seesaw/blob/9f71ddb057d527bdf5655ee19dcfe80eb9d1759f/Adafruit_seesaw.cpp",
+      "Adafruit ILI9341": "https://github.com/adafruit/Adafruit_ILI9341/blob/1871d9597f0d67cd15e3a331b8952c5dd3d3c418/README.md",
+      "Adafruit STMPE610": "https://github.com/adafruit/Adafruit_STMPE610/blob/3707ff5e8ff9149f352626d217e7255812df010f/LICENSE",
+      "Adafruit TouchScreen": "https://github.com/adafruit/Adafruit_TouchScreen/blob/b64e777d8f6e321ba2ed726412955dd2ae8d26e0/license.txt",
+      "Adafruit TSC2007": "https://github.com/adafruit/Adafruit_TSC2007/blob/99a91e05758fd7aa440773562f9506e94655c788/license.txt",
+      "Adafruit SH110X": "https://github.com/adafruit/Adafruit_SH110x/blob/f29762e0c2de7d31364acb427b3b69efc7b8913e/license.txt"
+    }
+  }
 }

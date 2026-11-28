@@ -2,7 +2,7 @@
   "checked_at": "2026-11-03",
   "store": "Amazon US (.com); shipping location/eligibility may change offers",
   "procurement_preference": "Amazon if possible",
-  "scope": "Candidate first-prototype purchases; no cart/order created",
+  "scope": "Historical 2026-11-03 five-sensor, owned-power-bank prototype basket; superseded, not a current purchase list; no cart/order created",
   "items": [
     {
       "component": "XIAO ESP32S3 Sense camera/mic bundle",
@@ -75,6 +75,6 @@
   "over_cap_before_charges": true,
   "purchase_ready": false,
   "existing_supplier_target_usd": 35.36,
-  "note": "Compare whole pack outlay, not only used-unit cost. Direct-supplier target refreshed to35.36USD; see supplier-comparison.json. Bare S3 plus microphone9.58USD was an incomplete supplier subtotal without a compatible camera/interface, not a qualified lower-cost head. Amazon-only first prototype exceeds cap even before allowances/charges. No purchase, cap increase, or component substitution authorized by this record.",
+  "note": "Compare whole pack outlay, not only used-unit cost. Direct-supplier target refreshed to35.36USD; see supplier-comparison.json. Bare S3 plus microphone9.58USD was an incomplete supplier subtotal without a compatible camera/interface, not a qualified lower-cost head. Amazon-only first prototype exceeds cap even before allowances/charges. No purchase, cap increase, or component substitution authorized by this record. The current eight-sensor, two-mux, rechargeable-power design and selected speaker are specified in hardware/full-feature-plan.json; do not reuse the archived quantities or prices as a current checkout estimate.",
   "comparison": "hardware/archive/supplier-comparison.json"
 }

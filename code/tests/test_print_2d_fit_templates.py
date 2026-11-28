@@ -1,0 +1,800 @@
+"""Real A4 page scale and failure on changed source, never fictitious holes."""
+import importlib.util
+import os
+import shutil
+import subprocess
+from decimal import Decimal
+from hashlib import sha256
+from pathlib import Path
+from struct import unpack_from
+from xml.etree import ElementTree
+
+import pytest
+
+SCRIPT = (Path(__file__).resolve().parents[2] /
+          "docs/cad/remixes/print_2d_fit_templates.py")
+
+
+def load():
+    spec = importlib.util.spec_from_file_location("paper_fit_templates", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def setup_sources(tmp_path):
+    data = {
+        "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad":
+            "board_x = 10.5;\nboard_y = 13.3;\n",
+        "docs/cad/remixes/speaker_rect_fit_gauge.scad":
+            "speaker_l=20;\nspeaker_w=16;\n",
+        "docs/cad/remixes/dock/dock_passive_fit.scad":
+            "tag_black_side_mm = 60;\ntag_white_margin_each_mm=5;\n"
+            "tag_paper_slack_each_mm=0.6;\n"
+            "track_outer_width_mm=96;\nside_clearance_each_mm=2;\n"
+            "base_length_mm=138;\nguide_run_mm=107;\nbase_thickness_mm=3;\n"
+            "backstop_thickness_mm=5;\nentry_coupon_length_mm=48;\n"
+            "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
+            "entry_flare_each_mm=7;\nentry_flare_run_mm=37;\nguide_height_mm=12;\n"
+            "backstop_brace_depth_mm=8;\nbackstop_brace_height_mm=10;\n"
+            "backstop_height_mm=90;\n"
+            "tag_recess_depth_mm=0.8;\ntag_bottom_z_mm=16;\n",
+        "docs/cad/remixes/remaining_fit_gauges.scad":
+            "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
+            "candidate_pack_body_w_mm = 30;\ncandidate_pack_body_h_mm = 7.4;\n"
+            "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
+            "base = 2.8;\ntray_strap_slot_w = 3.2;\n"
+            "m3_clearance = 3.4;\n"
+            "tray_tab_l_mm = 8;\ntray_tab_w_mm = 9;\ntray_tab_offset_mm = 5;\n",
+    }
+    for name, contents in data.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+
+
+@pytest.mark.parametrize("alias", ("output", "ancestor", "manifest", "page"))
+def test_a4_export_and_verify_reject_symlink_aliases_before_writes(
+    tmp_path, alias,
+):
+    source = load()
+    setup_sources(tmp_path)
+    # A fixture may run as root: make the parent explicitly mutable so an
+    # accidental root-owned test symlink is not a trusted system /var alias.
+    tmp_path.chmod(0o777)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "private.txt"
+    sentinel.write_text("unchanged", encoding="utf-8")
+    output = tmp_path / "paper"
+    if alias == "output":
+        output.symlink_to(outside, target_is_directory=True)
+    elif alias == "ancestor":
+        (outside / "nested").mkdir()
+        pivot = tmp_path / "pivot"
+        pivot.symlink_to(outside, target_is_directory=True)
+        output = pivot / "nested"
+    else:
+        output.mkdir()
+        target_name = ("paper_manifest.json" if alias == "manifest"
+                       else "ranger_reference_A4.svg")
+        (output / target_name).symlink_to(sentinel)
+
+    with pytest.raises(ValueError, match="Symlinked paper template output"):
+        source.export(tmp_path, output)
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
+    assert not (outside / "speaker_reference_A4.svg").exists()
+    with pytest.raises(ValueError, match="Symlinked paper template output"):
+        source.verify(tmp_path, output)
+
+
+def test_a4_real_scale_and_source_dimensions(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    report = source.export(tmp_path, output)
+    assert report["source_dimensions_mm"] == {
+        "ranger": [10.5, 13.3], "speaker": [20, 16],
+        "dock": [60, 70, 71.2],
+        "dock_guide": [126, 138, 107, 5, 8, 7, 100, 37],
+        "power": [86, 35, 91.6, 40.6, 8, 9, 5],
+    }
+    assert len(report["pages"]) == 5
+    assert report["approved_drill_holes"] == 0
+    assert report["actual_fit_verified"] is False
+    for filename in report["pages"]:
+        data = (output / filename).read_text()
+        root = ElementTree.fromstring(data)
+        assert root.attrib["width"] == "210mm"
+        assert root.attrib["height"] == "297mm"
+        assert root.attrib["viewBox"] == "0 0 210 297"
+        assert 'width="100" height="8"' in data
+        assert 'width="50" height="8"' in data
+        assert 'width="8" height="25"' in data
+        assert "FRONT / TOP" in data and "BACK / BOTTOM" in data
+        assert "NOT FOR DRILLING" in data
+    assert 'width="71.2" height="71.2"' in (
+        output / "dock_reference_A4.svg").read_text()
+    power = (output / "power_reference_A4.svg").read_text()
+    assert 'width="86" height="35"' in power
+    assert 'width="91.6" height="40.6"' in power
+    assert '<rect x="51.2" y="93" width="8" height="9"' in power
+    assert '<rect x="150.8" y="114.6" width="8" height="9"' in power
+    assert "Overall span including tabs: 107.6 x 40.6 mm" in power
+    assert "EXCLUDES leads, NTC, PCM overhang" in power
+    assert "No mounting holes, complete pack fit or charging approved." in power
+    rail = (output / "dock_guide_reference_A4.svg").read_text()
+    assert 'width="126" height="138"' in rail
+    assert '<polygon points="43,51 48,51 55,88 55,158 50,158 50,88"' in rail
+    assert '<polygon points="167,51 162,51 155,88 155,158 160,158 160,88"' in rail
+    assert "channel: 100 mm" in rail
+    assert "ENTRY at TOP, BACKSTOP at BOTTOM" in rail
+    assert source.verify(tmp_path, output) == report
+
+
+def test_changed_source_and_tampered_svg_refuse_verification(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    source.export(tmp_path, output)
+    page = output / "speaker_reference_A4.svg"
+    page.write_bytes(page.read_bytes().replace(b'width="20"', b'width="21"'))
+    with pytest.raises(ValueError, match="altered paper page"):
+        source.verify(tmp_path, output)
+    source.export(tmp_path, output)
+    scad = tmp_path / "docs/cad/remixes/speaker_rect_fit_gauge.scad"
+    scad.write_text(scad.read_text().replace("speaker_l=20", "speaker_l=21"))
+    with pytest.raises(ValueError, match="source, dimensions or manifest changed"):
+        source.verify(tmp_path, output)
+
+
+def test_larger_dock_pocket_must_not_overprint_a4_captions(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    modified = scad.read_text(encoding="utf-8")
+    modified = modified.replace("tag_black_side_mm = 60;",
+                                "tag_black_side_mm = 75;")
+    modified = modified.replace("tag_white_margin_each_mm=5;",
+                                "tag_white_margin_each_mm=10;")
+    # Keep the CAD backstop tall enough to isolate the A4 layout failure.
+    modified = modified.replace("backstop_height_mm=90;", "backstop_height_mm=120;")
+    scad.write_text(modified, encoding="utf-8")
+    # Pocket 96.2 mm ends at y=172.2, crossing the first caption at 171.
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock pocket outline exceeds A4"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_missing_or_ambiguous_measurement_fails_closed(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(scad.read_text().replace("tag_black_side_mm = 60;", ""))
+    with pytest.raises(ValueError, match="Missing or ambiguous"):
+        source.export(tmp_path, tmp_path / "paper")
+    assert not (tmp_path / "paper").exists()
+
+
+@pytest.mark.parametrize(("filename", "before", "after"), [
+    ("docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
+     "board_x = 10.5;", "board_x = 250;"),
+    ("docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
+     "board_x = 10.5;", "board_x = 200;"),
+    ("docs/cad/remixes/speaker_rect_fit_gauge.scad",
+     "speaker_w=16;", "speaker_w=90;"),
+])
+def test_a4_nominal_outline_cannot_clip_or_overlap_legend(
+    tmp_path, filename, before, after,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / filename
+    scad.write_text(scad.read_text().replace(before, after), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="exceeds A4 printable layout"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+def test_power_overlay_rejects_undersized_candidate_pack_layout(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_l = 86;", "power_l = 68;"))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="shorter than candidate protected pack"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_power_overlay_rejects_a4_label_collision(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_w = 35;", "power_w = 90;"))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power outline exceeds A4 printable layout"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("stale_name", [
+    "obsolete_holes_reference_A4.svg",
+    "old_layout.SVG",
+])
+def test_a4_export_verify_refuse_undeclared_stale_svg_before_writes(
+    tmp_path, stale_name,
+):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    output.mkdir()
+    stale = output / stale_name
+    sentinel = b"STALE UNVERIFIED DRILL ARTIFACT MUST NOT BE PUBLISHED"
+    stale.write_bytes(sentinel)
+    with pytest.raises(ValueError, match="Undeclared A4 paper template"):
+        source.export(tmp_path, output)
+    assert stale.read_bytes() == sentinel
+    assert not (output / "paper_manifest.json").exists()
+    assert not (output / "power_reference_A4.svg").exists()
+    with pytest.raises(ValueError, match="Undeclared A4 paper template"):
+        source.verify(tmp_path, output)
+
+
+@pytest.mark.parametrize("old, replacement, message", [
+    ("track_outer_width_mm=96;", "track_outer_width_mm=190;",
+     "Dock guide outline exceeds A4 printable layout"),
+    ("base_length_mm=138;", "base_length_mm=240;",
+     "Dock guide outline exceeds A4 printable layout"),
+    ("entry_flare_each_mm=7;", "entry_flare_each_mm=9;",
+     "Invalid nominal dock guide rail dimensions"),
+])
+def test_a4_dock_guide_refuses_impossible_or_clipped_source_layout(
+    tmp_path, old, replacement, message,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(scad.read_text().replace(old, replacement))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("track_width", [60, 67.2])
+def test_a4_tag_pocket_must_fit_strictly_inside_dock_rail_channel(
+    tmp_path, track_width,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(
+        scad.read_text(encoding="utf-8").replace(
+            "track_outer_width_mm=96;", f"track_outer_width_mm={track_width};"
+        ),
+        encoding="utf-8",
+    )
+    # The source pocket is 71.2 mm. These channels are 64 and 71.2 mm,
+    # both rejected by dock_passive_fit.scad's strict channel assertion.
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock tag pocket exceeds nominal rail channel"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("before", "after"), [
+    ("base_length_mm=138;", "base_length_mm=110;"),
+    ("base_length_mm=138;", "base_length_mm=112;"),
+    ("guide_run_mm=107;", "guide_run_mm=45;"),
+    ("entry_coupon_length_mm=48;", "entry_coupon_length_mm=107;"),
+])
+def test_a4_dock_rejects_impossible_backstop_or_entry_coupon(
+    tmp_path, before, after,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(
+        scad.read_text(encoding="utf-8").replace(before, after),
+        encoding="utf-8",
+    )
+    output = tmp_path / "paper"
+    with pytest.raises(
+        ValueError, match="Invalid dock backstop or entry coupon dimensions"
+    ):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 60;",
+     "Power outline exceeds A4 printable layout"),
+    ("tray_tab_offset_mm = 5;", "tray_tab_offset_mm = 40;",
+     "Power tab exceeds tray body width"),
+])
+def test_a4_power_tabs_cannot_clip_or_leave_tray_body(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.4;"),
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3;"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.4;"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3;"),
+    ("m3_clearance = 3.4;", "m3_clearance = 8;"),
+])
+def test_a4_power_tabs_must_exceed_mounting_bore(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power tab must exceed mounting bore"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tabs_with_printable_web_remain_provisional(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(
+        scad.read_text().replace("tray_tab_l_mm = 8;", "tray_tab_l_mm = 7.5;")
+        .replace("tray_tab_w_mm = 9;", "tray_tab_w_mm = 7.5;"),
+        encoding="utf-8",
+    )
+    manifest = source.export(tmp_path, tmp_path / "paper")
+    assert manifest["source_dimensions_mm"]["power"][4:6] == [7.5, 7.5]
+    assert manifest["approved_drill_holes"] == 0
+    assert manifest["actual_fit_verified"] is False
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("candidate_pack_body_l_mm = 86;\npower_l = 86;",
+     "candidate_pack_body_l_mm = 20;\npower_l = 25;"),
+    ("power_l = 86;", "power_l = 150;"),
+    ("power_w = 35;", "power_w = 12;"),
+    ("power_w = 35;", "power_w = 100;"),
+    ("power_h = 14;", "power_h = 4;"),
+    ("power_h = 14;", "power_h = 60;"),
+])
+def test_a4_power_tray_requires_renderable_envelope(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power tray dimensions exceed OpenSCAD limits"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tray_rejects_missing_height(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_h = 14;", ""), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Missing or ambiguous source dimension: power_h"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("power_w = 35;", "power_w = 29.9;"),
+    ("power_h = 14;", "power_h = 7.3;"),
+])
+def test_a4_power_tray_rejects_undersized_body_axes(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="narrower or shallower than candidate protected pack"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tray_inside_envelope_remains_provisional(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(
+        scad.read_text().replace("power_w = 35;", "power_w = 30;")
+        .replace("power_h = 14;", "power_h = 7.4;"),
+        encoding="utf-8",
+    )
+    manifest = source.export(tmp_path, tmp_path / "paper")
+    assert manifest["source_dimensions_mm"]["power"][1] == 30
+    assert manifest["provisional_only"] is True
+    assert manifest["actual_fit_verified"] is False
+
+
+@pytest.mark.parametrize(("before", "after", "message"), [
+    ("backstop_brace_depth_mm=8;", "backstop_brace_depth_mm=30;",
+     "Invalid dock brace or guide geometry"),
+    ("backstop_brace_depth_mm=8;", "backstop_brace_depth_mm=26;",
+     "Invalid dock brace or guide geometry"),
+    ("backstop_brace_height_mm=10;", "backstop_brace_height_mm=100;",
+     "Invalid dock brace or guide geometry"),
+    ("guide_height_mm=12;", "guide_height_mm=0;",
+     "Out-of-range source dimension: guide_height_mm"),
+    ("guide_height_mm=12;", "",
+     "Missing or ambiguous source dimension: guide_height_mm"),
+])
+def test_a4_dock_requires_printable_brace_and_guide_height(
+    tmp_path, before, after, message,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(before) == 1
+    scad.write_text(original.replace(before, after), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("guide_height_mm=12;", "guide_height_mm=0.5;"),
+    ("guide_wall_mm=5;", "guide_wall_mm=0.5;"),
+    ("base_thickness_mm=3;", "base_thickness_mm=0.5;"),
+])
+def test_a4_dock_rejects_thin_base_or_guides(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert old in original
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock base or guide below printable minimum"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("wall = 2.4;", "wall = 0.5;", "wall or floor below printable"),
+    ("base = 2.8;", "base = 0.5;", "wall or floor below printable"),
+    ("fit_xy = 0.4;", "fit_xy = 0.1;", "wall or floor below printable"),
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.5;", "insufficient M3 web"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.5;", "insufficient M3 web"),
+    ("tray_strap_slot_w = 3.2;", "tray_strap_slot_w = 31;", "openings missing or intersecting"),
+])
+def test_a4_power_rejects_unprintable_tray_geometry(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert old in original
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("side_clearance_each_mm = 2;", "side_clearance_each_mm = 0.1;",
+     "Invalid nominal dock guide rail dimensions"),
+    ("side_clearance_each_mm = 2;", "side_clearance_each_mm = 8;",
+     "Invalid nominal dock guide rail dimensions"),
+    ("tag_white_margin_each_mm = 5;", "tag_white_margin_each_mm = 1;",
+     "Invalid dock paper/pocket dimensions"),
+    ("tag_paper_slack_each_mm = 0.6;", "tag_paper_slack_each_mm = 0.1;",
+     "Invalid dock paper/pocket dimensions"),
+    ("tag_black_side_mm = 60;", "tag_black_side_mm = 5;",
+     "Invalid dock paper/pocket dimensions"),
+])
+def test_a4_dock_rejects_source_clearances_and_tag_dimensions(tmp_path, old, new, message):
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = (SCRIPT.parent / "dock/dock_passive_fit.scad").read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        load().export(tmp_path, output)
+    assert not output.exists()
+    if shutil.which("openscad"):
+        rendered = subprocess.run(
+            ["openscad", "--hardwarnings", "-o", str(tmp_path / "dock.stl"), str(scad)],
+            capture_output=True, text=True, timeout=90,
+        )
+        assert rendered.returncode != 0
+
+
+@pytest.mark.parametrize("filename", ["paper_manifest.json", "ranger_reference_A4.svg"])
+@pytest.mark.parametrize("kind", ["hardlink", "fifo", "directory"])
+def test_a4_refuses_nonregular_or_hardlinked_artifacts(tmp_path, filename, kind):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    output.mkdir()
+    target = output / filename
+    outside = tmp_path / "unrelated"
+    outside.write_bytes(b"unchanged")
+    if kind == "hardlink":
+        target.hardlink_to(outside)
+    elif kind == "fifo":
+        os.mkfifo(target)
+    else:
+        target.mkdir()
+    with pytest.raises(ValueError, match="Nonregular or hardlinked paper template output"):
+        source.export(tmp_path, output)
+    with pytest.raises(ValueError, match="Nonregular or hardlinked paper template output"):
+        source.verify(tmp_path, output)
+    assert outside.read_bytes() == b"unchanged"
+    assert not (output / "speaker_reference_A4.svg").exists()
+
+
+@pytest.mark.parametrize("contents", [
+    "/*\nboard_x=10.5;\n*/\nboard_x=20+1;",
+    "board_x=10.5;\nboard_x=20+1;",
+    "board_x=10.5; board_x=21;",
+    "module example() {\nboard_x=10.5;\n}",
+    "board_x=10.5;\nmodule example() {\nboard_x=20+1;\n}",
+])
+def test_a4_rejects_commented_or_ambiguous_dimension(tmp_path, contents):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad"
+    scad.write_text(contents + "\nboard_y=13.3;\n", encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Missing or ambiguous source dimension: board_x"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_ignores_commented_and_quoted_assignment_text():
+    contents = (
+        "/*\nboard_x=8;\n*/\n// board_x=9;\n"
+        'board_x=10.5; // mm\necho("board_x=12;");'
+    )
+    assert load().scad_mm(contents, "board_x") == 10.5
+
+
+def test_paper_source_digest_matches_dimensions_during_source_edit(tmp_path, monkeypatch):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    relative = source.SOURCES["speaker"]
+    scad = tmp_path / relative
+    original = scad.read_bytes()
+    parse_values = source.values
+
+    def edit_after_parse(root, **kwargs):
+        dimensions = parse_values(root, **kwargs)
+        scad.write_bytes(original.replace(b"speaker_l=20", b"speaker_l=21"))
+        return dimensions
+
+    with monkeypatch.context() as patch:
+        patch.setattr(source, "values", edit_after_parse)
+        report = source.export(tmp_path, output)
+    assert report["source_dimensions_mm"]["speaker"] == [20, 16]
+    assert report["source_sha256"][relative] == sha256(original).hexdigest()
+    assert 'width="20"' in (output / "speaker_reference_A4.svg").read_text()
+    with pytest.raises(ValueError, match="source, dimensions or manifest changed"):
+        source.verify(tmp_path, output)
+
+
+def test_paper_reads_shared_dock_source_once(tmp_path, monkeypatch):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    read_bytes = Path.read_bytes
+    reads = 0
+
+    def count_reads(path):
+        nonlocal reads
+        if path == scad:
+            reads += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", count_reads)
+    source.export(tmp_path, tmp_path / "paper")
+    assert reads == 1
+
+
+def test_a4_calibration_centerlines_and_no_drill_marks(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    manifest = source.export(tmp_path, output)
+    ns = "{http://www.w3.org/2000/svg}"
+    for filename, digest in manifest["pages"].items():
+        data = (output / filename).read_bytes()
+        assert sha256(data).hexdigest() == digest
+        root = ElementTree.fromstring(data)
+        assert root.attrib == {
+            "width": "210mm", "height": "297mm", "viewBox": "0 0 210 297",
+        }
+        rects = root.findall(f"{ns}rect")
+        for x, y, width, height in ((20, 239, 100, 8), (20, 258, 50, 8), (173, 229, 8, 25)):
+            marks = [r for r in rects if r.get("x") == str(x) and r.get("y") == str(y)]
+            assert len(marks) == 1
+            mark = marks[0]
+            assert Decimal(mark.attrib["width"]) == width
+            assert Decimal(mark.attrib["height"]) == height
+            assert Decimal(mark.attrib["stroke-width"]) == Decimal("0.3")
+            stroke = Decimal(mark.attrib["stroke-width"]) / 2
+            assert x - stroke >= 15 and x + width + stroke <= 195
+            assert y - stroke >= 15 and y + height + stroke <= 282
+        labels = [element.text for element in root.findall(f"{ns}text")]
+        assert "Measure all three lengths between stroke centers, not outer edges." in labels
+        assert "50 mm horizontal print scale" in labels
+        assert "FDM starting layer height: 0.2 mm; nozzle diameter is separate." in labels
+        assert "Calibrate XY clearance on a coupon; 0.2 mm is not a fit tolerance." in labels
+        if filename == "dock_guide_reference_A4.svg":
+            assert any("solid flared rail" in label for label in labels)
+            assert any(label.startswith("Dashed base:") for label in labels)
+        if filename == "power_reference_A4.svg":
+            assert any(label.startswith("Solid: nominal body envelope:") for label in labels)
+        assert any("FRONT / TOP" in label for label in labels)
+        assert any("BACK / BOTTOM" in label for label in labels)
+        assert any("NOT FOR DRILLING" in label for label in labels)
+        # Templates are silhouette references: no drill circles or paths,
+        # transforms, embedded images, or other unreviewed SVG primitives.
+        for element in root:
+            assert element.tag in {f"{ns}rect", f"{ns}polygon", f"{ns}text"}
+            assert "transform" not in element.attrib
+            if element.tag != f"{ns}text":
+                assert element.attrib["fill"] == "none"
+    assert source.verify(tmp_path, output) == manifest
+
+
+def test_cad_readme_matches_five_a4_template_sources():
+    source = load()
+    readme = (Path(__file__).resolve().parents[2] / "docs/cad/README.md").read_text(encoding="utf-8")
+    assert "five A4 SVG pages" in readme
+    assert "three A4 SVG pages" not in readme
+    for key in source.SOURCES:
+        assert key in readme, key
+
+
+@pytest.mark.parametrize(
+    "render_mesh", [
+        False,
+        pytest.param(
+            True, marks=pytest.mark.skipif(
+                shutil.which("openscad") is None, reason="OpenSCAD not installed"
+            )
+        ),
+    ],
+)
+def test_dock_paper_tracks_changed_scad_flare_transition(tmp_path, render_mesh):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_bytes((SCRIPT.parent / "dock/dock_passive_fit.scad").read_bytes())
+    output = tmp_path / "paper"
+
+    def paper_transitions():
+        root = ElementTree.parse(output / "dock_guide_reference_A4.svg").getroot()
+        transitions = []
+        for polygon in root.findall("{http://www.w3.org/2000/svg}polygon"):
+            ys = sorted({
+                float(point.split(",")[1])
+                for point in polygon.attrib["points"].split()
+            })
+            transitions.append(ys[1] - ys[0])
+        return transitions
+
+    source.export(tmp_path, output)
+    assert paper_transitions() == [37, 37]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count("entry_flare_run_mm = 37;") == 1
+    scad.write_text(
+        original.replace("entry_flare_run_mm = 37;", "entry_flare_run_mm = 37.5;"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="source, dimensions or manifest changed"):
+        source.verify(tmp_path, output)
+    manifest = source.export(tmp_path, output)
+    assert manifest["source_dimensions_mm"]["dock_guide"][-1] == 37.5
+    assert manifest["approved_drill_holes"] == 0
+    assert manifest["actual_fit_verified"] is False
+    assert source.verify(tmp_path, output) == manifest
+    assert paper_transitions() == [37.5, 37.5]
+    if render_mesh:
+        mesh = tmp_path / "coupon.stl"
+        subprocess.run(
+            ["openscad", "--hardwarnings", "--export-format", "binstl",
+             "-o", str(mesh), "-D", 'part="dock_rail_entry_coupon"', str(scad)],
+            check=True, capture_output=True, timeout=60,
+        )
+        blob = mesh.read_bytes()
+        triangles = unpack_from("<I", blob, 80)[0]
+        ys = set()
+        for i in range(triangles):
+            for j in range(3):
+                _, y, z = unpack_from("<fff", blob, 96 + 50 * i + 12 * j)
+                if z > 3:
+                    ys.add(y)
+        ordered = sorted(ys)
+        assert len(ordered) == 3
+        assert paper_transitions() == [ordered[1] - ordered[0]] * 2
+
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=0.39;", "backing thickness"),
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=3;", "backing thickness"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=14.9;", "vertical clearance"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=19;", "vertical clearance"),
+])
+def test_a4_dock_rejects_invalid_tag_recess_before_export(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=0.4;"),
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=2.99;"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=15;"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=18.8;"),
+])
+def test_a4_dock_accepts_valid_tag_recess_boundaries(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    manifest = source.export(tmp_path, output)
+    assert manifest["source_dimensions_mm"]["dock"] == [60, 70, 71.2]
+    assert manifest["actual_fit_verified"] is False
+    assert source.verify(tmp_path, output) == manifest
+
+
+@pytest.mark.parametrize("name, dims", [
+    ("ranger", (180, 13.3)),
+    ("speaker", (180, 16)),
+    ("dock_guide", (180, 138, 107, 5, 8, 7, 154, 37)),
+    ("power", (140, 35, 164, 40.6, 8, 9, 5)),
+])
+def test_a4_outline_rejects_ink_inside_side_margin(name, dims):
+    source = load()
+    with pytest.raises(ValueError, match="exceeds A4 printable layout"):
+        source.svg(name, dims)
+
+
+@pytest.mark.parametrize("name, dims", [
+    ("ranger", (179.7, 13.3)),
+    ("speaker", (179.7, 16)),
+    ("dock_guide", (179.7, 138, 107, 5, 8, 7, 153.7, 37)),
+    ("power", (140, 35, 163.7, 40.6, 8, 9, 5)),
+    ("dock", (60, 70, 71.2)),
+])
+def test_a4_outline_stroke_and_scale_margins(name, dims):
+    source = load()
+    root = ElementTree.fromstring(source.svg(name, dims))
+    assert root.attrib == {"width": "210mm", "height": "297mm", "viewBox": "0 0 210 297"}
+    rects = root.findall("{http://www.w3.org/2000/svg}rect")
+    for rect in rects:
+        x = Decimal(rect.attrib["x"])
+        width = Decimal(rect.attrib["width"])
+        half = Decimal(rect.attrib["stroke-width"]) / 2
+        assert x - half >= 15
+        assert x + width + half <= 195
+    for x, y, width, height in ((20, 239, 100, 8), (20, 258, 50, 8), (173, 229, 8, 25)):
+        marks = [r for r in rects if r.get("x") == str(x) and r.get("y") == str(y)]
+        assert len(marks) == 1
+        assert Decimal(marks[0].attrib["width"]) == width
+        assert Decimal(marks[0].attrib["height"]) == height

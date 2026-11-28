@@ -25,7 +25,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--head", choices=("eva", "sparky"), default="sparky")
 args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
 OUT = ROOT / (
-    "docs/cad/concepts/2026-11-03-rounded" if args.head == "sparky" else "docs/cad/concepts/2026-11-03"
+    "docs/cad/concepts/2026-11-03-rounded"
+    if args.head == "sparky"
+    else "docs/cad/concepts/2026-11-03"
 )
 OUT.mkdir(parents=True, exist_ok=True)
 scene = bpy.data.scenes.new("DeskRobot_Concept_Only")
@@ -116,8 +118,9 @@ def stl(path, name, mat):
             tuple(map(float, v))
             for v in re.findall(rb"vertex\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)\s+([-+0-9.eE]+)", data)
         ]
-        assert verts and len(verts) % 3 == 0
         faces = [(n, n + 1, n + 2) for n in range(0, len(verts), 3)]
+    if not verts or len(verts) % 3 != 0:
+        raise ValueError(f"STL must contain complete triangles: {path}")
     lo = [min(v[a] for v in verts) for a in range(3)]
     hi = [max(v[a] for v in verts) for a in range(3)]
     verts = [(v[0] - (lo[0] + hi[0]) / 2, v[1] - (lo[1] + hi[1]) / 2, v[2] - lo[2]) for v in verts]
@@ -131,40 +134,39 @@ chassis, chassis_dims = stl(
 )
 chassis.location.z = 0.005  # Illustration only, not an axle/ground datum.
 
-# Head front is source x=-9, not its 74-mm dimension. Rotate long axis to rover Y.
-headpath = ROOT / "docs/cad/originals/eva-head/EVA-Robot.3mf"
-source_record(headpath)
-with zipfile.ZipFile(headpath) as z:
-    root = ET.fromstring(z.read("3D/3dmodel.model"))
-ns = {"m": root.tag.split("}")[0][1:]}
-assert root.attrib["unit"] == "millimeter"
-head_objs = []
-for item in root.findall("./m:resources/m:object", ns):
-    vertices = item.findall("./m:mesh/m:vertices/m:vertex", ns)
-    if not vertices:
-        continue
-    verts = [
-        (-float(v.attrib["y"]), float(v.attrib["x"]) - 28 + 2, float(v.attrib["z"]) - 11 + 50)
-        for v in vertices
-    ]
-    # Rigid +90-degree rotation around Z; source dimensions/winding are preserved.
-    faces = [
-        (int(t.attrib["v1"]), int(t.attrib["v2"]), int(t.attrib["v3"]))
-        for t in item.findall("./m:mesh/m:triangles/m:triangle", ns)
-    ]
-    obj = mesh("SOURCE_EVA_" + item.attrib["id"], verts, faces, ivory)
-    head_objs.append(obj)
-
 if args.head == "sparky":
-    for obj in head_objs:
-        bpy.data.objects.remove(obj, do_unlink=True)
-    # Do not count the historical EVA file as a source of the rounded layout.
-    sources[:] = [s for s in sources if "eva-head" not in s["path"]]
-    shell, rounded_dims = stl(
+    shell, head_dims = stl(
         ROOT / "docs/cad/originals/sparky-head/sparky_shell.stl", "SOURCE_Sparky_v010_shell", ivory
     )
     shell.location = (0, -0.007, 0.050)
-    head_objs = [shell]
+else:
+    # Head front is source x=-9, not its 74-mm dimension. Rotate long axis to rover Y.
+    headpath = ROOT / "docs/cad/originals/eva-head/EVA-Robot.3mf"
+    source_record(headpath)
+    with zipfile.ZipFile(headpath) as z:
+        root = ET.fromstring(z.read("3D/3dmodel.model"))
+    ns = {"m": root.tag.split("}")[0][1:]}
+    if root.attrib.get("unit") != "millimeter":
+        raise ValueError(f"3MF must declare millimeter units: {headpath}")
+    head_vertices = []
+    for item in root.findall("./m:resources/m:object", ns):
+        vertices = item.findall("./m:mesh/m:vertices/m:vertex", ns)
+        if not vertices:
+            continue
+        verts = [
+            (-float(v.attrib["y"]), float(v.attrib["x"]) - 28 + 2, float(v.attrib["z"]) - 11 + 50)
+            for v in vertices
+        ]
+        # Rigid +90-degree rotation around Z; source dimensions/winding are preserved.
+        faces = [
+            (int(t.attrib["v1"]), int(t.attrib["v2"]), int(t.attrib["v3"]))
+            for t in item.findall("./m:mesh/m:triangles/m:triangle", ns)
+        ]
+        mesh("SOURCE_EVA_" + item.attrib["id"], verts, faces, ivory)
+        head_vertices.extend(verts)
+    head_dims = [
+        max(v[a] for v in head_vertices) - min(v[a] for v in head_vertices) for a in range(3)
+    ]
 
 
 def box(name, center, dims, mat, bevel=0):
@@ -361,17 +363,23 @@ report = {
     "render_script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
     "delivery": "concept_layout_only",
     "engine": "Blender Workbench studio light; material colors; cavity/shadows",
-    "unit_system": "metres internally; EVA 3MF declares mm; Sparky source SCAD specifies mm; chassis STL assumed mm, not yet physically checked",
+    "unit_system": (
+        "metres internally; EVA 3MF declares mm; Sparky source SCAD "
+        "specifies mm; chassis STL assumed mm, not yet physically checked"
+    ),
     "source_meshes": sources,
     "chassis_source_size": chassis_dims,
     "head_case": args.head,
-    "head_oriented_size_mm": dict(zip(("width", "depth", "height"), rounded_dims, strict=True))
-    if args.head == "sparky"
-    else {"width": 48, "depth": 74, "height": 48.8},
-    "head_source_note": "Sparky v0.1.0 shell only, original estimated/unprinted design; no whole-case scaling"
+    "head_oriented_size_mm": dict(zip(("width", "depth", "height"), head_dims, strict=True)),
+    "head_source_note": (
+        "Sparky v0.1.0 shell only, original estimated/unprinted design; "
+        "no whole-case scaling"
+    )
     if args.head == "sparky"
     else "EVA front source x=-9; long axis is depth, not face width",
-    "illustrative_objects": "all tracks, lift/claw, mounts, lenses, OLED insert, sensors and target",
+    "illustrative_objects": (
+        "all tracks, lift/claw, mounts, lenses, OLED insert, sensors and target"
+    ),
     "power_bank": "not modeled: dimensions, mass, capacity/current unknown",
     "physical_fit_verified": False,
     "print_exports": [],

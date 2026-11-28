@@ -1,0 +1,1212 @@
+"""The complete shared station must actually compile soil acquisition.
+
+These are source contract checks, not physically applied 5V/3.3V tests.
+"""
+import json
+import platform
+import shutil
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_station_bench_guide_uses_actual_private_receipt_destination():
+    # Match the collector's mode 0700, O_EXCL and no-private-data-in-Git gate.
+    guide = (ROOT / "code/firmware/room_station/README.md").read_text()
+    capture = guide.split("## Reproducible USB stream evidence capture", 1)[1]
+    command = capture.split("```bash", 1)[1].split("```", 1)[0]
+    assert 'ROOM_TRIAL_DIR="$HOME/.desk-robot/room-trials"' in command
+    assert 'mkdir -p "$ROOM_TRIAL_DIR"' in command
+    assert 'chmod 700 "$ROOM_TRIAL_DIR"' in command
+    assert "umask 077" in command
+    assert (
+        '--report "$ROOM_TRIAL_DIR/room-usb-$(date -u +%Y%m%dT%H%M%SZ).json"'
+        in command
+    )
+    assert "docs/records/reports/" not in command
+    assert "outside the Git checkout" in capture
+    collector = (ROOT / "code/scripts/bench_room_station.py").read_text()
+    assert "Room bench report directory must be private mode 0700" in collector
+    assert "os.O_WRONLY | os.O_CREAT | os.O_EXCL" in collector
+
+
+def test_station_has_both_full_soil_and_safe_bench_profiles():
+    ini = (ROOT / "code/firmware/room_station/platformio.ini").read_text()
+    assert "default_envs = feather_nrf52840_room_bench" in ini
+    assert ini.count("[env:feather_nrf52840_room_full]") == 1
+    assert ini.count("[env:feather_nrf52840_room_bench]") == 1
+    assert "[env]\n" in ini
+    full = ini.split("[env:feather_nrf52840_room_full]", 1)[1].split(
+        "[env:feather_nrf52840_room_bench]", 1)[0]
+    bench = ini.split("[env:feather_nrf52840_room_bench]", 1)[1].split(
+        "[env:feather_nrf52840_room_bench_thermal]", 1)[0]
+    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=1 -DROOM_AMG_FITTED=0" in full
+    assert "build_flags = ${env.build_flags} -DROOM_SOIL_FITTED=0 -DROOM_AMG_FITTED=0" in bench
+    assert ini.count(
+        "https://github.com/Sensirion/arduino-i2c-scd4x.git#fd169d39a3dd342ba05feef92d69c36fb3a340ee"
+    ) == 1
+    assert ini.count(
+        "https://github.com/adafruit/Adafruit_AMG88xx.git#d857b8e68dd52026c3dd8e792e7424812ec77043"
+    ) == 1
+
+
+def test_full_soil_adc_is_actual_three_sample_acquisition_not_stub():
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/soil_sample.h").read_text()
+    assert "#if ROOM_SOIL_FITTED" in code
+    assert "analogReadResolution(12);" in code
+    assert "return analogRead(A0);" in code
+    assert "read_soil_sample" in code
+    assert "const int a = read();" in helper
+    assert "const int b = read();" in helper
+    assert "const int c = read();" in helper
+    assert "largest - smallest > 256" in helper
+
+
+def test_room_station_power_budget_is_machine_readable_and_fail_closed():
+    plan = json.loads(
+        (ROOT / "docs/hardware/full-feature-plan.json").read_text()
+    )
+    power = plan["room_pod"]["power_reference"]
+    assert power["scd40"]["rail_candidate_v"] == 3.3
+    assert power["scd40"]["peak_ma_at_3v3_max"] == 205
+    assert power["scd40"]["periodic_average_ma_at_3v3_max"] == 18
+    assert power["bme688"]["custom_mode_current_ma_max"] == 12
+    assert power["amg8833"]["reference_current_ma_typ"] == 4.5
+    assert power["ld2410c"]["rail_candidate_v"] == 5.0
+    assert power["ld2410c"]["supply_capacity_ma_must_exceed"] == 200
+    assert power["room_controller"]["regulator_3v3_peak_ma"] == 500
+    assert power["room_controller"][
+        "regulator_500ma_continuous_from_5v_qualified"
+    ] is False
+    for role in ("room_controller", "scd40", "bme688", "amg8833",
+                 "ld2410c", "soil_probe"):
+        assert any(
+            key.endswith("_qualified") and value is False
+            for key, value in power[role].items()
+        )
+    assert power["physical_release"].startswith("HOLD")
+
+
+
+def test_amg8833_scan_is_bounded_incremental_and_never_fakes_frame_time():
+    firmware = (
+        ROOT / "code/firmware/room_station/src/main.cpp"
+    ).read_text()
+    stage = firmware.split("void thermal_step(", 1)[1].split(
+        "void thermal_observation(", 1
+    )[0]
+    report = firmware.split("void thermal_observation(", 1)[1].split(
+        "void report(", 1
+    )[0]
+    assert "thermal_step(now);" in firmware
+    assert firmware.index("radar.read();") < firmware.index("thermal_step(now);")
+    assert stage.count("read_thermal_chunk(") == 1
+    assert "thermal_staging + 8U * thermal_next_chunk" in stage
+    assert "thermal_valid = false;" in stage
+    assert "thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U" in stage
+    assert "thermal[i] = thermal_staging[i];" in stage
+    assert "thermal_sample_ms = thermal_started_ms;" in stage
+    assert "thermal_valid = true;" in stage
+    assert "kThermalScanMaxMs = 250;" in firmware
+    assert "read_thermal_chunk" not in report
+    assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
+    assert "telemetry.print(thermal_sample_ms);" in report
+    assert "telemetry.print(now);" not in report
+
+
+def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    # Upstream Adafruit_BME680 2.0.5 endReading() returns true on
+    # n_fields=0 without updating public sensor values. Invalidate the
+    # last gas value before initiating the next conversion.
+    start = code.split("void bme_step(", 1)[1].split("void bme_observation(", 1)[0]
+    assert "bme.gas_resistance = 0;" in start
+    assert start.index("bme.gas_resistance = 0;") < start.index("bme.beginReading()")
+    # Unsigned integer gas resistance uses >= 1 rather than > 0. Both
+    # reject the zero sentinel; the upper bound rejects absurd stale data.
+    assert "bme.gas_resistance >= 1" in start
+    assert "bme.gas_resistance <= 1000000000U" in start
+    assert "bme_completed.publish(bme.temperature, bme.humidity," in start
+    assert "static_cast<float>(bme.pressure)," in start
+    assert "bme.gas_resistance, bme_last_start_ms);" in start
+
+
+def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "bme.gas_resistance >= 1U" in code
+    assert "bme.gas_resistance <= 1000000000U" in code
+    assert "bme.gas_resistance >= 0" not in code
+
+
+def test_optional_radar_absence_never_blocks_shared_station_boot():
+    # Pinned ncmreynolds/ld2410 v0.2.2 begin(Stream, true) waits up to
+    # one second for firmware identification if the optional radar is absent.
+    # Explicit nonblocking boot must preserve fresh UART packet gating.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "RadarObservedUart radar_uart(Serial1);" in src
+    assert "radar.begin(radar_uart, false);" in src
+    assert "radar.begin(Serial1);" not in src
+    assert "radar.begin(radar_uart);" not in src
+    assert "radar.read();" in src
+    assert "radar_uart.take_completed_data_frame()" in src
+    assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in src
+
+
+def test_stale_radar_isolated_without_dropping_fresh_room_sensors():
+    # One over-age valid radar would cause Mac to drop the entire USB frame.
+    # The station must invalidate the radar field before emitting that frame.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    clock = (ROOT / "code/firmware/room_station/src/radar_sample_clock.h").read_text()
+    mac = (ROOT / "code/laptop/src/desk_robot/room_station.py").read_text()
+    report = src.split("void radar_observation(uint32_t now) {", 1)[1].split(
+        "void soil_observation(uint32_t now) {", 1
+    )[0]
+    assert "constexpr uint32_t kRadarStaleMs = 3000;" in src
+    assert '"ld2410c": 3000' in mac
+    assert "radar.isConnected()" not in report.split("\n  const bool", 1)[1]
+    assert "radar_completed = radar_uart.completed_sample();" in src
+    assert "radar_sample_clock.observe(true, true, now);" in src
+    for field in ("presence", "stationary", "moving", "stationary_cm", "moving_cm"):
+        assert f"radar_completed.{field}" in report
+    for getter in ("presenceDetected", "stationaryTargetDetected",
+                   "movingTargetDetected", "stationaryTargetDistance", "movingTargetDistance"):
+        assert f"radar.{getter}()" not in report
+    assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in report
+    assert "if (has_sample_ && now_ms - sample_ms_ > max_age_ms) has_sample_ = false;" in clock
+    assert "return has_sample_;" in clock
+    assert "jsbool(connected)" in report
+    assert "telemetry.print(radar_sample_clock.sample_ms());" in report
+
+
+def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
+    # The pinned Adafruit_BME680 2.0.5 API supports an asynchronous
+    # conversion; this is a source contract until physical Feather trials.
+    code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    assert "bme.performReading()" not in code
+    assert "bme_pending = bme.beginReading() != 0U;" in code
+    assert "const int remaining = bme.remainingReadingMillis();" in code
+    assert "if (remaining > Adafruit_BME680::reading_complete) return;" in code
+    assert "remaining != Adafruit_BME680::reading_complete || !bme.endReading()" in code
+    assert "bme_step(now);" in code
+    assert code.index("radar.read();") < code.index("bme_step(now);")
+    report = code.split("void bme_observation(", 1)[1].split("void radar_observation", 1)[0]
+    assert "bme.beginReading()" not in report
+    assert "bme.endReading()" not in report
+    assert "const bool fresh = bme_completed.fresh(now, kBmeStaleMs);" in report
+    assert 'telemetry.print(bme_completed.sample_ms);' in report
+    assert "constexpr uint32_t kBmeStaleMs = 3000;" in code
+
+
+def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
+    ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    assert "pio run -d code/firmware/room_station -e feather_nrf52840_room_full" in ci
+    assert "pio run -d code/firmware/room_station -e feather_nrf52840_room_bench" in ci
+    note = (ROOT / "code/firmware/room_station/README.md").read_text()
+    assert "A0" in note
+    assert "3.3V" in note
+    assert "room_full" in note
+    assert "no 5V output reaches A0" in note
+    assert "LD2410C" in note
+    assert "never** the Feather 3V pin" in note
+    assert "nominally 4.5 to 5.2 V" in note
+    assert "candidate source, not a qualified" in note
+    assert "TX/RX remain 3.3 V logic only" in note
+    assert "205 mA peak" in note
+    assert "500 mA peak" in note
+    assert "not a continuous 3.3 V budget" in note
+    assert "greater than 200 mA" in note
+    assert "run the exact fitted" in note
+    assert (
+        "uvx --from platformio==6.1.18 pio run -d code/firmware/room_station "
+        "-e feather_nrf52840_room_bench -t upload --upload-port <CONFIRMED_PORT>"
+    ) in note
+    assert (
+        "uvx --from platformio==6.1.18 pio run -d code/firmware/room_station "
+        "-e feather_nrf52840_room_full -t upload --upload-port <CONFIRMED_PORT>"
+    ) in note
+    assert "DFU/UF2 bootloader readiness; keep EXP-033 bootloader HOLD intact" in note
+    assert "STOP immediately on upload/bootloader error" in note
+    assert "Observe post-boot firmware" in note
+    assert "USB CDC enumeration before any sensor reads" in note
+
+def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
+    # The pure-C++ helper test is insufficient if the real Feather producer
+    # accidentally stops calling it. Keep the actual firmware consumer wired.
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/scd_sample_freshness.h").read_text()
+    poll = source.split("void scd_step(uint32_t now) {", 1)[1].split(
+        "void bme_step(", 1
+    )[0]
+    assert '#include "scd_sample_freshness.h"' in source
+    assert "const int readiness_status = scd.getDataReadyStatus(ready);" in poll
+    assert "if (readiness_status == 0 && ready)" in poll
+    assert "scd_valid = desk_robot_room::scd_sample_valid_after_poll(" in poll
+    assert "scd_valid, readiness_status, ready, measurement_valid);" in poll
+    assert (
+        "const bool fresh = scd_started && scd_valid && "
+        "now - last_scd_ms <= kScdStaleMs;"
+    ) in poll
+    assert "scd_started = false;" in poll
+    assert "scd_valid = false;" in poll
+    assert "if (readiness_status != 0) return false;" in helper
+    ci = (ROOT / ".github/workflows/host-verification.yml").read_text()
+    assert "python3 code/scripts/verify_room_station_host.py" in ci
+    runner = (ROOT / "code/scripts/verify_room_station_host.py").read_text()
+    assert 'glob("*.cpp")' in runner
+
+
+def test_thermal_scan_publishes_only_complete_staged_frames():
+    # An I2C failure in chunk eight may invalidate a scan. Never expose
+    # a mixed old/new 64-pixel array or make the report block radar UART.
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    scan = source.split("void thermal_step(uint32_t now) {", 1)[1].split(
+        "void thermal_observation(uint32_t now) {", 1
+    )[0]
+    report = source.split("void thermal_observation(uint32_t now) {", 1)[1].split(
+        "void report(uint32_t now) {", 1
+    )[0]
+    assert "thermal_staging + 8U * thermal_next_chunk" in scan
+    assert "thermal_valid = false;" in scan
+    assert "if (++thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U)" in scan
+    assert "thermal[i] = thermal_staging[i];" in scan
+    assert scan.index("thermal[i] = thermal_staging[i];") < scan.index(
+        "thermal_valid = true;"
+    )
+    assert "thermal_sample_ms = thermal_started_ms;" in scan
+    assert "read_thermal_chunk(" not in report
+    assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
+    assert "thermal_step(now);" in source
+
+def test_bme688_producer_ranges_match_room_decoder():
+    # A BME outlier should be emitted as valid:false, not as a plausible
+    # value that makes the Mac drop unrelated CO2, radar and thermal data.
+    firmware = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    mac = (ROOT / "code/laptop/src/desk_robot/room_station.py").read_text()
+    sample = firmware.split("void bme_step(uint32_t now) {", 1)[1].split(
+        "void bme_observation(", 1
+    )[0]
+    decoder = mac.split('elif sensor == "bme688":', 1)[1].split(
+        'elif sensor == "ld2410c":', 1
+    )[0]
+    assert "bme.pressure >= 30000U" in sample
+    assert "bme.pressure <= 125000U" in sample
+    assert "bme.gas_resistance >= 1" in sample
+    assert "bme.gas_resistance <= 1000000000U" in sample
+    assert '_value(data, "pressure_pa", 30000, 125000)' in decoder
+    assert '_value(data, "gas_ohms", 1, 1e9)' in decoder
+
+def test_bme_pending_conversion_reports_only_last_completed_tuple():
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/bme_completed_sample.h").read_text()
+    scan = source.split("void bme_step(uint32_t now) {", 1)[1].split(
+        "void bme_observation(uint32_t now) {", 1
+    )[0]
+    report = source.split("void bme_observation(uint32_t now) {", 1)[1].split(
+        "void radar_observation(", 1
+    )[0]
+    assert '#include "bme_completed_sample.h"' in source
+    assert "bme.gas_resistance = 0;" in scan
+    # A successful new conversion leaves the previously completed tuple
+    # intact until a new full conversion publishes its own tuple.
+    before_begin, after_begin = scan.split(
+        "bme_pending = bme.beginReading() != 0U;", 1
+    )
+    assert "bme_completed.invalidate();" not in before_begin
+    # A failed acquisition must instead retire the old tuple and the sensor,
+    # so a later report cannot pass it off as a fresh sample.
+    failed_begin = after_begin.split("return;", 1)[0]
+    assert "if (!bme_pending) {" in failed_begin
+    assert "bme_completed.invalidate();" in failed_begin
+    assert "bme_started = false;" in failed_begin
+    assert "bme_completed.publish(" in scan
+    assert "bme.gas_resistance, bme_last_start_ms);" in scan
+    assert "bme_completed.invalidate();" in scan
+    assert "bme_completed.fresh(now, kBmeStaleMs)" in report
+    assert "if (valid && now_ms - sample_ms > max_age_ms) invalidate();" in helper
+    assert "return valid;" in helper
+    for raw in ("bme.temperature", "bme.humidity", "bme.pressure", "bme.gas_resistance"):
+        assert raw not in report
+    for field in ("temperature_c", "humidity_pct", "pressure_pa", "gas_ohms", "sample_ms"):
+        assert "bme_completed." + field in report
+
+
+def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
+    # Compile both the cache and actual production acquisition function.
+    compiler = shutil.which("c++")
+    assert compiler is not None, "C++17 compiler is required for station tests"
+    station = ROOT / "code/firmware/room_station"
+    includes = station / "src"
+    firmware = (includes / "main.cpp").read_text()
+    temperature = "bool finite_temperature(" + firmware.split(
+        "bool finite_temperature(", 1
+    )[1].split("void jsbool(", 1)[0]
+    step = "void bme_step(" + firmware.split(
+        "void bme_step(", 1
+    )[1].split("void bme_observation(", 1)[0]
+    (tmp_path / "bme_step_under_test.h").write_text(temperature + step)
+    cmd = [
+        compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{includes}", f"-I{tmp_path}",
+    ]
+    if platform.system() == "Linux":
+        cmd.append("-no-pie")
+    if platform.system() == "Darwin":
+        for sdk in (
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1"),
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk/usr/include/c++/v1"),
+        ):
+            if sdk.exists():
+                cmd.extend(["-stdlib=libc++", f"-I{sdk}"])
+                break
+    for name in ("bme_completed_sample_tests", "bme_step_tests"):
+        src = station / "tests" / f"{name}.cpp"
+        executable = tmp_path / name
+        subprocess.run([*cmd, str(src), "-o", str(executable)], check=True,
+                       capture_output=True, text=True, timeout=30)
+        subprocess.run([str(executable)], check=True, capture_output=True,
+                       text=True, timeout=15)
+
+
+def test_room_transaction_clocks_follow_completed_io():
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/sensor_recovery.h").read_text()
+    recovery = src.split("void recover_sensors(", 1)[1].split("void report(", 1)[0]
+    stop = recovery.split("if (desk_robot_room::scd_request_stop(Wire, SCD41_I2C_ADDR_62)) {", 1)[1]
+    assert "const int result = wire.endTransmission();" in helper
+    assert "return high_ok && low_ok && result == 0;" in helper
+    assert "scd_stop_ms = millis();" in stop
+    assert "scd_started_ms = millis();" in recovery
+    loop = src.split("void loop() {", 1)[1]
+    assert "recover_sensors(now);\n  now = millis();" in loop
+    assert loop.index("thermal_step(now);") < loop.rindex("now = millis();")
+    assert loop.rindex("now = millis();") < loop.index("report(now);")
+
+
+def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
+    # Compile the actual runtime function with a fake I2C clock. A final
+    # successful chunk reaching 250 ms must not publish a completed frame.
+    # A valid scan is dated from its oldest possible pixel read.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    step = "void revoke_thermal_scan(" + src.split("void revoke_thermal_scan(", 1)[1].split(
+        "void thermal_observation(", 1
+    )[0]
+    harness = r"""
+#define ROOM_AMG_FITTED 1
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+constexpr uint32_t kReportMs = 1000, kThermalScanMaxMs = 250;
+constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
+constexpr uint8_t kAmgAddress = 0x69;
+int Wire;
+uint32_t clock_ms, transfer_ms;
+uint32_t millis() { return clock_ms; }
+bool amg_started, thermal_scan_active, thermal_ever_requested, thermal_valid;
+uint8_t thermal_next_chunk;
+uint32_t thermal_requested_ms, thermal_started_ms, thermal_sample_ms;
+float thermal[64], thermal_staging[64];
+namespace desk_robot_room {
+struct SensorRecoverySchedule {
+  enum Sensor { kScd, kBme, kAmg };
+  void record_success(Sensor) {}
+};
+bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels,
+                        std::size_t destination_count) {
+  assert(destination_count == 64U - 8U * chunk);
+  clock_ms += transfer_ms;
+  for (unsigned i = 0; i < 8; ++i) pixels[i] = float(chunk + 1);
+  return true;
+}
+}
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
+struct AmgRecoveryStub {
+  void reset() {}
+} amg_recovery;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
+""" + step + r"""
+void run(uint32_t start, uint32_t last_start, uint32_t last_duration, bool valid) {
+  amg_started = true;
+  thermal_scan_active = thermal_ever_requested = thermal_valid = false;
+  thermal_sample_ms = 123;
+  for (float& pixel : thermal) pixel = 99;
+  transfer_ms = 1;
+  for (unsigned chunk = 0; chunk < 7; ++chunk) {
+    clock_ms = start + chunk;
+    thermal_step(clock_ms);
+  }
+  clock_ms = start + last_start;
+  transfer_ms = last_duration;
+  thermal_step(clock_ms);
+  assert(thermal_valid == valid);
+  assert(!thermal_scan_active);
+  assert(amg_started == valid);
+  assert(thermal_sample_ms == (valid ? start : 123U));
+  if (valid) {
+    assert(clock_ms - thermal_sample_ms == last_start + last_duration);
+    assert(start + 3000U - thermal_sample_ms == 3000U);
+    assert(start + 3001U - thermal_sample_ms > 3000U);
+  }
+  assert(thermal[63] == (valid ? 8.0f : 99.0f));
+}
+int main() {
+  run(1000, 249, 1, false);
+  run(1000, 248, 1, true);
+  run(UINT32_MAX - 100, 249, 1, false);
+  run(UINT32_MAX - 100, 248, 1, true);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "thermal_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "thermal_runtime"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_room_usb_backpressure_does_not_block_sensor_loop(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    classes = "constexpr size_t kMaxUsbLineBytes" + src.split(
+        "constexpr size_t kMaxUsbLineBytes", 1
+    )[1].split("RoomUsbLine telemetry;", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    report = src.split("void report(uint32_t now) {", 1)[1].split(
+        "}  // namespace", 1
+    )[0]
+    assert "Serial.print" not in src
+    assert "usb_tx.queue_ack(usb_epoch_sync.token());" in loop
+    assert "scd_observation(now);" in report
+    assert "soil_observation(now);" in report
+    assert "usb_tx.queue_report(telemetry);" in report
+    assert loop.index("report(now);") < loop.index("usb_tx.step(usb_port);")
+    harness = r"""
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
+class Print {
+ public:
+  virtual size_t write(uint8_t) = 0;
+  virtual ~Print() = default;
+};
+""" + classes + r"""
+struct FakePort {
+  bool connected = true;
+  int capacity = 0;
+  size_t short_max = 2;
+  unsigned calls = 0, flushes = 0;
+  std::string output;
+  explicit operator bool() const { return connected; }
+  int availableForWrite() const { return capacity; }
+  size_t write(const uint8_t* bytes, size_t count) {
+    assert(capacity > 0 && count <= static_cast<size_t>(capacity));
+    assert(count <= 64);
+    ++calls;
+    count = std::min(count, short_max);
+    output.append(reinterpret_cast<const char*>(bytes), count);
+    return count;
+  }
+  void flush() { ++flushes; }
+};
+void fill(RoomUsbLine& line, const char* str) {
+  line.reset();
+  while (*str) assert(line.write(static_cast<uint8_t>(*str++)) == 1);
+}
+void drain(RoomUsbTx& tx, FakePort& port) {
+  for (unsigned i = 0; i < 100; ++i) tx.step(port);
+}
+int main() {
+  RoomUsbLine line;
+  RoomUsbTx tx;
+  FakePort port;
+  fill(line, "{old}\r\n");
+  assert(tx.queue_report(line));
+  drain(tx, port);
+  assert(port.calls == 0 && port.output.empty());
+  assert(!tx.queue_report(line));
+  tx.queue_ack("0123456789abcdef");
+  drain(tx, port);
+  assert(port.calls == 0);
+  port.capacity = 3;
+  drain(tx, port);
+  assert(port.output == "\nSYNC_ACK 0123456789abcdef\r\n");
+  assert(port.calls == port.flushes);
+  port.output.clear();
+  fill(line, "{new}\r\n");
+  assert(tx.queue_report(line));
+  tx.step(port); // two bytes of an in-flight report
+  tx.queue_ack("1111111111111111");
+  tx.queue_ack("2222222222222222");
+  assert(!tx.queue_report(line));
+  drain(tx, port);
+  assert(port.output == "{new}\r\n\nSYNC_ACK 2222222222222222\r\n");
+  port.output.clear();
+  assert(tx.queue_report(line));
+  tx.step(port);
+  port.connected = false;
+  tx.step(port);
+  port.connected = true;
+  tx.queue_ack("3333333333333333");
+  drain(tx, port);
+  assert(port.output == "{n\nSYNC_ACK 3333333333333333\r\n");
+  fill(line, "not terminated");
+  assert(!tx.queue_report(line));
+  line.reset();
+  for (unsigned i = 0; i < kMaxUsbLineBytes; ++i)
+    assert(line.write('\n') == 1);
+  assert(line.write('\n') == 0);
+  assert(!tx.queue_report(line));
+  fill(line, "recovered\n");
+  assert(tx.queue_report(line));
+  port.output.clear();
+  port.capacity = 512;
+  port.short_max = 512;
+  drain(tx, port);
+  assert(port.output == "recovered\n");
+  line.reset();
+  for (unsigned i = 0; i < 100; ++i) assert(line.write('a') == 1);
+  assert(line.write('\n') == 1);
+  assert(tx.queue_report(line));
+  port.output.clear();
+  tx.step(port);
+  assert(port.output.size() == 64);
+  tx.step(port);
+  assert(port.output.size() == 101 && port.output.back() == '\n');
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "usb_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "usb_runtime"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_room_radar_continuous_uart_has_bounded_poll_budget(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    wrapper = "class RadarObservedUart" + src.split(
+        "class RadarObservedUart", 1
+    )[1].split("RadarObservedUart radar_uart", 1)[0]
+    assert "radar_uart.begin_poll();\n  radar.read();" in src
+    harness = r"""
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+constexpr uint32_t kRadarStaleMs = 3000;
+uint32_t clock_ms = 0;
+uint32_t millis() { return clock_ms; }
+#include "radar_data_frame_gate.h"
+class Print {
+ public:
+  virtual size_t write(uint8_t) = 0;
+  virtual ~Print() = default;
+};
+class Stream : public Print {
+ public:
+  virtual int available() = 0;
+  virtual int peek() = 0;
+  virtual int read() = 0;
+  virtual void flush() = 0;
+};
+""" + wrapper + r"""
+struct FakeStream : Stream {
+  bool continuous = false, failed_read = false;
+  size_t pos = 0, reads = 0;
+  std::vector<uint8_t> bytes;
+  int available() override {
+    return continuous ? 1 : static_cast<int>(bytes.size() - pos);
+  }
+  int peek() override { return available() ? 0xff : -1; }
+  int read() override {
+    ++reads;
+    if (failed_read) return -1;
+    return continuous ? 0xff : (pos < bytes.size() ? bytes[pos++] : -1);
+  }
+  void flush() override {}
+  size_t write(uint8_t) override { return 1; }
+};
+void drain(RadarObservedUart& uart) {
+  uart.begin_poll();
+  unsigned steps = 0;
+  while (uart.available()) {
+    uart.read();
+    assert(++steps <= 128);
+  }
+}
+int main() {
+  FakeStream source;
+  RadarObservedUart uart(source);
+  source.continuous = true;
+  drain(uart);
+  assert(source.reads == 128 && uart.read() == -1 && uart.peek() == -1);
+  drain(uart);
+  assert(source.reads == 256 && !uart.take_completed_data_frame());
+  source.failed_read = true;
+  drain(uart);
+  assert(source.reads == 257 && !uart.take_completed_data_frame());
+  source.failed_read = source.continuous = false;
+  source.bytes.assign(120, 0xff);
+  const uint8_t packet[] = {0xf4, 0xf3, 0xf2, 0xf1, 13, 0, 2, 0xaa,
+      1, 50, 0, 20, 0, 0, 0, 50, 0, 0x55, 0, 0xf8, 0xf7, 0xf6, 0xf5};
+  source.bytes.insert(source.bytes.end(), packet, packet + sizeof(packet));
+  drain(uart);
+  assert(source.pos == 128 && !uart.take_completed_data_frame());
+  drain(uart);
+  assert(source.pos == source.bytes.size() && uart.take_completed_data_frame());
+  assert(!uart.take_completed_data_frame());
+  assert(uart.completed_sample().moving && uart.completed_sample().moving_cm == 50);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "radar_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "radar_runtime"
+    includes = ROOT / "code/firmware/room_station/src"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         f"-I{includes}", str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_amg_recovery_waits_for_checked_writes_and_fresh_frames(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    recovery = "class AmgRecovery" + src.split("class AmgRecovery", 1)[1].split(
+        "AmgRecovery amg_recovery;", 1
+    )[0]
+    assert "amg.begin(" not in src
+    assert "if (amg_recovery.take_ready()) amg_started = true;" in src
+    assert "if (amg_transaction) return;" in src
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <vector>
+constexpr uint8_t kAmgAddress = 0x69;
+constexpr uint8_t AMG88xx_PCTL = 0, AMG88xx_RST = 1,
+    AMG88xx_FPSC = 2, AMG88xx_INTC = 3, AMG88xx_NORMAL_MODE = 0,
+    AMG88xx_INITIAL_RESET = 0x3f, AMG88xx_FLAG_RESET = 0x30,
+    AMG88xx_FPS_10 = 0;
+uint32_t clock_ms;
+uint32_t millis() { return clock_ms; }
+""" + recovery + r"""
+struct FakeWire {
+  std::vector<uint8_t> bytes;
+  unsigned transfers = 0;
+  bool fail = false, short_write = false;
+  void beginTransmission(uint8_t address) { assert(address == kAmgAddress); }
+  int write(uint8_t value) { bytes.push_back(value); return short_write ? 0 : 1; }
+  int endTransmission() { ++transfers; clock_ms += 5; return fail ? 2 : 0; }
+};
+void run(uint32_t start) {
+  AmgRecovery amg;
+  FakeWire wire;
+  clock_ms = start;
+  amg.begin();
+  assert(amg.active() && amg.step(wire, clock_ms));
+  for (uint32_t wait : {50U, 2U, 50U, 2U}) {
+    clock_ms += wait - 1;
+    assert(!amg.step(wire, clock_ms) && !amg.take_ready());
+    ++clock_ms;
+    assert(amg.step(wire, clock_ms));
+  }
+  assert(amg.step(wire, clock_ms));
+  assert(amg.step(wire, clock_ms));
+  assert(wire.transfers == 7);
+  assert((wire.bytes == std::vector<uint8_t>{
+      0,0,0,0x10,0,0,1,0x3f,1,0x30,3,0,2,0}));
+  clock_ms += 249;
+  assert(!amg.step(wire, clock_ms) && amg.active() && !amg.take_ready());
+  ++clock_ms;
+  assert(!amg.step(wire, clock_ms) && !amg.active() && amg.take_ready());
+  assert(!amg.take_ready());
+}
+int main() {
+  run(0); run(UINT32_MAX - 80);
+  for (bool short_write : {false, true}) {
+    AmgRecovery amg; FakeWire wire;
+    clock_ms = 0; amg.begin();
+    assert(amg.step(wire, clock_ms));
+    clock_ms += 50;
+    wire.fail = !short_write; wire.short_write = short_write;
+    assert(amg.step(wire, clock_ms));
+    assert(!amg.active() && !amg.take_ready());
+    clock_ms += 1000;
+    assert(!amg.step(wire, clock_ms) && wire.transfers == 2);
+    wire.fail = wire.short_write = false;
+    amg.begin();
+    assert(amg.step(wire, clock_ms) && amg.active());
+  }
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "amg_recovery.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "amg_recovery"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_room_report_uses_completed_sensor_acquisitions():
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    scd = src.split("void scd_step(", 1)[1].split("void scd_observation(", 1)[0]
+    scd_format = src.split("void scd_observation(", 1)[1].split("void bme_step(", 1)[0]
+    soil = src.split("void soil_step()", 1)[1].split("void soil_observation(", 1)[0]
+    soil_format = src.split("void soil_observation(", 1)[1].split("void thermal_step(", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    assert scd.index("scd.readMeasurement(") < scd.index("last_scd_ms = millis();")
+    assert "scd.getDataReadyStatus" not in scd_format
+    assert "scd.readMeasurement" not in scd_format
+    assert soil.index("read_soil_sample(") < soil.index("soil_sample_ms = millis();")
+    assert "analogRead(" not in soil_format
+    assert "telemetry.print(soil_sample_ms);" in soil_format
+    assert "scd_step(now);\n    soil_step();\n    now = millis();\n    report(now);" in loop
+
+
+def test_scd_completion_timestamp_is_not_poll_start(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    step = "void scd_step(" + src.split("void scd_step(", 1)[1].split(
+        "void bme_step(", 1
+    )[0]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <cmath>
+#include <initializer_list>
+#include "scd_sample_freshness.h"
+using std::isfinite;
+uint32_t clock_ms;
+uint32_t millis() { return clock_ms; }
+constexpr uint32_t kScdNoSampleMs = 15000;
+constexpr uint32_t kScdStaleMs = 8500;
+#define F(x) x
+struct FakeTelemetry {
+  unsigned fields = 0;
+  template <typename T> void print(T) { ++fields; }
+} telemetry;
+bool reported_fresh;
+void jsbool(bool value) { reported_fresh = value; }
+void number(float value) { telemetry.print(value); }
+bool scd_started, scd_valid;
+uint32_t last_scd_ms, scd_started_ms;
+uint16_t co2_ppm;
+float scd_temp, scd_humidity;
+bool finite_temperature(float t) { return isfinite(t) && t >= -40 && t <= 125; }
+struct FakeScd {
+  bool ready = true;
+  int status = 0, measurement_status = 0;
+  unsigned reads = 0;
+  uint16_t ppm = 700;
+  float temp = 22, humidity = 40;
+  int getDataReadyStatus(bool& r) { clock_ms += 3; r = ready; return status; }
+  int readMeasurement(uint16_t& p, float& t, float& rh) {
+    ++reads;
+    clock_ms += 7; p = ppm; t = temp; rh = humidity; return measurement_status;
+  }
+} scd;
+namespace desk_robot_room {
+struct SensorRecoverySchedule {
+  enum Sensor { kScd, kBme, kAmg };
+  void record_success(Sensor) {}
+};
+}
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
+struct AmgRecoveryStub {
+  void reset() {}
+} amg_recovery;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
+""" + step + r"""
+void run(uint32_t start) {
+  clock_ms = scd_started_ms = start;
+  scd_started = true; scd_valid = false; scd = FakeScd{};
+  scd_step(clock_ms);
+  assert(scd_valid && scd_started && last_scd_ms == start + 10U);
+  assert(co2_ppm == 700 && scd_temp == 22 && scd_humidity == 40);
+  scd.ready = false;
+  scd_step(clock_ms);
+  assert(scd_valid && last_scd_ms == start + 10U);
+  scd.status = 1;
+  scd_step(clock_ms);
+  assert(!scd_valid && !scd_started);
+  scd_started = true; scd.status = 0; scd.ready = true;
+  scd.measurement_status = 1;
+  scd_step(clock_ms);
+  assert(!scd_valid && !scd_started && last_scd_ms == start + 10U);
+}
+void run_boundaries(uint32_t start) {
+  const auto reset = [&]() {
+    clock_ms = scd_started_ms = start;
+    scd_started = true; scd_valid = false; scd = FakeScd{};
+    scd_step(clock_ms);
+    assert(scd_valid && scd_started);
+  };
+  const auto check_report = [&](uint32_t now, bool expected) {
+    telemetry.fields = 0;
+    scd_observation(now);
+    assert(reported_fresh == expected);
+    assert(telemetry.fields == (expected ? 10U : 2U));
+  };
+  reset();
+  const uint32_t sample = last_scd_ms;
+  scd.ready = false;
+  clock_ms = sample + 8497U;
+  scd_step(clock_ms);
+  assert(last_scd_ms == sample);
+  check_report(clock_ms, true);
+  check_report(clock_ms + 1U, false);
+  clock_ms = sample + 14994U;
+  scd_step(clock_ms);
+  assert(scd_started);
+  scd_step(clock_ms);
+  assert(!scd_started && !scd_valid);
+  check_report(clock_ms, false);
+  for (uint16_t ppm : {0U, 50001U, 65535U}) {
+    reset();
+    scd.ppm = ppm;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+  for (uint16_t ppm : {1U, 50000U}) {
+    reset();
+    scd.ppm = ppm;
+    scd_step(clock_ms);
+    assert(scd_started && scd_valid && co2_ppm == ppm);
+    check_report(clock_ms, true);
+  }
+  for (float humidity : {-1.0f, 101.0f, NAN, INFINITY}) {
+    reset();
+    scd.humidity = humidity;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+  for (float temp : {-41.0f, 126.0f, NAN, INFINITY}) {
+    reset();
+    scd.temp = temp;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+  // The driver may populate plausible output arguments even when its
+  // transport/CRC status is nonzero. Those outputs must never commit.
+  for (int error : {1, 4, 256, -1}) {
+    for (bool readiness_failed : {false, true}) {
+      reset();
+      scd.ppm = 999; scd.temp = 31; scd.humidity = 61;
+      scd.status = readiness_failed ? error : 0;
+      scd.measurement_status = readiness_failed ? 0 : error;
+      scd_step(clock_ms);
+      assert(scd.reads == (readiness_failed ? 1U : 2U));
+      assert(!scd_started && !scd_valid && last_scd_ms == sample);
+      assert(co2_ppm == 700 && scd_temp == 22 && scd_humidity == 40);
+      check_report(clock_ms, false);
+    }
+  }
+}
+int main() {
+  run(100); run(UINT32_MAX - 5);
+  run_boundaries(100); run_boundaries(UINT32_MAX - 5);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "scd_completion.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "scd_completion"
+    includes = ROOT / "code/firmware/room_station/src"
+    cmd = [
+        compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer",
+        f"-I{includes}", str(source), "-o", str(executable),
+    ]
+    if platform.system() == "Linux":
+        cmd.append("-no-pie")
+    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_room_loop_watchdog_feeds_only_after_completed_pass(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    setup = src.split("void setup() {", 1)[1].split("void loop() {", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    assert setup.index("room_watchdog.begin(*NRF_WDT)") < setup.index("Wire.begin()")
+    assert "if (!room_watchdog_ready) return;" in setup
+    assert loop.lstrip().startswith("if (!room_watchdog_ready) return;")
+    assert "delay(" not in setup
+    assert src.count("room_watchdog.completed_pass(*NRF_WDT);") == 1
+    assert loop.index("usb_tx.step(usb_port)") < loop.index("room_watchdog.completed_pass")
+    assert loop.rstrip().endswith("room_watchdog.completed_pass(*NRF_WDT);\n}")
+    watchdog = "class RoomLoopWatchdog {" + src.split(
+        "class RoomLoopWatchdog {", 1
+    )[1].split("RoomLoopWatchdog room_watchdog;", 1)[0]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+""" + watchdog + r"""
+struct Registers {
+  uint32_t RUNSTATUS = 0, CONFIG = 0, CRV = 0, RREN = 0;
+  uint32_t TASKS_START = 0, RR[8] = {};
+};
+int main() {
+  Registers regs;
+  RoomLoopWatchdog watchdog;
+  watchdog.completed_pass(regs);
+  assert(regs.RR[0] == 0);
+  assert(watchdog.begin(regs));
+  assert(regs.TASKS_START == 1 && regs.RREN == 1);
+  assert(regs.CONFIG == 9 && regs.CRV == 131071);
+  assert(regs.RR[0] == 0);
+  watchdog.completed_pass(regs);
+  assert(regs.RR[0] == 0x6E524635U && regs.RR[1] == 0);
+  regs.RUNSTATUS = 1;
+  regs.TASKS_START = regs.RR[0] = 0;
+  RoomLoopWatchdog after_soft_reset;
+  assert(after_soft_reset.begin(regs));
+  assert(regs.TASKS_START == 0 && regs.RR[0] == 0);
+  after_soft_reset.completed_pass(regs);
+  assert(regs.RR[0] == 0x6E524635U);
+  for (unsigned fault = 0; fault < 3; ++fault) {
+    Registers incompatible = regs;
+    incompatible.RR[0] = 0;
+    if (fault == 0) incompatible.CONFIG = 1;
+    if (fault == 1) incompatible.CRV = 20;
+    if (fault == 2) incompatible.RREN = 3;
+    RoomLoopWatchdog foreign;
+    assert(!foreign.begin(incompatible));
+    foreign.completed_pass(incompatible);
+    assert(incompatible.TASKS_START == 0 && incompatible.RR[0] == 0);
+  }
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "room_watchdog.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "room_watchdog"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_bme_recovery_requires_every_configuration_write(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    begin = "bool begin_bme() {" + src.split("bool begin_bme() {", 1)[1].split(
+        "void recover_sensors(", 1
+    )[0]
+    recovery = src.split("void recover_sensors(", 1)[1].split("void report(", 1)[0]
+    assert "bme_started = begin_bme();" in recovery
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+constexpr uint8_t kBmePrimary = 0x77, kBmeAlternate = 0x76;
+constexpr uint8_t BME680_OS_8X = 4, BME680_OS_2X = 2, BME680_OS_4X = 3;
+constexpr uint8_t BME680_FILTER_SIZE_3 = 2, BME68X_ODR_NONE = 8;
+bool bme_pending;
+uint32_t bme_last_start_ms;
+struct Completed {
+  bool valid = true;
+  void invalidate() { valid = false; }
+} bme_completed;
+struct FakeBme {
+  int fail = 0, calls = 0, probes = 0;
+  bool primary = true, alternate = true;
+  bool begin(uint8_t address) {
+    ++probes;
+    return address == kBmePrimary ? primary : alternate;
+  }
+  bool setting() { return ++calls != fail; }
+  bool setTemperatureOversampling(uint8_t n) { assert(n == BME680_OS_8X); return setting(); }
+  bool setHumidityOversampling(uint8_t n) { assert(n == BME680_OS_2X); return setting(); }
+  bool setPressureOversampling(uint8_t n) { assert(n == BME680_OS_4X); return setting(); }
+  bool setIIRFilterSize(uint8_t n) { assert(n == BME680_FILTER_SIZE_3); return setting(); }
+  bool setODR(uint8_t n) { assert(n == BME68X_ODR_NONE); return setting(); }
+  bool setGasHeater(int t, int ms) { assert(t == 320 && ms == 150); return setting(); }
+} bme;
+""" + begin + r"""
+void reset() {
+  bme = FakeBme{};
+  bme_pending = bme_completed.valid = true;
+  bme_last_start_ms = 123;
+}
+int main() {
+  for (int failure = 1; failure <= 6; ++failure) {
+    reset(); bme.fail = failure;
+    assert(!begin_bme());
+    assert(bme.calls == failure && bme.probes == 1);
+    assert(!bme_pending && !bme_completed.valid && bme_last_start_ms == 0);
+  }
+  reset(); bme.primary = bme.alternate = false;
+  assert(!begin_bme() && bme.probes == 2 && bme.calls == 0);
+  assert(!bme_completed.valid && !bme_pending);
+  reset(); bme.primary = false;
+  assert(begin_bme() && bme.probes == 2 && bme.calls == 6);
+  assert(!bme_completed.valid && !bme_pending);
+  reset(); assert(begin_bme() && bme.probes == 1 && bme.calls == 6);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "bme_recovery.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "bme_recovery"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_thermal_report_retires_expired_grid_until_new_scan(tmp_path):
+    source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    report = "void thermal_observation(" + source.split(
+        "void thermal_observation(", 1
+    )[1].split("\n}", 1)[0] + "\n}\n"
+    harness = r"""
+#define ROOM_AMG_FITTED 1
+#include <cassert>
+#include <cstdint>
+#include <sstream>
+#include <string>
+#define F(value) value
+constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
+constexpr uint32_t kThermalStaleMs = 3000;
+bool thermal_valid = true;
+struct ThermalConsentStub {
+  bool allowed() const { return true; }
+} thermal_consent;
+uint32_t thermal_sample_ms = UINT32_MAX - 1000;
+float thermal[64]{};
+struct Telemetry {
+  std::ostringstream output;
+  template<typename T> void print(T value) { output << value; }
+  std::string take() { auto result = output.str(); output.str(""); return result; }
+} telemetry;
+void jsbool(bool value) { telemetry.print(value ? "true" : "false"); }
+void number(float value, int) { telemetry.print(value); }
+""" + report + r"""
+int main() {
+  thermal[63] = 80;
+  thermal_observation(thermal_sample_ms + 3000U);
+  const auto fresh = telemetry.take();
+  assert(fresh.find("\"valid\":true") != std::string::npos);
+  assert(fresh.find("80]") != std::string::npos);
+  thermal_observation(thermal_sample_ms + 3001U);
+  assert(telemetry.take() == "\"amg8833\":{\"valid\":false}");
+  // After the 32-bit clock cycles again, an expired grid must not revive.
+  thermal_observation(thermal_sample_ms + 1U);
+  assert(telemetry.take() == "\"amg8833\":{\"valid\":false}");
+  // A new completed scan may publish again.
+  thermal_valid = true;
+  thermal_sample_ms = 10;
+  thermal[63] = 50;
+  thermal_observation(11);
+  assert(telemetry.take().find("50]") != std::string::npos);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    native = tmp_path / "thermal_report.cpp"
+    native.write_text(harness)
+    executable = tmp_path / "thermal_report"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         str(native), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_partial_room_profile_is_explicit_at_receipt_and_after_expiry():
+    from desk_robot.room_station import SENSORS, RoomStationDecoder, fresh_room_summary
+
+    decoder = RoomStationDecoder()
+    readings = {
+        "scd40": {"valid": True, "sample_ms": 1000, "co2_ppm": 630,
+                  "temp_c": 22, "humidity_pct": 40},
+        "bme688": {"valid": True, "sample_ms": 1000, "temp_c": 22,
+                   "humidity_pct": 40, "pressure_pa": 100000, "gas_ohms": 12345},
+        "ld2410c": {"valid": True, "sample_ms": 1000, "presence": False,
+                    "moving": False, "stationary": False,
+                    "moving_cm": 0, "stationary_cm": 0},
+        "soil": {"valid": True, "sample_ms": 1000, "raw_adc": 2100},
+        "amg8833": {"valid": True, "sample_ms": 1000, "pixels_c": [22] * 64},
+    }
+    payload = {"v": 1, "station": "room-pod-01", "seq": 1,
+               "at_ms": 1000, "readings": readings}
+    full = decoder.accept(json.dumps(payload), now=10.0)
+    assert set(full.sensor_ages_ms) == set(SENSORS)
+    assert not full.summary.startswith("Partial room profile")
+    assert fresh_room_summary(full, now=13.001) == (
+        "Partial room profile (1/5 fresh sensors): Station CO2 630 ppm"
+    )
+    assert fresh_room_summary(full, now=18.501) is None
+
+    # Explicitly invalidated sources must not inherit the fresh BME sample.
+    for sensor in SENSORS:
+        readings[sensor] = {"valid": False}
+    readings["bme688"] = {
+        "valid": True, "sample_ms": 2000, "temp_c": 23, "humidity_pct": 41,
+        "pressure_pa": 100001, "gas_ohms": 12346,
+    }
+    payload.update(seq=2, at_ms=2000)
+    partial = decoder.accept(json.dumps(payload), now=11.0)
+    assert partial.readings["scd40"] == {"valid": False}
+    assert partial.readings["soil"] == {"valid": False}
+    assert partial.sensor_ages_ms == {"bme688": 0}
+    assert partial.summary.startswith("Partial room profile (1/5 fresh sensors): ")
+    assert "Station air 23.0 C" in partial.summary
+    assert "CO2" not in partial.summary
+    assert "soil" not in partial.summary
+    assert fresh_room_summary(partial, now=11.0) == partial.summary
+
+    readings["bme688"] = {"valid": False}
+    payload.update(seq=3, at_ms=3000)
+    empty = decoder.accept(json.dumps(payload), now=12.0)
+    assert empty.sensor_ages_ms == {}
+    assert empty.summary == "No fresh room station measurements"
+    assert fresh_room_summary(empty, now=12.0) is None
+
+    # Sub-millisecond negative deltas must fail closed before rounding to 0 ms.
+    assert fresh_room_summary(full, now=full.received_at - 0.0004) is None
+    assert fresh_room_summary(partial, now=partial.received_at - 0.0004) is None

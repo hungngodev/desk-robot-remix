@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "mode": "hardware",
   "python_env": true,
   "ollama_installed": true,

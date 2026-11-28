@@ -1,0 +1,456 @@
+"""The irreversible purchasing command must never print approval on a HOLD."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "code/scripts/procurement_release.py"
+
+
+def test_full_fleet_release_holds_before_printing_order_without_real_evidence():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--require-release",
+         "--format", "markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "HOLD" in result.stderr
+    assert "APPROVED" not in result.stdout
+
+
+def test_unverified_pilot_projection_remains_available_without_release_flag():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", "pilot-samples-json"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode == 0
+    import json
+    pilot = json.loads(result.stdout)
+    assert pilot["whole_first_robot_purchase_approved"] is False
+    assert pilot["lithium_charging_or_motor_motion_authorized"] is False
+    assert pilot["actual_current_landed_cost_verified"] is False
+
+
+
+def test_first_unit_two_list_preview_exposes_known_payment_not_fake_checkout():
+    """Normal builder views carry real partial cash evidence without approval."""
+    import json
+
+    markdown = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", "first-robot-markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert markdown.returncode == 0, markdown.stderr
+    assert "PROTOTYPE BUYING STATUS: HOLD" in markdown.stdout
+    assert "Documented prior payments, minimum: $13.67" in markdown.stdout
+    assert "Complete prior spending register: NOT RECONCILED" in markdown.stdout
+    assert "Payable now, cumulative delivered total" in markdown.stdout
+    assert "real shortfall: UNKNOWN" in markdown.stdout
+    assert markdown.stdout.count("## 1. Reported owned or ordered") == 1
+    assert markdown.stdout.count(
+        "## 2. First-unit remaining slots and conditional alternatives"
+    ) == 1
+
+    machine = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", "first-robot-json"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert machine.returncode == 0, machine.stderr
+    payload = json.loads(machine.stdout)
+    assert payload["purchase_approved"] is False
+    assert payload["documented_prior_paid_cents"] == 1367
+    assert payload["all_prior_spending_reconciled"] is False
+    assert payload["verified_checkout_cost"] is None
+
+
+def test_one_robot_release_requires_real_first_unit_receipts_before_printing_cart():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--require-first-robot",
+         "--format", "first-robot-markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "HOLD" in result.stderr
+
+
+def test_first_robot_release_refuses_fleet_or_pilot_output():
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--require-first-robot",
+         "--format", "markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert "First robot release may only print a first robot view" in result.stderr
+
+def test_fleet_release_refuses_nonfleet_views():
+    for view in ("first-robot-json", "pilot-cart-json",
+                 "landed-cost-json", "pilot-samples-markdown"):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--require-release",
+             "--format", view],
+            cwd=ROOT / "code", text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert "Fleet release may only print a full fleet view" in result.stderr
+
+
+def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
+    monkeypatch, tmp_path, capsys,
+):
+    """A mid-audit branch advance must not print a once-approved cart."""
+    import importlib.util
+    import json
+    import sys
+
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    import physical_trial_ledger
+    import verify_procurement_receipts as verifier
+
+    monkeypatch.setattr(
+        physical_trial_ledger, "require_recorded_physical_trials", lambda *_a, **_kw: 1,
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "procurement_cli_race_test", SCRIPT,
+    )
+    assert spec and spec.loader
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+
+    plan = tmp_path / "plan.json"
+    evidence = tmp_path / "evidence.json"
+    plan.write_text("{}", encoding="utf-8")
+    valid_paid_evidence = {"costs": {"lines": [], "paid_orders": [
+        {"order_reference": "synthetic-sense-payment", "total_paid_usd": "13.67",
+         "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}]}
+    ]}}
+    evidence.write_text(json.dumps(valid_paid_evidence), encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", [str(SCRIPT), "--plan", str(plan),
+                      "--evidence", str(evidence),
+                      "--require-first-robot", "--format", "first-robot-markdown"],
+    )
+    # The strict gate now always requires the canonical optional-station
+    # decision map before CI or source checkout. This synthetic checkout has
+    # no selected options, not an absent or unverified decision map.
+    monkeypatch.setattr(
+        release, "generate", lambda *args: {"supplemental_decisions": [], "room_pod": []},
+    )
+    monkeypatch.setattr(
+        release, "first_robot_projection",
+        lambda *_: {"purchase_approved": True},
+    )
+    # This fixture isolates PR-head races; historical-spend reviews are
+    # independently covered below, never replaced by a real receipt.
+    monkeypatch.setattr(
+        release, "_first_unit_paid_history_review_missing", lambda *_: False,
+    )
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+    monkeypatch.setattr(verifier, "audit_release", lambda *args, **kwargs: [])
+    # Isolate the head-moving race: successful job receipts are tested
+    # separately and do not involve a live Actions request in this fixture.
+    monkeypatch.setattr(
+        verifier, "verified_required_ci_jobs", lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(release, "attach_verified_checkout_evidence",
+                        lambda report, *args: report)
+    monkeypatch.setattr(release, "public_purchase_view",
+                        lambda report, **kwargs: report)
+    monkeypatch.setattr(release, "render_first_robot_markdown",
+                        lambda report: "synthetic cart, NOT approval")
+    # The November 3 confirmed XIAO payment must survive all synthetic
+    # receipt successes. Zero declared history or a missing role allocation
+    # cannot make an over-budget cart appear affordable.
+    evidence.write_text(
+        json.dumps({"costs": {"lines": [], "paid_orders": []}}),
+        encoding="utf-8",
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "confirmed Sense payment is absent" in captured.err
+    evidence.write_text(json.dumps(valid_paid_evidence), encoding="utf-8")
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 0},
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "confirmed Sense payment is absent" in captured.err
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+
+    revisions = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(verifier, "checkout_sha", lambda: next(revisions))
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "PR #17 advanced during purchasing verification" in captured.err
+
+    monkeypatch.setattr(verifier, "checkout_sha", lambda: "a" * 40)
+    assert release.main() == 0
+    assert "synthetic cart" in capsys.readouterr().out
+
+
+    # All independent receipt/CI checks succeed, but the $50 cap does not.
+    # This must fail before the renderer can emit even a partial cart.
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": False, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "actual landed quotation, budget or received stock" in captured.err
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+
+    revisions = iter(["a" * 40, None])
+
+    def offline_after_initial_receipt_check():
+        revision = next(revisions)
+        if revision is None:
+            raise ValueError("network unavailable")
+        return revision
+
+    monkeypatch.setattr(
+        verifier, "checkout_sha", offline_after_initial_receipt_check,
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot recheck live purchasing revision" in captured.err
+
+
+def _run_projection_with_json(
+    tmp_path, *, plan_text: str | None = None, evidence_text: str | None = None,
+):
+    command = [sys.executable, str(SCRIPT), "--format", "first-robot-json"]
+    if plan_text is not None:
+        plan = tmp_path / "plan.json"
+        plan.write_text(plan_text, encoding="utf-8")
+        command += ["--plan", str(plan)]
+    if evidence_text is not None:
+        evidence = tmp_path / "evidence.json"
+        evidence.write_text(evidence_text, encoding="utf-8")
+        command += ["--evidence", str(evidence)]
+    return subprocess.run(
+        command,
+        cwd=ROOT / "code",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=20,
+    )
+
+
+def test_procurement_cli_accepts_unambiguous_finite_evidence(tmp_path):
+    result = _run_projection_with_json(
+        tmp_path,
+        evidence_text='{"costs":{"scope":"evaluation","test_ratio":1.25}}',
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+    import json
+
+    projection = json.loads(result.stdout)
+    assert projection["purchase_approved"] is False
+
+
+def test_procurement_cli_rejects_duplicate_json_keys_before_projection(tmp_path):
+    for raw in (
+        '{"costs":{"scope":"evaluation","scope":"fleet"}}',
+        '{"costs":{"scope":"evaluation","lines":['
+        '{"role_key":"first","role_key":"second"}]}}',
+    ):
+        result = _run_projection_with_json(tmp_path, evidence_text=raw)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "evidence JSON is invalid or ambiguous" in result.stderr
+        assert "duplicate object key" in result.stderr
+
+    result = _run_projection_with_json(
+        tmp_path,
+        plan_text='{"robots":[],"robots":[]}',
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "plan JSON is invalid or ambiguous" in result.stderr
+    assert "duplicate object key" in result.stderr
+
+
+def test_procurement_cli_rejects_nonfinite_json_numbers_before_projection(tmp_path):
+    for token in ("NaN", "Infinity", "-Infinity", "1e9999"):
+        result = _run_projection_with_json(
+            tmp_path,
+            evidence_text=(
+                '{"costs":{"scope":"evaluation","claimed_value":'
+                + token
+                + "}}"
+            ),
+        )
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "evidence JSON is invalid or ambiguous" in result.stderr
+        assert (
+            "numeric constant" in result.stderr
+            or "overflows finite range" in result.stderr
+        )
+
+
+
+
+def test_strict_prior_spend_requires_review_bound_to_exact_paid_register():
+    import hashlib
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "procurement_prior_spend_review_test", SCRIPT
+    )
+    assert spec and spec.loader
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    orders = [{"order_reference": "synthetic-sense",
+               "total_paid_usd": "13.67",
+               "allocations": [{"role_key": "robot:xiao_sense",
+                                "quantity": 1}]}]
+    paid_digest = hashlib.sha256(
+        json.dumps(orders, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    review = {
+        "scope": release.PRIOR_SPEND_REVIEW_SCOPE,
+        "all_project_prior_spend_reconciled": True,
+        "review_basis": "private_invoices_and_payment_statements",
+        "reviewer": "Independent test witness",
+        "review_record_id": "synthetic-private-record",
+        "reviewed_on": "2026-11-23",
+        "reconciled_total_usd": "13.67",
+        "paid_orders_sha256": paid_digest,
+        "private_receipts_manifest_sha256": "a" * 64,
+    }
+    cost = {"prior_paid_orders_cents": 1367}
+    costs = {"paid_orders_complete": True, "paid_orders": orders,
+             "prior_spend_review": review}
+    helper = release._first_unit_paid_history_review_missing
+    assert helper(cost, {"costs": costs}) is False
+    assert helper(cost, {"costs": {**costs, "prior_spend_review": None}})
+    assert helper(cost, {"costs": {**costs, "paid_orders_complete": False}})
+    changed_orders = orders + [{"order_reference": "omitted-history",
+                               "total_paid_usd": "1.00", "allocations": []}]
+    assert helper(cost, {"costs": {**costs, "paid_orders": changed_orders}})
+    for field, bad in (
+        ("paid_orders_sha256", "f" * 64),
+        ("private_receipts_manifest_sha256", ""),
+        ("all_project_prior_spend_reconciled", False),
+        ("reconciled_total_usd", "13.66"),
+        ("reviewed_on", "2099-01-01"),
+        ("reviewer", "operator"),
+        ("scope", "just the Sense payment"),
+        ("review_record_id", ""),
+    ):
+        assert helper(cost, {"costs": {**costs,
+            "prior_spend_review": {**review, field: bad}}}), field
+    assert helper({"prior_paid_orders_cents": 1368}, {"costs": costs})
+    # This guard is executed by the real strict CLI before CI/checkout release.
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "if _first_unit_paid_history_review_missing(cost, evidence):" in source
+
+
+
+def test_paid_spend_review_documented_at_builder_entrypoint():
+    """The strict gate's required review has an executable builder path."""
+    doc = (ROOT / "docs/hardware/one-robot-inventory-and-shopping.md"
+           ).read_text(encoding="utf-8")
+    for key in (
+        "all_desk_robot_remix_prior_paid_orders",
+        "all_project_prior_spend_reconciled",
+        "private_invoices_and_payment_statements",
+        "review_record_id", "reviewed_on", "reconciled_total_usd",
+        "paid_orders_sha256", "private_receipts_manifest_sha256",
+        "costs.paid_orders_complete", "costs.prior_spend_review",
+    ):
+        assert key in doc
+    assert "sort_keys=True" in doc
+    assert "ensure_ascii=False" in doc
+    assert "allow_nan=False" in doc
+    assert "A digest or self-attestation alone cannot prove" in doc
+    assert "private operator storage" in doc
+
+def test_all_procurement_formats_from_unrelated_working_directory(tmp_path):
+    """Every preview is a clean, standalone CLI document, not a release."""
+    import csv
+    import json
+
+    formats = (
+        "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
+        "pilot-samples-json", "pilot-samples-markdown",
+        "pilot-cart-json", "pilot-cart-markdown",
+        "pilot-landed-cost-json", "pilot-landed-cost-markdown",
+        "landed-cost-json", "landed-cost-markdown",
+    )
+    for fmt in formats:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--format", fmt],
+            cwd=tmp_path, text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode == 0, (fmt, result.stderr)
+        assert result.stderr == "", fmt
+        assert result.stdout.strip(), fmt
+        if fmt.endswith("json"):
+            assert isinstance(json.loads(result.stdout), dict), fmt
+        elif fmt == "csv":
+            rows = list(csv.reader(result.stdout.splitlines()))
+            assert rows[0][:3] == ["scope", "part_id", "component"]
+            assert len(rows) > 1
+            assert all(len(row) == len(rows[0]) for row in rows[1:])
+        elif fmt == "markdown":
+            assert result.stdout.startswith("> **HISTORICAL SUPPLIER RESEARCH "), fmt
+            assert "\n# " in result.stdout, fmt
+        else:
+            assert result.stdout.startswith("# "), fmt
+
+    for flag, fmt in (
+        ("--require-release", "markdown"),
+        ("--require-first-robot", "first-robot-markdown"),
+    ):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), flag, "--format", fmt],
+            cwd=tmp_path, text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode == 2, (flag, result.stderr)
+        assert result.stdout == "", flag
+        assert "HOLD" in result.stderr, flag

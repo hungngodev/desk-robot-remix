@@ -1,0 +1,195 @@
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include "bme_completed_sample.h"
+#include "sensor_recovery.h"
+
+using std::isfinite;
+constexpr uint32_t kReportMs = 1000, kBmeStaleMs = 3000;
+uint32_t clock_ms = 0;
+uint32_t millis() { return clock_ms; }
+
+struct Adafruit_BME680 {
+  static constexpr int reading_complete = 0;
+  int remaining = 0;
+  bool start_ok = true, end_ok = true, fields = true;
+  float temperature = 0, humidity = 0, next_temp = -10, next_humidity = 55;
+  uint32_t pressure = 0, gas_resistance = 0, next_pressure = 101000, next_gas = 12345;
+  // Bit 0: temperature, 1: humidity, 2: pressure, 3: gas.
+  unsigned write_mask = 0xf;
+  bool write_on_failure = false;
+  unsigned ends = 0;
+  bool model_driver_clock = false;
+  uint32_t driver_start = 0;
+  unsigned starts = 0;
+  uint32_t beginReading() {
+    ++starts;
+    if (!start_ok) return 0;
+    if (!model_driver_clock) return 1;
+    // Pinned 2.0.5 uses zero as both failure and a timestamp sentinel.
+    if (driver_start == 0) driver_start = clock_ms;
+    return driver_start + 200U;
+  }
+  int remainingReadingMillis() {
+    if (!model_driver_clock) return remaining;
+    if (driver_start == 0) return -1;
+    const uint32_t elapsed = clock_ms - driver_start;
+    return elapsed < 200U ? static_cast<int>(200U - elapsed) : 0;
+  }
+  bool endReading() {
+    ++ends;
+    if (model_driver_clock) {
+      if (beginReading() == 0) return false;
+      driver_start = 0;
+    }
+    if ((end_ok || write_on_failure) && fields) {
+      if (write_mask & 1U) temperature = next_temp;
+      if (write_mask & 2U) humidity = next_humidity;
+      if (write_mask & 4U) pressure = next_pressure;
+      if (write_mask & 8U) gas_resistance = next_gas;
+    }
+    return end_ok;
+  }
+} bme;
+
+bool bme_started = true, bme_pending = false;
+uint32_t bme_last_start_ms = 0;
+desk_robot_room::BmeCompletedSample bme_completed;
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
+
+#include "bme_step_under_test.h"
+
+void step(uint32_t now) { clock_ms = now; bme_step(now); }
+void reset() {
+  bme = Adafruit_BME680{};
+  bme_started = true; bme_pending = false; bme_last_start_ms = 0;
+  bme_completed = desk_robot_room::BmeCompletedSample{};
+  sensor_recovery = desk_robot_room::SensorRecoverySchedule{};
+}
+
+int main() {
+  // A loop stall must not relabel an old conversion as freshly acquired.
+  reset(); step(1000); step(4001);
+  assert(!bme_completed.valid && !bme_pending && bme.ends == 1);
+  reset(); step(1000); step(1200);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1000);
+  assert(bme_completed.temperature_c == -10 && bme_completed.gas_ohms == 12345);
+  // New scratch must not mix with the old tuple while the heater is active.
+  step(2000); bme.remaining = 50; step(2050);
+  assert(bme_pending && bme.gas_resistance == 0 && bme.ends == 1);
+  assert(bme_completed.fresh(2050, kBmeStaleMs));
+  assert(bme_completed.gas_ohms == 12345 && bme_completed.sample_ms == 1000);
+  // Old tuple expires during a stalled conversion, even before collection.
+  step(4001); assert(!bme_completed.fresh(4001, kBmeStaleMs));
+  bme.remaining = 0; step(5001);
+  assert(!bme_completed.valid && !bme_pending && bme.ends == 2);
+  // A successful next conversion must replace every field together, not
+  // just the gas value and timestamp. Use distinct scratch and new values.
+  reset(); step(1000); step(1200);
+  step(2000); bme.remaining = 50;
+  bme.temperature = 90; bme.humidity = 99; bme.pressure = 40000;
+  bme.next_temp = 21; bme.next_humidity = 42;
+  bme.next_pressure = 102000; bme.next_gas = 67890;
+  step(2050);
+  assert(bme_completed.fresh(2050, kBmeStaleMs));
+  assert(bme_completed.temperature_c == -10 && bme_completed.humidity_pct == 55);
+  assert(bme_completed.pressure_pa == 101000 && bme_completed.gas_ohms == 12345);
+  assert(bme_completed.sample_ms == 1000);
+  bme.remaining = 0; step(2200);
+  assert(bme_completed.fresh(2200, kBmeStaleMs) && bme_completed.sample_ms == 2000);
+  assert(bme_completed.temperature_c == 21 && bme_completed.humidity_pct == 42);
+  assert(bme_completed.pressure_pa == 102000 && bme_completed.gas_ohms == 67890);
+  // A partial update must not borrow any field from the last conversion.
+  // Test every proper subset, including temperature without gas and vice versa.
+  for (unsigned mask = 0; mask < 0xf; ++mask) {
+    reset(); step(1000); step(1200);
+    assert(bme_completed.valid);
+    step(2000);
+    bme.write_mask = mask;
+    bme.next_temp = 21; bme.next_humidity = 42;
+    bme.next_pressure = 102000; bme.next_gas = 67890;
+    step(2200);
+    assert(bme.ends == 2 && !bme_pending && !bme_started);
+    assert(!bme_completed.fresh(2200, kBmeStaleMs));
+    assert(bme_completed.sample_ms == 1000);
+    assert(bme_completed.temperature_c == -10 && bme_completed.humidity_pct == 55);
+    assert(bme_completed.pressure_pa == 101000 && bme_completed.gas_ohms == 12345);
+  }
+  // Even plausible scratch values cannot override a failed endReading().
+  reset(); step(1000); step(1200); step(2000);
+  bme.end_ok = false; bme.write_on_failure = true;
+  bme.next_temp = 21; bme.next_gas = 67890;
+  step(2200);
+  assert(bme.temperature == 21 && bme.gas_resistance == 67890);
+  assert(!bme_pending && !bme_started && !bme_completed.fresh(2200, kBmeStaleMs));
+  assert(bme_completed.sample_ms == 1000);
+  for (int fault = 0; fault < 15; ++fault) {
+    reset(); step(1000); step(1200); assert(bme_completed.valid);
+    if (fault == 0) bme.start_ok = false;
+    step(2000);
+    if (fault == 1) bme.end_ok = false;
+    if (fault == 2) bme.fields = false;
+    if (fault == 3) bme.next_gas = 0;
+    if (fault == 4) bme.next_gas = 1000000001U;
+    if (fault == 5) bme.next_temp = -41;
+    if (fault == 6) bme.next_pressure = 29999;
+    if (fault == 7) bme.next_pressure = 125001;
+    if (fault == 8) bme.remaining = -1;
+    if (fault == 9) bme.next_humidity = -0.01f;
+    if (fault == 10) bme.next_humidity = 100.01f;
+    if (fault == 11) bme.next_humidity = std::numeric_limits<float>::quiet_NaN();
+    if (fault == 12) bme.next_temp = std::numeric_limits<float>::infinity();
+    if (fault == 13) bme.next_temp = 125.01f;
+    if (fault == 14) bme.next_pressure = UINT32_MAX;
+    step(2200); assert(!bme_completed.valid && !bme_started && !bme_pending);
+  }
+  // A conversion started 200 ticks before wrap would return zero and
+  // leave the pinned driver permanently pending, even across begin().
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 199U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(0U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  assert(bme_started && !bme_pending && bme.driver_start == 0U);
+  // A normal acquisition just before the guard remains valid, and its
+  // cache expires at the usual age without a new conversion in the gap.
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5200U); step(UINT32_MAX - 5000U);
+  assert(bme_completed.valid && bme_completed.sample_ms == UINT32_MAX - 5200U);
+  step(UINT32_MAX - 4000U);
+  assert(bme_completed.fresh(UINT32_MAX - 4000U, kBmeStaleMs));
+  step(UINT32_MAX - 2199U);
+  assert(!bme_completed.fresh(UINT32_MAX - 2199U, kBmeStaleMs));
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  // Exact rollover guard boundary: pending work is still collected,
+  // but no new conversion may start at the first forbidden tick.
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5001U);
+  assert(bme_pending && bme.starts == 1);
+  step(UINT32_MAX - 4801U);
+  assert(bme_completed.valid && !bme_pending);
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5000U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(UINT32_MAX); step(0U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  // Exactly the age limit is valid, including the inclusive sensor bounds.
+  reset(); bme.next_temp = -40; bme.next_humidity = 0;
+  bme.next_pressure = 30000; bme.next_gas = 1;
+  step(1000); step(4000);
+  assert(bme_completed.fresh(4000, kBmeStaleMs));
+  assert(bme_completed.temperature_c == -40 && bme_completed.humidity_pct == 0);
+  assert(bme_completed.pressure_pa == 30000 && bme_completed.gas_ohms == 1);
+  reset(); bme.next_temp = 125; bme.next_humidity = 100;
+  bme.next_pressure = 125000; bme.next_gas = 1000000000U;
+  step(1000); step(1200);
+  assert(bme_completed.fresh(1200, kBmeStaleMs));
+  assert(bme_completed.temperature_c == 125 && bme_completed.humidity_pct == 100);
+  assert(bme_completed.pressure_pa == 125000 && bme_completed.gas_ohms == 1000000000U);
+}

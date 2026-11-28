@@ -42,6 +42,13 @@ if [[ ! -x "$tools_root/sdk-bootstrap/bin/python" || ! -f "$tools_root/esp-idf/e
   echo "Project-local ESP-IDF/Python environment missing; see docs/guides/build.md." >&2
   exit 1
 fi
+# Check the SDK before its export script or build can run.
+if ! expected_idf="$("$tools_root/sdk-bootstrap/bin/python" -c 'import json; print(json.load(open("toolchain-lock.json"))["esp_idf"]["commit"])')" ||
+   ! actual_idf="$(git -C "$tools_root/esp-idf" rev-parse HEAD)" ||
+   [[ "$actual_idf" != "$expected_idf" ]]; then
+  echo "ESP-IDF revision differs from toolchain-lock.json or cannot be verified; inspect the existing SDK checkout." >&2
+  exit 1
+fi
 export IDF_TOOLS_PATH="$tools_root/idf-tools"
 export PATH="$tools_root/sdk-bootstrap/bin:$PATH"
 source "$tools_root/esp-idf/export.sh"

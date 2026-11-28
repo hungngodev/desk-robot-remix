@@ -1,0 +1,57 @@
+#include "camera_frame_bounds.hpp"
+
+#include <cassert>
+#include <initializer_list>
+#include <limits>
+
+int main() {
+    using desk_robot::ValidRgb565Frame;
+    constexpr auto max = std::numeric_limits<std::size_t>::max();
+    static_assert(ValidRgb565Frame(320, 240, 153600));
+    static_assert(ValidRgb565Frame(640, 480, 614400));
+    static_assert(ValidRgb565Frame(480, 640, 614400));
+    static_assert(!ValidRgb565Frame(0, 240, 0));
+    static_assert(!ValidRgb565Frame(320, 0, 0));
+    static_assert(!ValidRgb565Frame(max, max, max));
+    static_assert(!ValidRgb565Frame(640, 640, 819200));
+    for (std::size_t bytes : {0u, 153599u, 153601u, 614400u}) {
+        assert(!ValidRgb565Frame(320, 240, bytes));
+    }
+    assert(!ValidRgb565Frame(641, 1, 1282));
+    assert(!ValidRgb565Frame(1, 641, 1282));
+
+    // Independent multiplication is safe over this bounded test domain.
+    // Exercise every edge pair, including nonstandard aspect ratios, and
+    // verify exact lengths rather than merely a few named resolutions.
+    for (std::size_t width = 0; width <= 641; ++width) {
+        for (std::size_t height = 0; height <= 641; ++height) {
+            const auto bytes = width * height * 2;
+            const bool expected = width != 0 && height != 0 &&
+                                  width <= 640 && height <= 640 && bytes <= 614400;
+            assert(ValidRgb565Frame(width, height, bytes) == expected);
+            if (expected) {
+                assert(!ValidRgb565Frame(width, height, bytes - 1));
+                assert(!ValidRgb565Frame(width, height, bytes + 1));
+            }
+        }
+    }
+    assert(!ValidRgb565Frame(max, 1, max));
+    assert(!ValidRgb565Frame(1, max, max));
+    assert(!ValidRgb565Frame(1, 1, max));
+
+    using desk_robot::ValidJpegFrame;
+    const std::uint8_t valid[] = {0xff, 0xd8, 0x42, 0xff, 0xd9};
+    const std::uint8_t repeated[] = {0xff, 0xd8, 0xff, 0xd8, 0xff, 0xd9};
+    const std::uint8_t missing_eoi[] = {0xff, 0xd8, 0x42, 0xff, 0};
+    const std::uint8_t bad_soi[] = {0xff, 0, 0x42, 0xff, 0xd9};
+    assert(ValidJpegFrame(valid, sizeof(valid)));
+    assert(!ValidJpegFrame(repeated, sizeof(repeated)));
+    assert(!ValidJpegFrame(missing_eoi, sizeof(missing_eoi)));
+    assert(!ValidJpegFrame(bad_soi, sizeof(bad_soi)));
+    assert(!ValidJpegFrame(nullptr, sizeof(valid)));
+    for (std::size_t length = 0; length < sizeof(valid); ++length) {
+        assert(!ValidJpegFrame(valid, length));
+    }
+    assert(!ValidJpegFrame(valid, 512 * 1024 + 1));
+    assert(!ValidJpegFrame(valid, max));
+}

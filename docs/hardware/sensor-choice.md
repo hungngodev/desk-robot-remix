@@ -1,22 +1,60 @@
 # Which distance sensor to buy first
 
-Updated 2026-11-03. The user is comparing GODIYMODULES VL53L1X (advertised 4–400 cm)
-with TENSTAR VL53L0X CJVL53L0XV2 two/five-packs. No exact sensor order, price or
-delivered PCB has been verified. Seller labels are not a new required component.
+Updated 2026-11-24. The November 3 comparison of GODIYMODULES VL53L1X
+and TENSTAR VL53L0X CJVL53L0XV2 was historical, not the current purchase list.
 
-**Recommendation: keep VL53L0X as the inexpensive prototype candidate. Start with
-two samples for stationary tests; one five-pack can equip robot one if the mount
-qualifies. Do not buy 25 fleet sensors yet. VL53L1X is not a required upgrade.**
+**Current selection:** follow [full-feature-plan.json](full-feature-plan.json).
+The selected inexpensive range chip is VL53L0X. The exact pilot source candidate
+is ElectroPeak GY-530 SEN-19-006 (nominal 10.5 by 13.3 mm PCB), not an approved
+installed carrier. Buy or borrow **one** sample for stationary qualification;
+seven additional first-robot modules and the fleet order remain on HOLD.
+The selected handling IMU is MPU6050 / GY-521; retain the reported BerryIMU
+only as a spare, not a second installed IMU or a reason to alter the chassis.
+Do not substitute either sensor without the existing engineering decision and
+qualification process.
 
-| Sensor | Relevant specification | Role in this project |
-| --- | --- | --- |
-| [VL53L0X](https://www.st.com/resource/en/datasheet/vl53l0x.pdf) | Up to 2 m, approximately 25° FoV; ST lists cliff detection as an application. The datasheet does not guarantee a useful near-zero range. | Budget candidate for front obstacle sensing and four downward positions **only after standoff/stop qualification**. |
-| [VL53L1X](https://www.st.com/resource/en/datasheet/vl53l1x.pdf) | Guaranteed minimum 40 mm; below this detection can occur but distance is inaccurate. Up to 4 m and programmable ROI. | Optional front/narrow-FoV upgrade. Longer maximum range does not solve a low-mounted floor sensor. Different driver, not a drop-in. |
-| [VL6180X](https://www.st.com/resource/en/datasheet/vl6180x.pdf) | Specified 0–100 mm range; beyond 100 mm is conditional. | Better candidate for a floor window only 10–30 mm above the table. Separate driver and exact breakout voltage checks required. |
+| Sensor / ST datasheet | Ranging FoV and distance | Timing / update capability | Bare sensor current (nominal 2.8 V) | Project role |
+| --- | --- | --- | --- | --- |
+| [VL53L0X, DS11555 Rev 6](https://www.st.com/resource/en/datasheet/vl53l0x.pdf), §§5.4, 6.1–6.3 | 25° system FoV; up to 2 m under favorable long-range conditions; no guaranteed near-zero accuracy | 20 ms high-speed profile; 33 ms long-range budget; not a guaranteed application update rate | 19 mA typical active (33 ms default API); 40 mA peak | Selected eight-channel low-cost candidate; qualify exact standoff, optics and local stopping |
+| [VL53L1X, DS12385 Rev 8](https://www.st.com/resource/en/datasheet/vl53l1x.pdf), §§6.4, 7.3–7.6 | 27° full diagonal FoV, ROI down to 15° diagonal; 40 mm minimum ensured; up to 4 m in darkness with 140 ms budget and bright target | Up to 50 Hz headline rate, not at the 4 m test condition | 16 mA typical / 18 mA max active in long mode; 40 mA peak | Optional front alternative, not a low-floor solution or drop-in driver |
+| [VL53L4CD, DS13812 Rev 8](https://www.st.com/resource/en/datasheet/vl53l4cd.pdf), features and §5.4 | 18° diagonal FoV; 1 mm short-distance linearity, up to 1200 mm with full FoV | Up to 100 Hz | 22 mA typical / 24 mA max active with default driver; 40 mA peak | Former selection; technically relevant if L0X fails short-range qualification, not selected or interchangeable in firmware |
+| [VL6180X, DocID026171 Rev 7](https://www.st.com/resource/en/datasheet/vl6180x.pdf), §§2.9, 3.1 | 0–100 mm characterized proximity range; longer distances conditional. 25° ranging FoV per carrier vendor (not the separate ALS FoV) | 15 ms maximum convergence time in §3.1 test conditions, not total conversion/update period | 1.7 mA average at 10 Hz, 50 mm, 17% target; 38 mA instantaneous peak on combined rails | Short-range alternative only after explicit selection review, separate driver and carrier qualification |
+
+Current figures use different operating modes and cannot be ranked as equal-duty
+power measurements. They exclude carrier regulators, LEDs, pull-ups, muxes and
+other loads. Eight L0X devices can draw overlapping emitter pulses: plan for up
+to 320 mA aggregate sensor peak as an arithmetic design case, not a measured
+rail maximum or a complete current budget. An I2C mux isolates addressing, not
+sensor supply or optical emissions. Measure actual simultaneous ranging current,
+rail transients, crosstalk and end-to-end sample ages with all eight fitted.
+
+Price is a supplier property, not a datasheet specification. For a same-vendor
+reference, [Pololu's carrier comparison](https://www.pololu.com/category/306/carriers-for-st-time-of-flight-tof-distance-sensors)
+lists single-unit USD prices (accessed 2026-11-24): L0X $19.95, L1X $22.95,
+L4CD $13.95, and 6180X $19.95. These are premium carrier reference prices, not
+the selected generic boards, delivered prices, stock or purchase approval. They
+do not establish that L0X is cheaper on every carrier. The generic ElectroPeak
+SEN-19-006 candidate and its historical quote are maintained only in the
+[procurement generator](../../code/scripts/procurement_release.py) and generated
+[shopping checklist](complete-shopping-checklist.md); verify current checkout,
+shipping, tax, board variant and actual suitability before release.
+
+The existing [WROOM ToF driver](../../code/firmware/body/lib/TofBus/TofBus.cpp)
+sets a 33 ms measurement budget and starts continuous ranging via pinned Pololu
+VL53L0X Arduino 1.3.1 (see [firmware profiles](../../code/firmware/body/platformio.ini)).
+The budget is not a measured eight-lane refresh interval or cliff-stop latency.
+The [Mac optical validator](../../code/laptop/src/desk_robot/tof_optics.py)
+checks eight-lane raw signal/ambient 9.7 MCPS words, identity, validity masks and
+sample ages (critical lanes below 200 ms, diagnostic lanes at most 350 ms).
+These are read-only diagnostic freshness limits, not measured response times,
+distance calibration or clearance authority. The [existing regression tests](../../code/tests/test_tof_optics.py)
+exercise this provenance boundary; physical acceptance remains open.
 
 A downward sensor checks whether the tabletop is still under its view. A forward
-sensor checks obstacles ahead. **One module cannot do both jobs at once.** Initial
-full-core topology remains four down + one forward through the body-owned mux.
+sensor checks obstacles ahead. **One module cannot do both jobs at once.** The
+current full-core topology is four down + one forward (movement authority), and
+left, right and rear (read-only), through the body-owned 3.3 V TCA9548A range mux.
+A rear or side reading never grants motion authority.
 No range sensor arrangement alone establishes that the robot cannot fall.
 
 ## Near-field correction to the drawing
@@ -42,9 +80,13 @@ x±59.1, y±58.1 mm even before a stopping margin or PCB size. This is already a
 118×116mm sensor-center rectangle. It is not a qualified mounting drawing.
 Do not hide that width increase in the next product render.
 
-Compare one real raised L0X corner with a low VL6180X option before final CAD.
-If the compact layout only permits a 10–30 mm window height, change the downward
-sensor choice rather than pretending the L0X fits. Front L0X can remain.
+Test one real raised L0X corner before final CAD. If the compact layout only
+permits a 10–30 mm window height, keep that mounting location unqualified and
+redesign the mount or explicitly reopen sensor selection; do not silently switch
+to a different driver or pretend the L0X fits. Record per-lane measured lens
+centers, carrier and connector envelopes, optical path, cable clearance and
+loaded stop geometry in the [Fusion measurement sheet](../cad/FUSION_MEASUREMENT_SHEET.md).
+The existing aperture/angle reference does not retain a PCB.
 
 ## Breakout and test requirements
 
@@ -53,7 +95,7 @@ actual chip/board, voltage regulator, pullups and pin labels. A 5 V-compatible V
 does not prove safe 3.3 V I²C signal levels. Bare VL6180X supply requirements differ
 from L0X/L1X; do not apply a bare-chip rating to an unidentified breakout.
 
-Different sensor drivers must report invalid/no-return/stale data as faults,
+The selected range driver must report invalid/no-return/stale critical data as faults,
 not clear floor. Use the WROOM local stop, calibrated surface intervals and
 tether/catch trials. Never use the guide's universal 65 mm threshold or blind
 reverse. Keep full fleet shopping pending a passing prototype.
