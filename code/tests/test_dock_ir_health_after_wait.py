@@ -37,7 +37,7 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
         async def status(self):
             self.reads += 1
             if self.changed == "slow_body" and self.reads >= 2:
-                await asyncio.sleep(0.16)
+                await asyncio.sleep(0.12)
             disarmed = self.changed == "disarmed"
             side = [600, 600, 600]
             if self.changed == "side_blocked":

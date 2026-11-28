@@ -138,6 +138,10 @@ async def test_default_controller_and_pet_state_are_independent(tmp_path):
 
 
 async def test_registry_and_status_snapshot_resist_caller_mutation(tmp_path):
+    """Registry keys are read-only and ``status()`` returns isolated snapshots.
+
+    Full encapsulation of internal ``PetState`` attributes remains a follow-up.
+    """
     pet = _controller(tmp_path)
     try:
         first_id, second_id = list(pet.states)[:2]

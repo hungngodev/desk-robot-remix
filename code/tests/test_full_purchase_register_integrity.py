@@ -305,12 +305,87 @@ def test_source_ownership_has_exact_unique_roles_and_in_tree_paths():
     assert len(all_ids) == len(set(all_ids)) == 63
 
 
+_EXPECTED_PILOT_ROWS = {
+    "cliff_obstacle": (
+        "SEN-19-006", 1, "https://electropeak.com/gy-530-vl53l0x-laser-range-finder",
+    ),
+    "i2c_mux": (
+        "COM-05-067", 2,
+        "https://electropeak.com/tca9548a-1-to-8-i2c-8-way-multi-channel-expansion-board",
+    ),
+    "cap1188": ("SEN-25-020", 1, "https://electropeak.com/cap1188-capacitive-touch-module"),
+    "apds9960": (
+        "SEN-24-027", 1, "https://electropeak.com/apds-9960-infrared-gesture-sensor-module",
+    ),
+    "ads1115": (
+        "COM-05-045", 1,
+        "https://electropeak.com/ads1115-16-bit-adc-4-channel-programmable-gain-amplifier-b00soy52cu",
+    ),
+    "mcp23017": (
+        "COM-05-093", 1,
+        "https://electropeak.com/mcp23017-e-ss-16-channel-i-o-expansion-module-i2c-interface",
+    ),
+    "amp": ("DFR0954", 1, "https://www.dfrobot.com/product-2614.html"),
+    "bumper": (
+        "D2F-01L3", 2,
+        "https://www.newark.com/aratas/d2f-01l3/microswitch-d2f-01l3/dp/45Y5018",
+    ),
+    "speaker": (
+        "CS20-02P110-04-1X", 1,
+        "https://www.digikey.com/en/products/detail/"
+        "challenge-electronics/CS20-02P110-04-1X/30407069",
+    ),
+    "sensor_3v3": ("2873", 1, "https://www.pololu.com/product/2873"),
+    "rgb": (
+        "BOB-13282", 1, "https://www.sparkfun.com/sparkfun-rgb-led-breakout-ws2812b.html",
+    ),
+    "dock_ir_receivers": (
+        "TSOP38438", 2,
+        "https://www.digikey.com/en/products/detail/"
+        "vishay-semiconductor-opto-division/TSOP38438/4073478",
+    ),
+    "dock_ir_emitter_channels": (
+        "TSAL6200", 2,
+        "https://www.digikey.com/en/products/detail/"
+        "vishay-semiconductor-opto-division/TSAL6200/1681339",
+    ),
+}
+
+
+def _assert_pilot_cart_markdown(markdown: str, expected_by_sku: dict[str, tuple[int, str]]) -> None:
+    header = (
+        "| Candidate checkout seller | Brand or manufacturer | SKU | Part "
+        "| Qty | Historical USD each | Link | Engineering source | Supplier status |"
+    )
+    lines = markdown.splitlines()
+    starts = [i for i, line in enumerate(lines) if line == header]
+    assert len(starts) == 1, "Missing or duplicate pilot table header"
+    rows: dict[str, tuple[int, str]] = {}
+    for line in lines[starts[0] + 2:]:
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        assert len(cells) == 9, line
+        sku = cells[2]
+        assert sku not in rows, f"Duplicate pilot row for SKU {sku}"
+        rows[sku] = (int(cells[4]), cells[6])
+    assert rows == expected_by_sku
+
+
 def test_first_unit_shopping_scopes_and_pilot_source_links():
     """Keep historical sample references distinct from complete build quantities."""
     import ast
     import json
+    import sys
+
+    import pytest
 
     root = HARDWARE.parents[1]
+    scripts_dir = str(root / "code/scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from procurement_release import generate, render_pilot_supplier_cart
+
     checklist = (root / "docs/plans/first-unit-shopping-agent-checklist.md").read_text(
         encoding="utf-8"
     )
@@ -337,13 +412,45 @@ def test_first_unit_shopping_scopes_and_pilot_source_links():
     ]
     assert len(assignments) == 1
     pilot = ast.literal_eval(assignments[0])
+    assert set(pilot) == set(_EXPECTED_PILOT_ROWS)
+    for role, (exp_sku, exp_qty, exp_url) in _EXPECTED_PILOT_ROWS.items():
+        assert (pilot[role][2], pilot[role][4], pilot[role][3]) == (exp_sku, exp_qty, exp_url), role
     for role, full_qty, sample_qty in (("cliff_obstacle", 8, 1), ("i2c_mux", 2, 2)):
         assert parts[role]["per_robot"] == full_qty
         assert pilot[role][4] == sample_qty
     for role in ("cliff_obstacle", "i2c_mux", "amp", "speaker", "dock_ir_receivers"):
-        url = pilot[role][3]
-        assert url in checklist, role
-        assert url in register, role
+        assert pilot[role][3] in checklist, role
+        assert pilot[role][3] in register, role
+
+    expected_by_sku = {sku: (qty, url) for sku, qty, url in _EXPECTED_PILOT_ROWS.values()}
+    markdown = render_pilot_supplier_cart(generate(plan, {}))
+    _assert_pilot_cart_markdown(markdown, expected_by_sku)
+
+    lines = markdown.splitlines()
+    mux_row = next(line for line in lines if "| COM-05-067 |" in line)
+    mux_cells = [cell.strip() for cell in mux_row.strip("|").split("|")]
+    bad_qty = mux_cells.copy()
+    bad_qty[4] = "1"
+    with pytest.raises(AssertionError):
+        _assert_pilot_cart_markdown(
+            markdown.replace(mux_row, "| " + " | ".join(bad_qty) + " |", 1), expected_by_sku,
+        )
+    bad_url = mux_cells.copy()
+    bad_url[6] = "https://example.invalid/wrong"
+    with pytest.raises(AssertionError):
+        _assert_pilot_cart_markdown(
+            markdown.replace(mux_row, "| " + " | ".join(bad_url) + " |", 1), expected_by_sku,
+        )
+    amp_row = next(line for line in lines if "| DFR0954 |" in line)
+    with pytest.raises(AssertionError):
+        _assert_pilot_cart_markdown(
+            markdown.replace(amp_row, amp_row + "\n" + amp_row, 1), expected_by_sku,
+        )
+    with pytest.raises(AssertionError):
+        _assert_pilot_cart_markdown(
+            markdown.replace("| Candidate checkout seller |", "| Wrong header |", 1),
+            expected_by_sku,
+        )
 
 
 def test_audit_supplemental_lineage_matches_current_register_contract():

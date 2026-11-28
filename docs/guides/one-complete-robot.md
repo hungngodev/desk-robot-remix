@@ -102,8 +102,10 @@ Quiet mode uses the existing operator-only `POST /v1/pet/{robot_id}/quiet` route
 
 ```sh
 # Read status and issue urgent full STOP (WROOM halt + pet pause + audio stop)
-uv run --no-sync desk-robot --config config/local.toml status robot-01
+status_rc=0
+uv run --no-sync desk-robot --config config/local.toml status robot-01 || status_rc=$?
 uv run --no-sync desk-robot --config config/local.toml stop robot-01
+test "$status_rc" -eq 0
 
 # Operator-only quiet on / off (load DESK_ROBOT_API_TOKEN in your local shell from code/config/local.env)
 curl -fsS -X POST -H "Authorization: Bearer ${DESK_ROBOT_API_TOKEN:?}" \

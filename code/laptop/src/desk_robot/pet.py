@@ -525,7 +525,11 @@ class PetController:
 
     @property
     def states(self) -> Mapping[str, PetState]:
-        """Live controller-owned records; the fleet registry cannot be modified."""
+        """Read-only registry mapping; call ``status(robot_id)`` for isolated snapshots.
+
+        Full field-level encapsulation of internal ``PetState`` records is deferred
+        as a follow-up while internal callers and tests still mutate ``PetState``.
+        """
         return self._states
 
     def set_voice_monitor_ready(self, ready: bool) -> None:

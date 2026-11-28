@@ -338,15 +338,28 @@ def test_builder_status_and_stop_use_private_config_from_code(tmp_path, monkeypa
     code.mkdir()
     stub = tmp_path / "uv"
     log = tmp_path / "calls"
-    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\n')
+    stub.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\n'
+        'case "$*" in *status*) if [ "${FAIL_STATUS:-0}" = "1" ]; then exit 17; fi;; esac\n'
+    )
     stub.chmod(0o755)
     monkeypatch.setenv("LOG", str(log))
     monkeypatch.setenv("PATH", str(tmp_path) + ":/usr/bin:/bin")
+    monkeypatch.delenv("FAIL_STATUS", raising=False)
     result = subprocess.run(
-        ["bash", "-c", commands], cwd=code, capture_output=True, text=True, check=False,
+        ["bash", "-e", "-c", commands], cwd=code, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert log.read_text().splitlines() == [
+    expected = [
         "run --no-sync desk-robot --config config/local.toml status robot-01",
         "run --no-sync desk-robot --config config/local.toml stop robot-01",
     ]
+    assert log.read_text().splitlines() == expected
+
+    log.unlink()
+    monkeypatch.setenv("FAIL_STATUS", "1")
+    failed = subprocess.run(
+        ["bash", "-e", "-c", commands], cwd=code, capture_output=True, text=True, check=False,
+    )
+    assert failed.returncode == 1
+    assert log.read_text().splitlines() == expected

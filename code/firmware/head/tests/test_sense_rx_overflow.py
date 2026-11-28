@@ -119,8 +119,14 @@ public:
     uint32_t consecutive_missing_reference_reads_ = 0;
     std::atomic<uint32_t> rx_queue_overflows_{0};
     std::atomic<uint32_t> rx_queue_overflow_bytes_{0};
+    std::atomic<bool> bench_contention_fault_{false};
     uint32_t observed_rx_queue_overflows_ = 0;
     bool reference_integrity_failed_ = false;
+    void ApplyPendingBenchContentionFaultLocked(int64_t now_us) {
+        if (bench_contention_fault_.exchange(false, std::memory_order_acq_rel)) {
+            bench_window_.invalidate_read(now_us);
+        }
+    }
     void FillSilenceLocked(int64_t) {}
     bool ReadReferenceLocked(int16_t* dest, int frames, int64_t) {
         std::fill_n(dest, frames, 12);

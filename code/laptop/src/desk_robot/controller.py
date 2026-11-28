@@ -285,7 +285,7 @@ class Coordinator:
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM preflight status timeout",
         )
-        status_elapsed_ms = max(0.0, (time.monotonic() - status_started_at) * 1000.0)
+        status_elapsed_ms = max(0, int((time.monotonic() - status_started_at) * 1000.0))
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
         self._record_local_fault(robot_id, status)
@@ -1227,7 +1227,7 @@ class Coordinator:
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM active health status timeout",
         )
-        body_elapsed_ms = max(0.0, (time.monotonic() - body_started_at) * 1000.0)
+        body_elapsed_ms = max(0, int((time.monotonic() - body_started_at) * 1000.0))
         if self.settings.mode == "hardware":
             self._record_local_fault(robot_id, body)
         active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
@@ -2183,17 +2183,39 @@ class Coordinator:
                 raise OperationError("Pickup requires WROOM commanded servo telemetry")
             return body
 
+        async def _await_pickup_servo(
+            wait_fn: Callable[[Callable[[], Awaitable[dict]], int], Awaitable[None]],
+            target_angle: int,
+        ) -> None:
+            body = await self._assert_armed_health(job.robot_id)
+            self._require_job_motion(job)
+            self._pickup_live_media(job.robot_id, camera_grant)
+            if "servo" not in body and not self._uses_guarded_body_profile(job.robot_id):
+                return
+            prefetched = [body]
+
+            async def _health() -> dict:
+                if prefetched:
+                    first = prefetched.pop()
+                    servo = first.get("servo")
+                    if not isinstance(servo, dict) or type(servo.get("settled")) is not bool:
+                        raise OperationError("Pickup requires WROOM commanded servo telemetry")
+                    return first
+                return await grasp_health()
+
+            await wait_fn(_health, target_angle)
+
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"grip {c.grip_open}")
         if self.settings.mode == "hardware":
             # Confirm WROOM-reported jaw settlement before commanding lift down.
-            await await_commanded_jaw_target(grasp_health, c.grip_open)
+            await _await_pickup_servo(await_commanded_jaw_target, c.grip_open)
         else:
             await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_down}")
         if self.settings.mode == "hardware":
-            await await_commanded_lift_target(grasp_health, c.lift_down)
+            await _await_pickup_servo(await_commanded_lift_target, c.lift_down)
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         initial = None

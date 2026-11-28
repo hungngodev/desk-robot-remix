@@ -102,6 +102,7 @@ struct SenseReferenceCodec {
     std::atomic<bool> microphone_privacy_muted_{false};
     std::atomic<uint32_t> microphone_privacy_epoch_{1};
     std::atomic<uint64_t> bench_capture_generation_{0};
+    std::atomic<bool> bench_contention_fault_{false};
     bool bench_transfer_active_ = false, bench_start_pending_ = false;
     desk_robot::SensePcmWindow bench_window_;
     Consent bench_consent_;
@@ -112,6 +113,7 @@ struct SenseReferenceCodec {
     void* bench_expiry_timer_ = nullptr;
     static void BenchPcmExpiry(void*) {}
     static void ReleaseBenchPcmCapture(int16_t*);
+    void ApplyPendingBenchContentionFaultLocked(int64_t) {}
     bool BeginBenchPcmCapture(uint32_t);
     void AbortBenchPcmCapture(bool);
 };
