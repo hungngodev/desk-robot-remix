@@ -29,9 +29,9 @@ def test_budget_discloses_current_requested_omission():
 
 def test_rank_keeps_topical_relevance_and_peer_provenance():
     rows = [
-        ("peer", "robot-02", 1, "peer_report", "peer", 100, 0.8, -1.0),
+        ("peer", "robot-02", 0, "peer_report", "peer", 100, 0.8, -1.0),
         ("own", "robot-01", 1, "object", "own", 100, 0.8, -1.0),
-        ("topical", "robot-02", 1, "peer_report", "topical", 100, 0.1, -2.0),
+        ("topical", "robot-02", 0, "peer_report", "topical", 100, 0.1, -2.0),
     ]
     result = _rank_search_rows("robot-01", rows, now=100, limit=3)
     assert [m.event_id for m in result] == ["topical", "own", "peer"]
